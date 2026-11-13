@@ -9,6 +9,7 @@
 
 #include "handheld_hud.hpp"
 #include "handheld_prof.hpp"
+#include "tile_blit.hpp"
 
 #include <log.hpp>
 
@@ -26,6 +27,7 @@ const char* logs_3ds_notes();
 namespace d2d::client {
 
 namespace {
+constexpr int kJobs = 3;   // this core and the two the worker threads have: the screens' copy is memory-bound and splits cleanly
 inline std::uint32_t word(const std::uint8_t* rgba) { return std::uint32_t(rgba[0]) << 24 | std::uint32_t(rgba[1]) << 16 | std::uint32_t(rgba[2]) << 8 | 0xFFu; }
 }
 
@@ -44,16 +46,19 @@ void handheld_present(const std::vector<std::uint8_t>& frame, int frame_w, int f
     } else if (top && world_only && frame_w == 400) {
         // Sixteen columns at a time: the screen's columns are 960 bytes apart, and sixteen of them
         // stay in the first-level cache while the frame's rows are read along (as below).
-        for (int x0 = 0; x0 < 400; x0 += 16)
+        run_parallel(kJobs, [&](int job) {
+        for (int x0 = job * 25 / kJobs * 16; x0 < (job + 1) * 25 / kJobs * 16; x0 += 16)
             for (int y = 0; y < 240; ++y) {
                 const std::uint8_t* source = frame.data() + (std::size_t(clip_top + y) * 400 + std::size_t(x0)) * 4;
                 std::uint32_t* out = top + x0 * 240 + (239 - y);   // a column's first word is the bottom row
                 for (int x = 0; x < 16; ++x, source += 4, out += 240) *out = word(source);
             }
+        });
     } else if (top && world_only && frame_w == 600) {
         // Zoomed out by a half: 600x360 of the world, three pixels into two each way (weights 2:1, 1:2).
         const std::size_t pitch = 600 * 4;
-        for (int x0 = 0; x0 < 200; x0 += 8)
+        run_parallel(kJobs, [&](int job) {
+        for (int x0 = job * 25 / kJobs * 8; x0 < (job + 1) * 25 / kJobs * 8; x0 += 8)
         for (int y = 0; y < 240; ++y) {
             const std::uint8_t* upper = frame.data() + std::size_t(clip_top + (y / 2) * 3 + (y & 1)) * pitch + std::size_t(x0) * 12;
             const std::uint8_t* lower = upper + pitch;
@@ -66,10 +71,12 @@ void handheld_present(const std::vector<std::uint8_t>& frame, int frame_w, int f
                 out[240] = (red * 7282u >> 16) << 24 | (green * 7282u >> 16) << 16 | (blue * 7282u >> 16) << 8 | 0xFFu;
             }
         }
+        });
     } else if (top && world_only && frame_w == 800) {
         // Zoomed out to the PC's scale: 800x480 of the world, four pixels into one.
         const std::size_t pitch = 800 * 4;
-        for (int x0 = 0; x0 < 400; x0 += 16)
+        run_parallel(kJobs, [&](int job) {
+        for (int x0 = job * 25 / kJobs * 16; x0 < (job + 1) * 25 / kJobs * 16; x0 += 16)
         for (int y = 0; y < 240; ++y) {
             const std::uint8_t* upper = frame.data() + std::size_t(clip_top + y * 2) * pitch + std::size_t(x0) * 8;
             const std::uint8_t* lower = upper + pitch;
@@ -77,12 +84,14 @@ void handheld_present(const std::vector<std::uint8_t>& frame, int frame_w, int f
             for (int x = 0; x < 16; ++x, upper += 8, lower += 8, out += 240)
                 *out = ((upper[0] + upper[4] + lower[0] + lower[4]) >> 2) << 24 | ((upper[1] + upper[5] + lower[1] + lower[5]) >> 2) << 16 | ((upper[2] + upper[6] + lower[2] + lower[6]) >> 2) << 8 | 0xFFu;
         }
+        });
     } else if (top && frame_w >= 800 && frame_h >= 600) {
         // 800x600 -> 400x240: two columns and three rows a pixel (rows step 2.5, so they
         // overlap by one now and then, which keeps thin lines). Six samples: no division by a variable.
         const int off = (frame_w - 800) / 2;
         const std::size_t pitch = std::size_t(frame_w) * 4;
-        for (int y = 0; y < 240; ++y) {
+        run_parallel(kJobs, [&](int job) {
+        for (int y = job * 240 / kJobs; y < (job + 1) * 240 / kJobs; ++y) {
             const int first = y * 5 / 2 > 597 ? 597 : y * 5 / 2;
             const std::uint8_t* pixel = frame.data() + std::size_t(first) * pitch + std::size_t(off) * 4;
             std::uint32_t* out = top + (239 - y);
@@ -92,6 +101,7 @@ void handheld_present(const std::vector<std::uint8_t>& frame, int frame_w, int f
                 *out = (red * 10923u >> 16) << 24 | (green * 10923u >> 16) << 16 | (blue * 10923u >> 16) << 8 | 0xFFu;
             }
         }
+        });
     }
     timed.emplace("present: touch screen");
     // The second screen has one buffer, not two: the HUD changes five times a second and is copied
@@ -150,6 +160,13 @@ void handheld_present(const std::vector<std::uint8_t>& frame, int frame_w, int f
         d2d::log::info("3ds: {} | application memory {} MiB | heap {} MiB | linear heap {} MiB | system {}.{}.{}", new_model ? "New 3DS" : "old 3DS (not supported)",
                        osGetMemRegionSize(MEMREGION_APPLICATION) >> 20, envGetHeapSize() >> 20, envGetLinearHeapSize() >> 20,
                        unsigned(GET_VERSION_MAJOR(osGetFirmVersion())), unsigned(GET_VERSION_MINOR(osGetFirmVersion())), unsigned(GET_VERSION_REVISION(osGetFirmVersion())));
+        {   // A save replaces its file by a rename onto it, which this file system refuses (files_3ds.cpp makes it work): say so if it doesn't.
+            const char *first = "sdmc:/3ds/d2d/rename-a.tmp", *second = "sdmc:/3ds/d2d/rename-b.tmp";
+            for (const char* name : { first, second }) if (std::FILE* file = std::fopen(name, "wb")) { std::fputc('x', file); std::fclose(file); }
+            const int renamed = std::rename(first, second);
+            d2d::log::info("3ds: saving over an existing file {}", renamed == 0 ? "works" : "FAILS (saves will be lost)");
+            std::remove(first); std::remove(second);
+        }
         for (const char* notes = logs_3ds_notes(); *notes;) {
             const char* end = std::strchr(notes, '\n');
             d2d::log::info("{}", std::string(notes, end ? std::size_t(end - notes) : std::strlen(notes)));

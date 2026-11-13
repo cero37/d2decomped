@@ -85,7 +85,8 @@ target_link_libraries(d2d PRIVATE
     SDL3_3ds CLI11 citro3d ctru m)
 # std::thread: a real stack and the other cores (src/threads_3ds.cpp).
 target_link_options(d2d PRIVATE -Wl,--wrap=threadCreate -Wl,--wrap=__syscall_thread_create
-    -Wl,--wrap=malloc -Wl,--wrap=calloc -Wl,--wrap=realloc -Wl,--wrap=memalign -Wl,--wrap=free)   # src/memory_3ds.cpp
+    -Wl,--wrap=malloc -Wl,--wrap=calloc -Wl,--wrap=realloc -Wl,--wrap=memalign -Wl,--wrap=free   # src/memory_3ds.cpp
+    -Wl,--wrap=rename)   # src/files_3ds.cpp
 target_link_options(d2d PRIVATE -Wl,--gc-sections)
 
 ctr_generate_smdh(d2d.smdh NAME "D2Decomp" DESCRIPTION "Diablo II engine (bring your own game data)" AUTHOR "psi29a and contributors; 3DS port")

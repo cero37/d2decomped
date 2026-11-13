@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <condition_variable>
 #include <cstddef>
 #include <cstdint>
@@ -24,6 +25,16 @@ namespace d2d::client {
 
 namespace {
 
+constexpr std::uint32_t kOpaqueAlpha = std::endian::native == std::endian::little ? 0xFF000000u : 0x000000FFu;   // Rgba's a, as a word
+
+// An opaque pixel: the colour with its alpha byte set, in one store.
+inline void put(std::uint8_t* pixel, const d2d::palette::Rgba& colour) {
+    std::uint32_t value;
+    std::memcpy(&value, &colour, 4);
+    value |= kOpaqueAlpha;
+    std::memcpy(pixel, &value, 4);
+}
+
 // Draws a tile's buffer at (screen_x, screen_y), clipped to the framebuffer
 // and `rows` once up front: each non-transparent pixel (index 0 is
 // see-through) takes colour_at(x, y, index), x and y in the tile's buffer,
@@ -32,9 +43,9 @@ template <class ColourAt>
 void blit_tile_pixels(std::vector<std::uint8_t>& framebuffer, const d2d::dt1::Tile& tile,
                       int screen_x, int screen_y, int alpha_all, const Hole* hole, Rows rows, ColourAt colour_at) {
     const int screen_w = fb_width(framebuffer);
-    const int x_begin = std::max(0, -screen_x), x_end = std::min<int>(tile.width, screen_w - screen_x);
-    const int y_begin = std::max(0, rows.begin - screen_y), y_end = std::min<int>(std::abs(tile.height), std::min(int(kScreenHeight), rows.end) - screen_y);
-    if (x_begin >= x_end) return;
+    const int all_begin = std::max(0, -screen_x), all_end = std::min<int>(tile.width, screen_w - screen_x);
+    const int y_begin = std::max(0, std::max(rows.begin, g_clip_top) - screen_y), y_end = std::min<int>(std::abs(tile.height), std::min({ int(kScreenHeight), rows.end, g_clip_bottom }) - screen_y);
+    if (all_begin >= all_end || y_begin >= y_end) return;
     const auto* tile_pixels = tile.pixels();   // decoded now if this is the tile's first draw
     if (!tile_pixels) return;
     const bool opaque = !hole && alpha_all >= 255;
@@ -42,6 +53,8 @@ void blit_tile_pixels(std::vector<std::uint8_t>& framebuffer, const d2d::dt1::Ti
         const int pixel_y = screen_y + y;
         const auto* row = tile_pixels + std::size_t(y) * std::size_t(tile.width);
         auto* line = framebuffer.data() + std::size_t(pixel_y) * std::size_t(screen_w) * 4;   // the row's first pixel; screen_x + x >= 0 inside the clip
+        const auto span = d2d::dt1::row_span(tile, tile_pixels, y);
+        const int x_begin = std::max(all_begin, int(span.first)), x_end = std::min(all_end, int(span.end));
         if (opaque) {
             for (int x = x_begin; x < x_end; ++x) {
                 const std::uint8_t idx = row[x];
@@ -76,16 +89,17 @@ void blit_dt1_tile(std::vector<std::uint8_t>& framebuffer,
     if (!hole && alpha_all >= 255) {
         const int screen_w = fb_width(framebuffer);
         const int x_begin = std::max(0, -screen_x), x_end = std::min<int>(tile.width, screen_w - screen_x);
-        const int y_begin = std::max(0, rows.begin - screen_y), y_end = std::min<int>(std::abs(tile.height), std::min(int(kScreenHeight), rows.end) - screen_y);
-        if (x_begin >= x_end) return;
+        const int y_begin = std::max(0, std::max(rows.begin, g_clip_top) - screen_y), y_end = std::min<int>(std::abs(tile.height), std::min({ int(kScreenHeight), rows.end, g_clip_bottom }) - screen_y);
+        if (x_begin >= x_end || y_begin >= y_end) return;
         const auto* tile_pixels = tile.pixels();
         if (!tile_pixels) return;
         const auto* colours = pal.ramped();
         for (int y = y_begin; y < y_end; ++y) {
             const auto* row = tile_pixels + std::size_t(y) * std::size_t(tile.width);
             auto* line = framebuffer.data() + (std::size_t(screen_y + y) * std::size_t(screen_w) + std::size_t(screen_x)) * 4;
-            for (int x = x_begin; x < x_end; ++x)
-                if (const std::uint8_t idx = row[x]) { auto* pixel = line + std::size_t(x) * 4; std::memcpy(pixel, &colours[idx], 4); pixel[3] = 0xFF; }
+            const auto span = d2d::dt1::row_span(tile, tile_pixels, y);
+            for (int x = std::max(x_begin, int(span.first)), row_end = std::min(x_end, int(span.end)); x < row_end; ++x)
+                if (const std::uint8_t idx = row[x]) put(line + std::size_t(x) * 4, colours[idx]);
         }
         return;
     }
@@ -97,13 +111,14 @@ void blit_dt1_shadow(std::vector<std::uint8_t>& framebuffer, const d2d::dt1::Til
     const int screen_w = fb_width(framebuffer);
     const int x_begin = std::max(0, -screen_x), x_end = std::min<int>(tile.width, screen_w - screen_x);
     const int y_begin = std::max(0, g_clip_top - screen_y), y_end = std::min<int>(std::abs(tile.height), g_clip_bottom - screen_y);
-    if (x_begin >= x_end) return;
+    if (x_begin >= x_end || y_begin >= y_end) return;
     const auto* tile_pixels = tile.pixels();
     if (!tile_pixels) return;
     for (int y = y_begin; y < y_end; ++y) {
         const auto* row = tile_pixels + std::size_t(y) * std::size_t(tile.width);
         auto* line = framebuffer.data() + std::size_t(screen_y + y) * std::size_t(screen_w) * 4;
-        for (int x = x_begin; x < x_end; ++x) {
+        const auto span = d2d::dt1::row_span(tile, tile_pixels, y);
+        for (int x = std::max(x_begin, int(span.first)), row_end = std::min(x_end, int(span.end)); x < row_end; ++x) {
             const std::uint8_t idx = row[x];
             if (idx == 0) continue;
             const auto colour = pal[idx];
@@ -172,33 +187,41 @@ void blit_dt1_tile_lit(std::vector<std::uint8_t>& framebuffer, const d2d::dt1::T
         // as level() below, pixel for pixel.
         const int screen_w = fb_width(framebuffer);
         const int x_begin = std::max(0, -screen_x), x_end = std::min<int>(tile.width, screen_w - screen_x);
-        const int y_begin = std::max(0, rows.begin - screen_y), y_end = std::min<int>(std::abs(tile.height), std::min(int(kScreenHeight), rows.end) - screen_y);
-        if (x_begin >= x_end) return;
+        const int y_begin = std::max(0, std::max(rows.begin, g_clip_top) - screen_y), y_end = std::min<int>(std::abs(tile.height), std::min({ int(kScreenHeight), rows.end, g_clip_bottom }) - screen_y);
+        if (x_begin >= x_end || y_begin >= y_end) return;
         const auto* tile_pixels = tile.pixels();
         if (!tile_pixels) return;
+        std::array<const d2d::palette::Rgba*, 32> level_colours;   // each level's colours, asked for once a tile
+        for (std::size_t each = 0; each < level_colours.size(); ++each) level_colours[each] = pals[each].ramped();
         for (int y = y_begin; y < y_end; ++y) {
             const auto* row = tile_pixels + std::size_t(y) * std::size_t(tile.width);
             auto* line = framebuffer.data() + (std::size_t(screen_y + y) * std::size_t(screen_w) + std::size_t(screen_x)) * 4;
             const int offset_y = y - tile.y_shift;
-            for (int x = x_begin; x < x_end;) {
+            const auto span = d2d::dt1::row_span(tile, tile_pixels, y);
+            for (int x = std::max(x_begin, int(span.first)), row_end = std::min(x_end, int(span.end)); x < row_end;) {
                 const int offset_x = x - kIsoW / 2;
                 const int sum = offset_x + 2 * offset_y, difference = 2 * offset_y - offset_x;
-                const int run_end = std::min(x_end, x + std::min(32 - (sum & 31), (difference & 31) + 1));
+                const int run_end = std::min(row_end, x + std::min(32 - (sum & 31), (difference & 31) + 1));
                 const int block_x = std::clamp(sum >> 5, 0, 4), block_y = std::clamp(difference >> 5, 0, 4);
                 const auto& block = blocks[std::size_t(block_y * 5 + block_x)];
                 if (block.flat) {
-                    const auto* colours = pals[std::size_t(block.level)].ramped();
+                    const auto* colours = level_colours[std::size_t(block.level) & 31];
                     for (; x < run_end; ++x)
-                        if (const std::uint8_t idx = row[x]) { auto* pixel = line + std::size_t(x) * 4; std::memcpy(pixel, &colours[idx], 4); pixel[3] = 0xFF; }
+                        if (const std::uint8_t idx = row[x]) put(line + std::size_t(x) * 4, colours[idx]);
                     continue;
                 }
                 const int row_in = std::clamp(offset_y - (block_x + block_y) * 8, 0, 15), base = (block_x - block_y) * 16 - 16 + kIsoW / 2;
                 const int left = (block.v0 * 16 + (block.v3 - block.v0) * row_in) >> 7, right = (block.v1 * 16 + (block.v2 - block.v1) * row_in) >> 7;
+                if (left == right) {   // no ramp along this row
+                    const auto* colours = level_colours[std::size_t(std::clamp(left, 0, 31))];
+                    for (; x < run_end; ++x)
+                        if (const std::uint8_t idx = row[x]) put(line + std::size_t(x) * 4, colours[idx]);
+                    continue;
+                }
                 for (; x < run_end; ++x)
                     if (const std::uint8_t idx = row[x]) {
                         const int along = std::clamp(x - base, 0, 31);
-                        const auto* colours = pals[std::size_t(std::clamp(left + (((right - left) * along) >> 5), 0, 31))].ramped();
-                        auto* pixel = line + std::size_t(x) * 4; std::memcpy(pixel, &colours[idx], 4); pixel[3] = 0xFF;
+                        put(line + std::size_t(x) * 4, level_colours[std::size_t(std::clamp(left + (((right - left) * along) >> 5), 0, 31))][idx]);
                     }
             }
         }
@@ -240,6 +263,32 @@ void blit_dt1_wall_lit(std::vector<std::uint8_t>& framebuffer, const d2d::dt1::T
     if (low >> 3 == high >> 3) { blit_dt1_tile(framebuffer, tile, pals[std::size_t(low >> 3)], screen_x, screen_y, alpha_all, hole); return; }
     // A block (FUN_004f8120): flat at the left light's level when its two
     // lights differ by under 10, else the ramp between their levels.
+    if (!hole && alpha_all >= 255 && tile.width <= 256) {
+        // Opaque (nearly every wall): the level depends on the column alone,
+        // so each column's palette is found once and a pixel is one lookup.
+        // The same levels as the general draw below.
+        const int screen_w = fb_width(framebuffer);
+        const int x_begin = std::max(0, -screen_x), x_end = std::min<int>(tile.width, screen_w - screen_x);
+        const int y_begin = std::max(0, g_clip_top - screen_y), y_end = std::min<int>(std::abs(tile.height), std::min(int(kScreenHeight), g_clip_bottom) - screen_y);
+        if (x_begin >= x_end || y_begin >= y_end) return;
+        const auto* tile_pixels = tile.pixels();
+        if (!tile_pixels) return;
+        std::array<const d2d::palette::Rgba*, 256> column_colours;
+        for (int x = x_begin; x < x_end; ++x) {
+            const int column = std::min(x / 32, 4), along = x - column * 32;
+            const int left = lights[std::size_t(column)], right = lights[std::size_t(column) + 1];
+            const int lvl = std::abs(right - left) < 10 ? left >> 3 : (left >> 3) + ((((right >> 3) - (left >> 3)) * along) >> 5);
+            column_colours[std::size_t(x)] = pals[std::size_t(lvl)].ramped();
+        }
+        for (int y = y_begin; y < y_end; ++y) {
+            const auto* row = tile_pixels + std::size_t(y) * std::size_t(tile.width);
+            auto* line = framebuffer.data() + (std::size_t(screen_y + y) * std::size_t(screen_w) + std::size_t(screen_x)) * 4;
+            const auto span = d2d::dt1::row_span(tile, tile_pixels, y);
+            for (int x = std::max(x_begin, int(span.first)), row_end = std::min(x_end, int(span.end)); x < row_end; ++x)
+                if (const std::uint8_t idx = row[x]) put(line + std::size_t(x) * 4, column_colours[std::size_t(x)][idx]);
+        }
+        return;
+    }
     blit_tile_pixels(framebuffer, tile, screen_x, screen_y, alpha_all, hole, {}, [&](int x, int, std::uint8_t idx) {
         const int column = std::min(x / 32, 4), along = x - column * 32;
         const int left = lights[std::size_t(column)], right = lights[std::size_t(column) + 1];
@@ -250,7 +299,10 @@ void blit_dt1_wall_lit(std::vector<std::uint8_t>& framebuffer, const d2d::dt1::T
 
 void draw_in_bands(int bands, const std::function<void(Rows)>& draw) {
     const int band_height = (g_clip_bottom - g_clip_top + bands - 1) / bands;
-    const std::function<void(int)> band = [&](int index) { draw({ g_clip_top + index * band_height, std::min(g_clip_bottom, g_clip_top + (index + 1) * band_height) }); };
+    run_parallel(bands, [&](int index) { draw({ g_clip_top + index * band_height, std::min(g_clip_bottom, g_clip_top + (index + 1) * band_height) }); });
+}
+
+void run_parallel(int bands, const std::function<void(int)>& band) {
     if (bands <= 1) { band(0); return; }
     // Made on the first call and never destroyed: at exit a static pool's
     // destructor would run while its workers still wait on it, and hang.

@@ -6,6 +6,7 @@
 #include "platform.hpp"
 #include "sound_reads.hpp"
 
+#include <memory>
 #include <install.hpp>
 #include <log.hpp>
 #include <rules.hpp>
@@ -408,7 +409,34 @@ struct Audio {
             if (!paused && state == AL_PAUSED) alSourcePlayv(channel.right_src ? 2 : 1, both.data());
         }
     }
-    std::optional<std::vector<std::byte>> read_wav(const GameData& game_data, const GameData::Sound& snd, int index) {
+    // A sound's file. The short ones played lately are kept: a footstep or a hit was read from its
+    // archive and unpacked again each time it played (a tenth of a frame's time walking in the field).
+    struct KeptWav { std::shared_ptr<const std::vector<std::byte>> bytes; std::uint32_t used = 0; };
+    std::unordered_map<int, KeptWav> kept_wavs;
+    std::size_t kept_wav_bytes = 0;
+    std::uint32_t kept_wav_clock = 0;
+#ifdef __3DS__
+    static constexpr std::size_t kKeptWavBudget = 1024 * 1024, kKeptWavMost = 160 * 1024;
+#else
+    static constexpr std::size_t kKeptWavBudget = 16 * 1024 * 1024, kKeptWavMost = 512 * 1024;
+#endif
+    std::shared_ptr<const std::vector<std::byte>> read_wav(const GameData& game_data, const GameData::Sound& snd, int index) {
+        if (const auto kept = kept_wavs.find(index); kept != kept_wavs.end()) { kept->second.used = ++kept_wav_clock; return kept->second.bytes; }
+        auto read = read_wav_file(game_data, snd, index);
+        if (!read) return nullptr;
+        auto bytes = std::make_shared<const std::vector<std::byte>>(std::move(*read));
+        if (bytes->size() <= kKeptWavMost) {
+            kept_wav_bytes += bytes->size();
+            kept_wavs[index] = { bytes, ++kept_wav_clock };
+            while (kept_wav_bytes > kKeptWavBudget && kept_wavs.size() > 1) {
+                const auto oldest = std::ranges::min_element(kept_wavs, {}, [](const auto& entry) { return entry.second.used; });
+                kept_wav_bytes -= oldest->second.bytes->size();
+                kept_wavs.erase(oldest);
+            }
+        }
+        return bytes;
+    }
+    std::optional<std::vector<std::byte>> read_wav_file(const GameData& game_data, const GameData::Sound& snd, int index) {
         std::optional<std::vector<std::byte>> wav;
         if (unplayable.contains(index)) return wav;
         // One there that won't read (a cut-short MPQ) goes unheard.

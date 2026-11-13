@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstring>
 #include <format>
 #include <string>
 
@@ -56,11 +57,18 @@ void draw_bottom_hud(std::vector<std::uint8_t>& framebuffer, const Scene& scene,
     ++g_bottom_serial;
     const int width = kBottomWidth, height = kBottomHeight;
     // The stone the panel is cut from.
+    static const std::vector<std::uint8_t> stone = [&] {   // worked out once, copied a row at a time after
+        std::vector<std::uint8_t> made(std::size_t(width) * std::size_t(height) * 4);
+        for (int y = 0; y < height; ++y)
+            for (int x = 0; x < width; ++x) {
+                const int grain = ((x * 7 + y * 13) ^ (x * y >> 3)) & 7;
+                auto* pixel = made.data() + (std::size_t(y) * std::size_t(width) + std::size_t(x)) * 4;
+                pixel[0] = std::uint8_t(26 + grain); pixel[1] = std::uint8_t(23 + grain); pixel[2] = std::uint8_t(20 + grain); pixel[3] = 0xFF;
+            }
+        return made;
+    }();
     for (int y = 0; y < height; ++y)
-        for (int x = 0; x < width; ++x) {
-            const int grain = ((x * 7 + y * 13) ^ (x * y >> 3)) & 7;
-            canvas.put(x, y, std::uint8_t(26 + grain), std::uint8_t(23 + grain), std::uint8_t(20 + grain));
-        }
+        std::memcpy(framebuffer.data() + std::size_t(y) * kScreenWidth * 4, stone.data() + std::size_t(y) * std::size_t(width) * 4, std::size_t(width) * 4);
     if (!state.stats) return;
     const auto& stats = *state.stats;
 

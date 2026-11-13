@@ -112,5 +112,7 @@ void blit_dt1_wall_lit(std::vector<std::uint8_t>& framebuffer, const d2d::dt1::T
 // threads, and returns when all are done. The workers start on the first
 // call and live as long as the process. Called from one thread at a time.
 void draw_in_bands(int bands, const std::function<void(Rows)>& draw);
+// job(0) here and job(1 .. jobs-1) on the same worker threads, back when all are done.
+void run_parallel(int jobs, const std::function<void(int)>& job);
 
 }  // namespace d2d::client

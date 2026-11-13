@@ -183,7 +183,12 @@ void render_world(std::vector<std::uint8_t>& framebuffer,
         const int screen_y = (layer == 0 && tile.type >= 16 ? iso_y + kIsoH - tile.y_shift : iso_y - (tile_height - kIsoH)) - wall_lift;
         const bool drawn = layer == 1 ? floor_drawn(screen_x, screen_y) : layer == 0 && wall_drawn(screen_x, screen_y, tile);
         if (drawn) g_drawn.cells.push_back({ cell_x, cell_y, source });
-        if (layer == 1) { floors.push_back({ &tile, screen_x, screen_y, cell_x, cell_y }); return drawn; }   // drawn after the sweep, below
+        if (layer == 1) {   // drawn after the sweep, below: those with a pixel in the view (of 625 swept cells, a tenth)
+            if (screen_x < screen_w && screen_x + int(tile.width) > 0 && screen_y < g_clip_bottom && screen_y + tile_height > g_clip_top)
+                floors.push_back({ &tile, screen_x, screen_y, cell_x, cell_y });
+            return drawn;
+        }
+        if (screen_x >= screen_w || screen_x + int(tile.width) <= 0 || screen_y >= g_clip_bottom || screen_y + tile_height <= g_clip_top) return drawn;   // nothing of it in the view
         if (layer == 2) blit_dt1_shadow(framebuffer, tile, pal, screen_x, screen_y);
         else if (light && layer == 0) blit_dt1_wall_lit(framebuffer, tile, *light, screen_x, screen_y, cell_x, cell_y, alpha < 255, alpha);   // ponytail: "in front" read off the alpha, so a wall fading back still samples the front spots
         else if (light) blit_dt1_tile_lit(framebuffer, tile, *light, screen_x, screen_y, cell_x, cell_y, alpha);
@@ -334,7 +339,7 @@ void render_world(std::vector<std::uint8_t>& framebuffer,
         }
     }
 #ifdef __3DS__
-    static const int floor_bands = 4;   // a New 3DS's four cores (hardware_concurrency doesn't know them)
+    static const int floor_bands = 3;   // a New 3DS: this core and the two the workers have (threads_3ds.cpp)
 #else
     static const int floor_bands = std::clamp(int(std::thread::hardware_concurrency()), 1, 4);
 #endif

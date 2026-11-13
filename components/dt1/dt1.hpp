@@ -86,6 +86,9 @@ namespace d2d::dt1 {
 
 struct Tile;
 
+// A row's pixels that aren't see-through: [first, end). Kept after a decoded tile's pixels (File::pixels).
+struct RowSpan { std::uint16_t first, end; };
+
 // A DT1 file's bytes and the tiles decoded from it so far. Decoded tiles
 // are about nine times the file (Act 1's outdoors: 9 MB of DT1s, 75 MB of
 // pixels), so a tile decodes when it is first drawn and the least recently
@@ -245,6 +248,13 @@ struct Tile {
     std::int32_t block_headers{}, block_count{};   // where its blocks are in the file
     std::vector<std::pair<std::int16_t, std::int16_t>> blocks;   // each block's top left in pixels[] (a wall's draw clips by them)
 };
+
+// Row y's span of a tile's pixels() (which must be this tile's, not null).
+[[nodiscard]] inline RowSpan row_span(const Tile& tile, const std::uint8_t* pixels, int y) {
+    RowSpan span;
+    std::memcpy(&span, pixels + std::size_t(tile.width) * std::size_t(std::abs(tile.height)) + std::size_t(y) * sizeof(RowSpan), sizeof(RowSpan));
+    return span;
+}
 
 // Whether an archive decodes its tiles' pixels. A headless game server
 // needs only the headers and subtile flags (walkability).
@@ -496,6 +506,19 @@ inline const std::uint8_t* File::pixels(const Tile& tile, std::size_t index) {
     auto* decoded = new std::vector<std::uint8_t>;
     if (!slot.blocks.empty()) Archive::decode(tile, slot.blocks, *decoded);
     else Archive::decode(tile, std::span(bytes_).subspan(std::size_t(tile.block_headers)), *decoded);
+    // After the pixels, each row's span of them that isn't see-through (first, end): a floor's
+    // diamond fills a quarter of its buffer, and a draw that knows the span skips the rest.
+    if (const std::size_t width = std::size_t(tile.width > 0 ? tile.width : 0), height = std::size_t(std::abs(tile.height)); width > 0 && width < 0x10000 && decoded->size() == width * height) {
+        decoded->resize(width * height + height * sizeof(RowSpan));
+        for (std::size_t y = 0; y < height; ++y) {
+            const std::uint8_t* row = decoded->data() + y * width;
+            std::size_t first = 0, end = width;
+            while (first < width && row[first] == 0) ++first;
+            while (end > first && row[end - 1] == 0) --end;
+            const RowSpan span{ std::uint16_t(first), std::uint16_t(end) };
+            std::memcpy(decoded->data() + width * height + y * sizeof(RowSpan), &span, sizeof(RowSpan));
+        }
+    }
     all.decoded_bytes += decoded->size();
     slot.pixels.store(decoded, std::memory_order_release);
     return decoded->data();

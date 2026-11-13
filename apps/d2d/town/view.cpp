@@ -370,10 +370,28 @@ Lighting frame_light(const Scene& scene, const View& view, float cam_x, float ca
                                   d2d::rules::border_room_light(near_room.level->id, near_room.level->light, view.day.intensity(), dip_light, view.diablo_red) });
     }
     lighting.grid.paint_border_rooms(view.level->world_x, view.level->world_y, border_rooms);
-    for (int j = 0; j < lighting.grid.grid_size; ++j)                            // what walls light (FUN_004756d0)
-        for (int i = 0; i < lighting.grid.grid_size; ++i)
-            lighting.grid.blocked[std::size_t(j * lighting.grid.grid_size + i)] =
-                view.level->blocked((float(lighting.grid.origin_x + i) + 0.5f) / 5, (float(lighting.grid.origin_y + j) + 0.5f) / 5, 0x22);
+    {   // what walls light (FUN_004756d0). Walls rarely change, so the last frame's answers are kept where
+        // the two grids overlap (all of it standing still, all but an edge walking) and asked afresh
+        // every 400 ms (a door opened).
+        struct Kept { const void* level = nullptr; int x = 0, y = 0, size = 0; std::uint32_t at = 0; std::vector<std::uint8_t> cells; };
+        static Kept kept;
+        auto& grid = lighting.grid;
+        const int size = grid.grid_size;
+        const bool reuse = kept.level == view.level && kept.size == size && now - kept.at < 400 && kept.cells.size() == std::size_t(size * size);
+        const int shift_x = grid.origin_x - kept.x, shift_y = grid.origin_y - kept.y;
+        for (int j = 0; j < size; ++j) {
+            const int old_j = j + shift_y;
+            const bool row_kept = reuse && old_j >= 0 && old_j < size;
+            for (int i = 0; i < size; ++i) {
+                const int old_i = i + shift_x;
+                grid.blocked[std::size_t(j * size + i)] = row_kept && old_i >= 0 && old_i < size ? kept.cells[std::size_t(old_j * size + old_i)]
+                    : std::uint8_t(view.level->blocked((float(grid.origin_x + i) + 0.5f) / 5, (float(grid.origin_y + j) + 0.5f) / 5, 0x22));
+            }
+        }
+        if (!reuse) kept.at = now;
+        kept.level = view.level; kept.x = grid.origin_x; kept.y = grid.origin_y; kept.size = size;
+        kept.cells = grid.blocked;
+    }
     // Type 0 lights (the player's, objects') are shadowed by walls; type 1
     // (monsters', missiles') aren't (FUN_004755a0).
     struct Ease { int radius8 = 0; std::uint32_t changed_at = 0, seen = 0; };
