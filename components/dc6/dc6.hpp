@@ -24,8 +24,12 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <functional>
+#include <mutex>
+#include <optional>
 #include <span>
 #include <stdexcept>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -46,20 +50,43 @@ public:
         parse(bytes);
     }
 
-    [[nodiscard]] std::uint32_t directions() const noexcept { return directions_; }
-    [[nodiscard]] std::uint32_t frames_per_direction() const noexcept { return framesPerDir_; }
-    [[nodiscard]] std::size_t total_frames() const noexcept { return frames_.size(); }
+    // A sprite read when it is first looked at (through set_loader's reader),
+    // for art most sessions never show: a panel nobody opens costs nothing.
+    // A file that isn't there, or won't parse, is a sprite with no frames.
+    using Loader = std::function<std::optional<std::vector<std::byte>>(const std::string& path)>;
+    static void set_loader(Loader loader) { const std::scoped_lock lock(lazy_mutex()); lazy_loader() = std::move(loader); }
+    [[nodiscard]] static Sprite lazy(std::string path) { Sprite sprite; sprite.lazy_path_ = std::move(path); return sprite; }
+
+    [[nodiscard]] std::uint32_t directions() const noexcept { ensure(); return directions_; }
+    [[nodiscard]] std::uint32_t frames_per_direction() const noexcept { ensure(); return framesPerDir_; }
+    [[nodiscard]] std::size_t total_frames() const noexcept { ensure(); return frames_.size(); }
 
     [[nodiscard]] const Frame& frame(std::uint32_t dir, std::uint32_t idx) const {
+        ensure();
         if (dir >= directions_ || idx >= framesPerDir_) {
             throw std::out_of_range("DC6: frame out of range");
         }
         return frames_[dir * framesPerDir_ + idx];
     }
 
-    [[nodiscard]] std::span<const Frame> frames() const noexcept { return frames_; }
+    [[nodiscard]] std::span<const Frame> frames() const noexcept { ensure(); return frames_; }
 
 private:
+    static std::mutex& lazy_mutex() { static std::mutex mutex; return mutex; }
+    static Loader& lazy_loader() { static Loader loader; return loader; }
+    void ensure() const noexcept {
+        if (lazy_path_.empty()) return;
+        const std::scoped_lock lock(lazy_mutex());
+        if (lazy_path_.empty() || !lazy_loader()) return;      // read meanwhile, or no reader yet (asked again later)
+        auto* self = const_cast<Sprite*>(this);                 // the sprite's own cache: it is the same sprite either way
+        try {
+            if (const auto bytes = lazy_loader()(lazy_path_)) self->parse(*bytes);
+        } catch (...) {
+            self->frames_.clear(); self->directions_ = 0; self->framesPerDir_ = 0;
+        }
+        self->lazy_path_.clear();
+    }
+
     static std::uint32_t rd32(const std::byte* source) {
         std::uint32_t value; std::memcpy(&value, source, 4); return value;
     }
@@ -144,6 +171,7 @@ private:
     std::uint32_t directions_{};
     std::uint32_t framesPerDir_{};
     std::vector<Frame> frames_;
+    std::string lazy_path_;                    // set: not read yet (Sprite::lazy)
 };
 
 }  // namespace d2d::dc6

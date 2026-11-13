@@ -2088,6 +2088,10 @@ int main(int argc, char** argv) {
         d2d::dt1::File::set_loader([mpqs = &scene->mpqs](const std::string& path) -> std::optional<std::vector<std::byte>> {
             try { return mpqs->try_read(path); } catch (const std::exception&) { return std::nullopt; }
         });
+    if (scene)
+        d2d::dc6::Sprite::set_loader([mpqs = &scene->mpqs](const std::string& path) -> std::optional<std::vector<std::byte>> {
+            try { return mpqs->try_read(path); } catch (const std::exception&) { return std::nullopt; }
+        });
     if (scene) loading = std::async(std::launch::async, [&scene, save_dir, map_seed] { finish_scene(*scene, save_dir, map_seed, game_seed); });
 
     std::atomic<std::uint64_t> frame_count{0};

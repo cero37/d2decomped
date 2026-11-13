@@ -133,7 +133,7 @@ void load_ui_sprites(Scene& scene, const d2d::mpq::Stack& mpqs) {
         return values;
     };
     auto sprite = [&](std::string_view path, auto& into) {
-        if (auto bytes = mpqs.try_read(path)) into = d2d::dc6::Sprite(*bytes);
+        into = d2d::dc6::Sprite::lazy(std::string(path));   // read when first drawn: most of this art a session never shows
     };
     const auto types = txt("ItemTypes");
     if (auto bytes = mpqs.try_read(R"(data\global\monsters\RandTransforms.dat)"))
@@ -151,8 +151,8 @@ void load_ui_sprites(Scene& scene, const d2d::mpq::Stack& mpqs) {
         auto& graphics = scene.type_invgfx[code];
         for (int i = 0; i < 6; ++i) graphics[std::size_t(i)] = std::string(types.get(row, "InvGfx" + std::to_string(i + 1)));
     }
-    if (auto bytes = mpqs.try_read(R"(data\global\ui\PANEL\ctrlpnl_popbelt.dc6)")) scene.popbelt = d2d::dc6::Sprite(*bytes);
-    if (auto bytes = mpqs.try_read(R"(data\global\ui\CURSOR\focus16.dc6)")) scene.focus16 = d2d::dc6::Sprite(*bytes);
+    scene.popbelt = d2d::dc6::Sprite::lazy(std::string(R"(data\global\ui\PANEL\ctrlpnl_popbelt.dc6)"));
+    scene.focus16 = d2d::dc6::Sprite::lazy(std::string(R"(data\global\ui\CURSOR\focus16.dc6)"));
     {
         static constexpr std::string_view kLevelTypeName[] = {
             "None", "1 Town", "1 Wilderness", "1 Cave", "1 Crypt", "1 Monestary", "1 Courtyard", "1 Barracks",
@@ -186,13 +186,13 @@ void load_ui_sprites(Scene& scene, const d2d::mpq::Stack& mpqs) {
         }
         // By level type and orientation, each's rows in the table's order (automap_cel's first match).
         std::ranges::stable_sort(scene.automap_rules, {}, [](const Scene::AutomapRule& rule) { return std::pair(rule.level_type, rule.orientation); });
-        if (auto bytes = mpqs.try_read(R"(data\global\ui\AutoMap\MaxiMap.dc6)")) scene.automap_cels = d2d::dc6::Sprite(*bytes);
-        if (auto bytes = mpqs.try_read(R"(data\global\ui\AutoMap\MaxiMapS.dc6)")) scene.automap_cels_small = d2d::dc6::Sprite(*bytes);
+        scene.automap_cels = d2d::dc6::Sprite::lazy(std::string(R"(data\global\ui\AutoMap\MaxiMap.dc6)"));
+        scene.automap_cels_small = d2d::dc6::Sprite::lazy(std::string(R"(data\global\ui\AutoMap\MaxiMapS.dc6)"));
         static constexpr std::array<const char*, 4> kMiniatures{ "", "Act2Map", "Act4Map", "ExTnMap" };   // FUN_0045a2b0's cel files 1..3
         for (std::size_t file = 1; file < kMiniatures.size(); ++file) {
             const std::string base = std::string(R"(data\global\ui\AutoMap\)") + kMiniatures[file];
-            if (auto bytes = mpqs.try_read(base + ".dc6")) scene.automap_miniatures[file] = d2d::dc6::Sprite(*bytes);
-            if (auto bytes = mpqs.try_read(base + "S.dc6")) scene.automap_miniatures_small[file] = d2d::dc6::Sprite(*bytes);
+            scene.automap_miniatures[file] = d2d::dc6::Sprite::lazy(std::string(base + ".dc6"));
+            scene.automap_miniatures_small[file] = d2d::dc6::Sprite::lazy(std::string(base + "S.dc6"));
         }
     }
     sprite(R"(data\global\ui\menu\waygatebackground.dc6)", scene.wp_bg);
@@ -250,8 +250,7 @@ void load_ui_sprites(Scene& scene, const d2d::mpq::Stack& mpqs) {
     sprite(R"(data\global\ui\PANEL\hlthmana.dc6)", scene.globes);
     sprite(R"(data\global\ui\PANEL\overlap.dc6)", scene.globe_glass);
     sprite(R"(data\global\ui\PANEL\runbutton.dc6)", scene.run_button);
-    if (auto bytes = mpqs.try_read(R"(data\global\ui\PANEL\invchar6.dc6)"))
-        scene.inv_panel = d2d::dc6::Sprite(*bytes);
+    scene.inv_panel = d2d::dc6::Sprite::lazy(std::string(R"(data\global\ui\PANEL\invchar6.dc6)"));
     sprite(R"(data\global\ui\PANEL\invchar6Tab.dc6)", scene.inv_tab);
     sprite(R"(data\global\ui\PANEL\800BorderFrame.dc6)", scene.border_frame);
     {
@@ -291,21 +290,16 @@ void load_ui_sprites(Scene& scene, const d2d::mpq::Stack& mpqs) {
     sprite(R"(data\global\ui\PANEL\tradebtn.dc6)", scene.trade_button);
     static constexpr const char* kClassIcon[7] = { "Amazon", "Sorceress", "Necromancer", "Paladin", "Barbarian", "Druid", "Assassin" };
     for (std::size_t class_index = 0; class_index < 7; ++class_index)
-        if (auto bytes = mpqs.try_read(std::string(R"(data\global\ui\Hireables\)") + kClassIcon[class_index] + "Icon.dc6"))
-            scene.class_icons[class_index] = d2d::dc6::Sprite(*bytes);
-    if (auto bytes = mpqs.try_read(R"(data\global\ui\PANEL\supertransmogrifier.dc6)"))
-        scene.cube_panel = d2d::dc6::Sprite(*bytes);
-    if (auto bytes = mpqs.try_read(R"(data\global\ui\PANEL\miniconvert.dc6)"))
-        scene.transmute_button = d2d::dc6::Sprite(*bytes);
+        scene.class_icons[class_index] = d2d::dc6::Sprite::lazy(std::string(std::string(R"(data\global\ui\Hireables\)") + kClassIcon[class_index] + "Icon.dc6"));
+    scene.cube_panel = d2d::dc6::Sprite::lazy(std::string(R"(data\global\ui\PANEL\supertransmogrifier.dc6)"));
+    scene.transmute_button = d2d::dc6::Sprite::lazy(std::string(R"(data\global\ui\PANEL\miniconvert.dc6)"));
     static constexpr const char* kTree[7] = { "a", "s", "n", "p", "b", "d", "i" };
     static constexpr const char* kIcons[7] = { "Am", "So", "Ne", "Pa", "Ba", "Dr", "As" };
     for (std::size_t class_index = 0; class_index < 7; ++class_index) {
-        if (auto bytes = mpqs.try_read(std::string(R"(data\global\ui\SPELLS\skltree_)") + kTree[class_index] + "_back.dc6"))
-            scene.skill_tree_bg[class_index] = d2d::dc6::Sprite(*bytes);
-        if (auto bytes = mpqs.try_read(std::string(R"(data\global\ui\SPELLS\)") + kIcons[class_index] + "Skillicon.dc6"))
-            scene.skill_icons[class_index] = d2d::dc6::Sprite(*bytes);
+        scene.skill_tree_bg[class_index] = d2d::dc6::Sprite::lazy(std::string(std::string(R"(data\global\ui\SPELLS\skltree_)") + kTree[class_index] + "_back.dc6"));
+        scene.skill_icons[class_index] = d2d::dc6::Sprite::lazy(std::string(std::string(R"(data\global\ui\SPELLS\)") + kIcons[class_index] + "Skillicon.dc6"));
     }
-    if (auto bytes = mpqs.try_read(R"(data\global\ui\SPELLS\Skillicon.dc6)")) scene.generic_skill_icons = d2d::dc6::Sprite(*bytes);
+    scene.generic_skill_icons = d2d::dc6::Sprite::lazy(std::string(R"(data\global\ui\SPELLS\Skillicon.dc6)"));
     sprite(R"(data\global\ui\menu\questbackground.dc6)", scene.quest_bg);
     sprite(R"(data\global\ui\menu\expquesttabs.dc6)", scene.quest_tabs);
     sprite(R"(data\global\ui\menu\questtabs.dc6)", scene.quest_tabs_classic);
@@ -313,9 +307,7 @@ void load_ui_sprites(Scene& scene, const d2d::mpq::Stack& mpqs) {
     sprite(R"(data\global\ui\menu\questlast.dc6)", scene.quest_last);
     sprite(R"(data\global\ui\menu\questdone.dc6)", scene.quest_done);
     for (std::size_t i = 0; i < scene.quest_icons.size(); ++i)    // the names at 0x6da2c8: a1q1..a1q6, a2q1.., a4q1..3, a5q1..
-        if (auto bytes = mpqs.try_read(std::format(R"(data\global\ui\menu\a{}q{}.dc6)", i < 6 ? 1 : i < 12 ? 2 : i < 18 ? 3 : i < 21 ? 4 : 5,
-                                               i < 18 ? i % 6 + 1 : i < 21 ? i - 17 : i - 20)))
-            scene.quest_icons[i] = d2d::dc6::Sprite(*bytes);
+        scene.quest_icons[i] = d2d::dc6::Sprite::lazy(std::string(std::format(R"(data\global\ui\menu\a{}q{}.dc6)", i < 6 ? 1 : i < 12 ? 2 : i < 18 ? 3 : i < 21 ? 4 : 5, i < 18 ? i % 6 + 1 : i < 21 ? i - 17 : i - 20)));
 }
 
 void load_monster_sprites(Scene& scene, const d2d::mpq::Stack& mpqs) {
