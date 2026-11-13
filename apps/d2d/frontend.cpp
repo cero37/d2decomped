@@ -359,7 +359,7 @@ void advance_char_states(CharCreateUI& create_ui,
     for (std::size_t i = 0; i < 7; ++i) {
         auto& class_ui = create_ui.classes[i];
         if (class_ui.state == ClassState::Selecting) {
-            const auto& forward = scene.class_anims[i][2];
+            const auto& forward = scene.hero_anims()[i][2];
             const auto frames = forward.frames_per_direction();
             const auto elapsed = elapsed_ms - class_ui.state_start_ms;
             if (frames == 0 || elapsed / kBaseFrameMs >= frames) {
@@ -367,7 +367,7 @@ void advance_char_states(CharCreateUI& create_ui,
                 class_ui.state_start_ms = elapsed_ms;
             }
         } else if (class_ui.state == ClassState::Deselecting) {
-            const auto& backward = scene.class_anims[i][4];
+            const auto& backward = scene.hero_anims()[i][4];
             const auto frames = backward.frames_per_direction();
             const auto elapsed = elapsed_ms - class_ui.state_start_ms;
             if (frames == 0 || elapsed / kBaseFrameMs >= frames) {
@@ -385,7 +385,7 @@ static int class_under(const CharCreateUI& create_ui, const Scene& scene, const 
     for (int i = 0; i < 7; ++i) {
         const auto position = kClassPos[i];
         const auto& class_ui = create_ui.classes[std::size_t(i)];
-        const auto& anim = scene.class_anims[std::size_t(i)][class_ui.state == ClassState::Idle ? 0 : class_ui.state == ClassState::Selecting ? 2 : class_ui.state == ClassState::Selected ? 3 : 4];
+        const auto& anim = scene.hero_anims()[std::size_t(i)][class_ui.state == ClassState::Idle ? 0 : class_ui.state == ClassState::Selecting ? 2 : class_ui.state == ClassState::Selected ? 3 : 4];
         if (anim.frames_per_direction() == 0) continue;
         const auto& frame = anim.frame(0, 0);
         const int left = position.x + frame.offset_x, bottom = position.y + frame.offset_y;
@@ -469,7 +469,7 @@ void render_charcreate(std::vector<std::uint8_t>& framebuffer,
         case ClassState::Selected:    anim = 3; break;
         case ClassState::Deselecting: anim = 4; one_shot = true; break;
         }
-        const auto& spr = scene.class_anims[i][anim];
+        const auto& spr = scene.hero_anims()[i][anim];
         const auto frames = spr.frames_per_direction();
         if (frames == 0) continue;
         std::uint32_t frame_index;

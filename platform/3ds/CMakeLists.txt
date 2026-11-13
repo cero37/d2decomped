@@ -77,7 +77,7 @@ file(GLOB port_sources CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp"
 add_executable(d2d ${d2d_sources} ${port_sources})
 # The game's main() runs under ours (src/main_3ds.cpp), which sets up the SD card's folders first.
 set_source_files_properties("${d2d_dir}/main.cpp" PROPERTIES COMPILE_DEFINITIONS "main=d2d_main")
-target_compile_definitions(d2d PRIVATE D2D_NO_VIDEO)
+target_compile_definitions(d2d PRIVATE D2D_NO_VIDEO D2D_NO_MUSIC)
 target_include_directories(d2d PRIVATE "${generated}" "${d2d_dir}" "${CMAKE_CURRENT_SOURCE_DIR}/src")
 target_include_directories(d2d SYSTEM PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/shim")
 target_link_libraries(d2d PRIVATE

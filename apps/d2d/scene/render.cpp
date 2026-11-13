@@ -49,6 +49,20 @@ const d2d::dcc::Sprite* Scene::overlay_sprite(const OverlayInfo& overlay) const 
     return usable ? &found->second : nullptr;
 }
 
+// A missile's cel, decoded at its first draw.
+const d2d::dcc::Sprite* Scene::missile_cel(const std::string& name) const {
+    auto [found, fresh] = missile_cels.try_emplace(name);
+    if (fresh) {
+        const auto missile = missiles.find(name);
+        if (missile != missiles.end())
+            try {
+                if (auto bytes = mpqs.try_read(R"(data\global\missiles\)" + missile->second.cel_file + ".dcc")) found->second = d2d::dcc::Sprite(*bytes);
+            } catch (const std::exception& error) { d2d::log::warn("missile cel {}: {}", name, error.what()); }
+    }
+    const bool usable = found->second.directions() && found->second.frames_per_direction();
+    return usable ? &found->second : nullptr;
+}
+
 // Record each sprite once when the optional animation audit is enabled.
 void Scene::note_drawn(std::string_view kind, std::string_view name) {
     static std::unordered_set<std::string> drawn;

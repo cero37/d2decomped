@@ -35,10 +35,12 @@ void blit_tile_pixels(std::vector<std::uint8_t>& framebuffer, const d2d::dt1::Ti
     const int x_begin = std::max(0, -screen_x), x_end = std::min<int>(tile.width, screen_w - screen_x);
     const int y_begin = std::max(0, rows.begin - screen_y), y_end = std::min<int>(std::abs(tile.height), std::min(int(kScreenHeight), rows.end) - screen_y);
     if (x_begin >= x_end) return;
+    const auto* tile_pixels = tile.pixels();   // decoded now if this is the tile's first draw
+    if (!tile_pixels) return;
     const bool opaque = !hole && alpha_all >= 255;
     for (int y = y_begin; y < y_end; ++y) {
         const int pixel_y = screen_y + y;
-        const auto* row = tile.pixels.data() + std::size_t(y) * std::size_t(tile.width);
+        const auto* row = tile_pixels + std::size_t(y) * std::size_t(tile.width);
         auto* line = framebuffer.data() + std::size_t(pixel_y) * std::size_t(screen_w) * 4;   // the row's first pixel; screen_x + x >= 0 inside the clip
         if (opaque) {
             for (int x = x_begin; x < x_end; ++x) {
@@ -76,6 +78,8 @@ void blit_dt1_tile(std::vector<std::uint8_t>& framebuffer,
         const int x_begin = std::max(0, -screen_x), x_end = std::min<int>(tile.width, screen_w - screen_x);
         const int y_begin = std::max(0, rows.begin - screen_y), y_end = std::min<int>(std::abs(tile.height), std::min(int(kScreenHeight), rows.end) - screen_y);
         if (x_begin >= x_end) return;
+        const auto* tile_pixels = tile.pixels();
+        if (!tile_pixels) return;
         std::array<std::uint32_t, 256> lut{};
         for (std::size_t i = 0; i < 256; ++i) {
             const auto colour = pal[std::uint8_t(i)];
@@ -83,7 +87,7 @@ void blit_dt1_tile(std::vector<std::uint8_t>& framebuffer,
             lut[i] |= 0xFF000000u;
         }
         for (int y = y_begin; y < y_end; ++y) {
-            const auto* row = tile.pixels.data() + std::size_t(y) * std::size_t(tile.width);
+            const auto* row = tile_pixels + std::size_t(y) * std::size_t(tile.width);
             auto* line = framebuffer.data() + (std::size_t(screen_y + y) * std::size_t(screen_w) + std::size_t(screen_x)) * 4;
             for (int x = x_begin; x < x_end; ++x) {
                 const std::uint8_t idx = row[x];
@@ -101,8 +105,10 @@ void blit_dt1_shadow(std::vector<std::uint8_t>& framebuffer, const d2d::dt1::Til
     const int x_begin = std::max(0, -screen_x), x_end = std::min<int>(tile.width, screen_w - screen_x);
     const int y_begin = std::max(0, -screen_y), y_end = std::min<int>(std::abs(tile.height), int(kScreenHeight) - screen_y);
     if (x_begin >= x_end) return;
+    const auto* tile_pixels = tile.pixels();
+    if (!tile_pixels) return;
     for (int y = y_begin; y < y_end; ++y) {
-        const auto* row = tile.pixels.data() + std::size_t(y) * std::size_t(tile.width);
+        const auto* row = tile_pixels + std::size_t(y) * std::size_t(tile.width);
         auto* line = framebuffer.data() + std::size_t(screen_y + y) * std::size_t(screen_w) * 4;
         for (int x = x_begin; x < x_end; ++x) {
             const std::uint8_t idx = row[x];

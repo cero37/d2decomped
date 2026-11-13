@@ -783,9 +783,10 @@ LevelDt1s load_level_dt1s(Level& level, d2d::mpq::Stack& mpqs, d2d::drlg::Outdoo
         if (dt1s.heads.always[k]) files.emplace_back(dt1s.heads.always[k], std::array{ "Act1/Outdoors/Blank.dt1", "Act1/Barracks/InvisWal.dt1", "Act1/Barracks/Warp.dt1" }[k]);
     level.dt1s.reserve(files.size());                      // archive points into it
     for (const auto& [file_key, file] : files) {
-        auto bytes = mpqs.try_read(R"(data\global\tiles\)" + ds1_path_to_mpq(file));
+        const auto mpq_path = R"(data\global\tiles\)" + ds1_path_to_mpq(file);
+        auto bytes = mpqs.try_read(mpq_path);
         if (!bytes) continue;
-        try { dt1s.archive[file_key] = &level.dt1s.emplace_back(*bytes, pixels); } catch (const std::exception& error) { d2d::log::warn("level {}: {}: {}", level.id, file, error.what()); }
+        try { dt1s.archive[file_key] = &level.dt1s.emplace_back(*bytes, pixels, mpq_path); } catch (const std::exception& error) { d2d::log::warn("level {}: {}: {}", level.id, file, error.what()); }
     }
     return dt1s;
 }

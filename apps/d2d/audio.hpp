@@ -18,6 +18,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstddef>
+#include <cstdlib>
 #include <cstdint>
 #include <exception>
 #include <filesystem>
@@ -528,6 +529,12 @@ struct Audio {
     void play_music_path(const GameData& game_data, std::string path, int id, float gain, bool loop) {
         stop(music);
         if (!ok) return;
+#ifdef D2D_NO_MUSIC
+        // A song is decoded whole (22 MB of samples and as much again while
+        // it loads): more than the 3DS has to spare until songs stream.
+        (void)game_data; (void)path; (void)id; (void)gain; (void)loop;
+        if (std::getenv("D2D_MUSIC") == nullptr) return;
+#endif
         music.sound = id;                        // pending until the job lands
         music_job_sound = id;
         music_job_gain = gain;

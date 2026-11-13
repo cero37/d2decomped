@@ -109,6 +109,7 @@ void render_world(std::vector<std::uint8_t>& framebuffer,
                   std::vector<std::pair<const Unit*, std::array<int, 2>>>* items) {   // each ground item drawn, where (its feet: FUN_00620650 / FUN_006206b0 less the view)
     const auto& map = level.ds1;
     if (map.width() == 0 || map.height() == 0) return;
+    d2d::dt1::File::trim();   // before any tile is drawn: no draw thread holds a tile's pixels here
     const auto& pal = scene.act_pal.entries().empty() ? scene.pal : scene.act_pal;
     const int screen_w = fb_width(framebuffer);
     const int cx0 = screen_w / 2;
@@ -463,9 +464,9 @@ void render_world(std::vector<std::uint8_t>& framebuffer,
             if (anchor_x < -200 || anchor_x > screen_w + 200 || anchor_y < -100 || anchor_y > int(kScreenHeight) + 300) continue;
             std::array<int, 4> bounds{};
             if (unit.missile) {
-                const auto cel = scene.missile_cels.find(unit.missile->name);
-                if (cel == scene.missile_cels.end()) continue;
-                const auto& spr = cel->second;
+                const auto* cel = scene.missile_cel(unit.missile->name);
+                if (!cel) continue;
+                const auto& spr = *cel;
                 const std::uint32_t dirs = spr.directions(), fpd = std::uint32_t(spr.frames_per_direction());
                 if (dirs == 0 || fpd == 0) continue;
                 // AnimSpeed in 16ths of a frame a tick, or the unit's own rate (+0x4c) where one was set.

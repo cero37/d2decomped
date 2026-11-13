@@ -39,7 +39,7 @@ inline int to_int(std::string_view text, int fallback = 0) {
 struct OutdoorAssets {
     d2d::txt::Table levels, lvl_types, lvl_warp, lvl_maze;
     std::deque<Dt1File> dt1s;                           // loaded by load_room_dt1s
-    std::deque<d2d::ds1::Map> maps;
+    std::deque<std::unique_ptr<LazyMap>> maps;          // each parsed when first read (outdoor.hpp LazyMap)
     OutdoorData data;
     OutdoorAssets() = default;
     OutdoorAssets(const OutdoorAssets&) = delete;
@@ -51,13 +51,15 @@ template <class Read> void load_outdoor_assets(OutdoorAssets& assets, Read&& rea
         const auto bytes = read(std::string(R"(data\global\excel\)") + name);
         return bytes ? d2d::txt::Table(*bytes) : d2d::txt::Table{};
     };
-    auto ds1 = [&](std::string_view rel) -> const d2d::ds1::Map* {
-        if (rel.empty() || rel == "0") return nullptr;
+    auto ds1 = [&](std::string_view rel) -> MapRef {
+        if (rel.empty() || rel == "0") return {};
         std::string path = R"(data\global\tiles\)";
         for (const char letter : rel) path.push_back(letter == '/' ? '\\' : letter);
         const auto bytes = read(path);
-        if (!bytes) return nullptr;
-        try { return &assets.maps.emplace_back(*bytes); } catch (...) { return nullptr; }
+        if (!bytes) return {};
+        auto lazy = LazyMap::pack(*bytes);
+        if (!lazy) return {};
+        return MapRef(assets.maps.emplace_back(std::move(lazy)).get());
     };
     assets.levels = table("Levels.txt");
     assets.lvl_types = table("LvlTypes.txt");

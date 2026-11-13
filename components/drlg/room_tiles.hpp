@@ -345,7 +345,7 @@ inline std::vector<BuiltRoom> level_room_tiles(const std::vector<Outdoor::RoomSe
             const auto found = data.presets.find(room.seed->def);
             if (found == data.presets.end()) { note("drlg: preset def " + std::to_string(room.seed->def) + " missing"); continue; }
             pre = &found->second;
-            map = room.seed->file < 6 ? pre->maps[std::size_t(room.seed->file)] : nullptr;
+            map = room.seed->file < 6 ? pre->maps[std::size_t(room.seed->file)].get() : nullptr;
             if (!map) { note("drlg: preset " + std::to_string(room.seed->def) + " file not loaded"); continue; }
         }
         if (room.plain) {

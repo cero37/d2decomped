@@ -183,7 +183,7 @@ struct Room {
 inline void preset_rooms(const OutdoorData& data, const Preset& preset, int def, int file, int x, int y, int fallback_w, int fallback_h,
                          d2d::rules::Rng& seed, std::vector<Outdoor::RoomSeed>& out) {
     const int width = preset.width && preset.height ? preset.width : fallback_w, height = preset.width && preset.height ? preset.height : fallback_h;
-    const auto* map = file >= 0 && file < 6 ? preset.maps[std::size_t(file)] : nullptr;
+    const auto* map = file >= 0 && file < 6 ? preset.maps[std::size_t(file)].get() : nullptr;
     const bool rolled = map && (preset.scan || preset.pops);
     std::vector<Unit> units;
     if (rolled) {

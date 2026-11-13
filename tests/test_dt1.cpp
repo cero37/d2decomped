@@ -39,8 +39,7 @@ int main() try {
         for (const auto& tile : archive.tiles()) {
             assert(tile.width > 0);
             const auto height = std::size_t(tile.height < 0 ? -tile.height : tile.height);
-            assert(tile.pixels.size() == std::size_t(tile.width) * height
-                || height == 0);   // some rare "shadow" tiles carry no pixels
+            assert((tile.pixels() != nullptr) == (height != 0));   // some rare "shadow" tiles carry no pixels
         }
     }
 
@@ -53,7 +52,8 @@ int main() try {
         // A floor tile: at least one tile has non-transparent decoded pixels.
         bool any_painted = false;
         for (const auto& tile : archive.tiles()) {
-            for (auto pixel : tile.pixels) if (pixel) { any_painted = true; break; }
+            const auto count = std::size_t(tile.width) * std::size_t(tile.height < 0 ? -tile.height : tile.height);
+            if (const auto* pixels = tile.pixels()) for (std::size_t i = 0; i < count; ++i) if (pixels[i]) { any_painted = true; break; }
             if (any_painted) break;
         }
         assert(any_painted);

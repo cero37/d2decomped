@@ -16,20 +16,76 @@
 #include <algorithm>
 #include <array>
 #include <cstdint>
+#include <cstddef>
 #include <cstdlib>
+#include <memory>
+#include <mutex>
+#include <optional>
+#include <span>
 #include <string>
 #include <unordered_map>
 #include <utility>
 #include <vector>
 
+#include <zlib.h>
+
 namespace d2d::drlg {
+
+// A preset's or stamp sheet's DS1. The acts' ~2,400 DS1s parse to 57 MB,
+// and a game uses a handful, so each is kept deflated (they shrink to a
+// twelfth) and parsed when a generator first reads it; it stays parsed.
+class LazyMap {
+public:
+    // Null if `bytes` isn't a DS1 (parsed once here to find out).
+    static std::unique_ptr<LazyMap> pack(std::span<const std::byte> bytes) {
+        try { (void)d2d::ds1::Map(bytes); } catch (...) { return nullptr; }
+        auto lazy = std::make_unique<LazyMap>();
+        uLongf packed = compressBound(uLong(bytes.size()));
+        lazy->packed_.resize(packed);
+        if (compress2(reinterpret_cast<Bytef*>(lazy->packed_.data()), &packed, reinterpret_cast<const Bytef*>(bytes.data()), uLong(bytes.size()), 1) != Z_OK) return nullptr;
+        lazy->packed_.resize(packed);
+        lazy->packed_.shrink_to_fit();
+        lazy->size_ = bytes.size();
+        return lazy;
+    }
+    [[nodiscard]] const d2d::ds1::Map& map() {
+        std::call_once(once_, [&] {
+            std::vector<std::byte> bytes(size_);
+            uLongf size = uLong(size_);
+            if (uncompress(reinterpret_cast<Bytef*>(bytes.data()), &size, reinterpret_cast<const Bytef*>(packed_.data()), uLong(packed_.size())) == Z_OK)
+                try { map_.emplace(bytes); } catch (...) {}
+            if (!map_) map_.emplace();   // can't happen: pack() parsed these bytes
+            packed_ = {};
+        });
+        return *map_;
+    }
+
+private:
+    std::vector<std::byte> packed_;
+    std::size_t size_ = 0;
+    std::once_flag once_;
+    std::optional<d2d::ds1::Map> map_;
+};
+// What Preset and Sub hold of one: a pointer to the map, parsed at its first use.
+class MapRef {
+public:
+    MapRef() = default;
+    explicit MapRef(LazyMap* lazy) : lazy_(lazy) {}
+    [[nodiscard]] const d2d::ds1::Map* get() const { return lazy_ ? &lazy_->map() : nullptr; }
+    explicit operator bool() const noexcept { return lazy_ != nullptr; }
+    const d2d::ds1::Map& operator*() const { return lazy_->map(); }
+    const d2d::ds1::Map* operator->() const { return &lazy_->map(); }
+
+private:
+    LazyMap* lazy_ = nullptr;
+};
 
 // LvlPrest.txt, what the generator needs: size in tiles, file count, the
 // loaded File1..6 (null when absent), and the columns that roll units.
 struct Preset {
     int width = 0, height = 0, files = 0, scan = 0, pops = 0, level_id = 0, kill_edge = 1;   // level_id: LvlPrest LevelId
     std::uint32_t dt1_mask = 0;                         // which LvlTypes files its rooms load
-    std::array<const d2d::ds1::Map*, 6> maps{};
+    std::array<MapRef, 6> maps{};
     int populate = 1;                                   // LvlPrest Populate (0: its rooms flagged 0x800000, FUN_00666680)
     int logicals = 0;                                   // LvlPrest Logicals (1: areas by walls, FUN_0066d110)
     int animate = 0;                                    // LvlPrest Animate (1: its animated tiles keep every frame, FUN_0066d440)
@@ -40,7 +96,7 @@ struct Sub {
     int type = 0, check_all = 0, bord_type = 0, grid_size = 1;   // grid_size: cells per DS1 tile (act 5's barricade rules: 2)
     std::uint32_t dt1_mask = 0;
     std::array<int, 5> prob{}, trials{}, max{};
-    const d2d::ds1::Map* map = nullptr;
+    MapRef map;
 };
 struct OutdoorData {
     std::unordered_map<int, Preset> presets;           // by Def
@@ -1564,7 +1620,7 @@ inline Outdoor generate_outdoor(const OutdoorData& data, const OutdoorLevel& lev
                 if (!preset) { gen.note("drlg: LvlPrest def " + std::to_string(def) + " missing"); continue; }
                 (void)gen.seed(preset->files);                   // FUN_00666ed0: rolled, then replaced
                 const int file = int((flags >> 16) & 0xf);
-                const auto* map = file < 6 ? preset->maps[std::size_t(file)] : nullptr;
+                const auto* map = file < 6 ? preset->maps[std::size_t(file)].get() : nullptr;
                 // FUN_00667970: with Scan or Pops the units roll to stay now, on the level seed.
                 const bool rolled = map && (preset->scan || preset->pops);
                 std::vector<Unit> units;

@@ -1593,6 +1593,7 @@ int run_windowed(std::vector<std::uint8_t>& framebuffer,
                 break;
             }
             case Screen::InGame: {
+                scene->drop_hero_anims();   // the character screens' art: not needed until they show again
                 if (town.coop_typing()) {                        // a joining pad's new character's name
                     town.coop_text(text_this_frame, backspace_this_frame);
                     text_this_frame.clear();

@@ -319,28 +319,55 @@ void load_ui_sprites(Scene& scene, const d2d::mpq::Stack& mpqs) {
 }
 
 void load_monster_sprites(Scene& scene, const d2d::mpq::Stack& mpqs) {
-    std::vector<std::pair<d2d::dcc::Sprite*, std::vector<std::byte>>> cels;
-    for (const auto& [name, missile] : scene.missiles)
-        if (auto bytes = mpqs.try_read(R"(data\global\missiles\)" + missile.cel_file + ".dcc")) cels.emplace_back(&scene.missile_cels[name], std::move(*bytes));
-    if (auto bytes = mpqs.try_read(R"(data\global\overlays\NPCSpeechBalloon.dcc)")) cels.emplace_back(&scene.npc_alert, std::move(*bytes));
+    // The missiles' own cels load when one is first drawn (Scene::missile_cel):
+    // all 391 at once are 86 MB of pixels.
+    if (auto bytes = mpqs.try_read(R"(data\global\overlays\NPCSpeechBalloon.dcc)"))
+        try { scene.npc_alert = d2d::dcc::Sprite(*bytes); }
+        catch (const std::exception& error) { d2d::log::warn("npc alert: {}", error.what()); }
     for (std::size_t i = 0; i < 4; ++i) {              // the rain's splashes and the mud's bubbles (FUN_00472890)
         if (auto bytes = mpqs.try_read(R"(data\global\UncompOverlays\Rain)" + std::to_string(i + 1) + ".dc6")) scene.rain_splash[i] = d2d::dc6::Sprite(*bytes);
         if (auto bytes = mpqs.try_read(R"(data\global\UncompOverlays\bubble)" + std::to_string(i + 1) + ".dc6")) scene.mud_bubble[i] = d2d::dc6::Sprite(*bytes);
     }
-    // Their DCCs decode on every core (the reads above stay on this thread:
-    // StormLib handles aren't shared).
-    {
-        std::atomic<std::size_t> next = 0;
-        std::vector<std::jthread> pool(std::max(1u, std::thread::hardware_concurrency()));
-        for (auto& worker : pool) worker = std::jthread([&] {
-            for (std::size_t i; (i = next++) < cels.size();)
-                try { *cels[i].first = d2d::dcc::Sprite(cels[i].second); }
-                catch (const std::exception& error) { d2d::log::warn("missile cel: {}", error.what()); }
-        });
-    }
 }
 
 }  // namespace
+
+// The character screens' heroes, loaded when one of those screens first
+// shows them and dropped in game (drop_hero_anims): 24 MB of frames.
+const std::array<std::array<d2d::dc6::Sprite, 5>, 7>& Scene::hero_anims() const {
+    if (class_anims[0][0].total_frames() != 0) return class_anims;
+    try {
+        // Anim files per class, in order {nu1, nu2, fw, nu3, bw}.
+        // Class prefix pairs from FUN_004326f0's loader.
+        struct C { const char* dir; const char* prefix; };
+        constexpr C classes[7] = {
+            {"barbarian",   "ba"},
+            {"necromancer", "ne"},
+            {"paladin",     "pa"},
+            {"amazon",      "am"},
+            {"sorceress",   "so"},
+            {"druid",       "dz"},
+            {"assassin",    "as"},
+        };
+        constexpr const char* suffix[5] = {"nu1", "nu2", "fw", "nu3", "bw"};
+        std::array<std::array<d2d::dc6::Sprite, 5>, 7> out;
+        for (std::size_t class_index = 0; class_index < 7; ++class_index) {
+            for (std::size_t state_index = 0; state_index < 5; ++state_index) {
+                char path[256];
+                std::snprintf(path, sizeof(path),
+                    R"(data\global\ui\FrontEnd\%s\%s%s.dc6)",
+                    classes[class_index].dir, classes[class_index].prefix, suffix[state_index]);
+                out[class_index][state_index] = d2d::dc6::Sprite(mpqs.read(path));
+            }
+        }
+        class_anims = std::move(out);
+    } catch (const std::exception& error) { d2d::log::warn("hero animations: {}", error.what()); }
+    return class_anims;
+}
+
+void Scene::drop_hero_anims() const {
+    if (class_anims[0][0].total_frames() != 0) class_anims = {};
+}
 
 Character character_of_save(const Scene& scene, std::size_t index) {
     Character character;
@@ -513,32 +540,7 @@ std::optional<Scene> load_scene(const fs::path& data_dir, const fs::path& patch_
         scene.font24 = font("font24");
         scene.cursor = d2d::dc6::Sprite(mpqs.read(R"(data\global\ui\CURSOR\ohand.dc6)"));
         scene.cursor_buysell = d2d::dc6::Sprite(mpqs.read(R"(data\global\ui\CURSOR\buysell.dc6)"));
-        scene.class_anims = [&] {
-                // Anim files per class, in order {nu1, nu2, fw, nu3, bw}.
-                // Class prefix pairs from FUN_004326f0's loader.
-                struct C { const char* dir; const char* prefix; };
-                constexpr C classes[7] = {
-                    {"barbarian",   "ba"},
-                    {"necromancer", "ne"},
-                    {"paladin",     "pa"},
-                    {"amazon",      "am"},
-                    {"sorceress",   "so"},
-                    {"druid",       "dz"},
-                    {"assassin",    "as"},
-                };
-                constexpr const char* suffix[5] = {"nu1", "nu2", "fw", "nu3", "bw"};
-                std::array<std::array<d2d::dc6::Sprite, 5>, 7> out;
-                for (std::size_t class_index = 0; class_index < 7; ++class_index) {
-                    for (std::size_t state_index = 0; state_index < 5; ++state_index) {
-                        char path[256];
-                        std::snprintf(path, sizeof(path),
-                            R"(data\global\ui\FrontEnd\%s\%s%s.dc6)",
-                            classes[class_index].dir, classes[class_index].prefix, suffix[state_index]);
-                        out[class_index][state_index] = d2d::dc6::Sprite(mpqs.read(path));
-                    }
-                }
-                return out;
-            }();
+        // scene.class_anims (the seven heroes by the fire, 24 MB) loads when a menu shows them: Scene::hero_anims.
         scene.font = d2d::font::Font(
                              mpqs.read(R"(data\local\FONT\LATIN\font16.tbl)"),
                              d2d::dc6::Sprite(mpqs.read(R"(data\local\FONT\LATIN\font16.dc6)")));

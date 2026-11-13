@@ -108,7 +108,9 @@ struct Scene : GameData {
     // necromancer, barbarian, sorceress, paladin — but we store them in
     // our left-to-right visual order (barb/necro/pally/ama/sorc/druid/assn)
     // to match Scene::class positions.
-    std::array<std::array<d2d::dc6::Sprite, 5>, 7> class_anims;
+    mutable std::array<std::array<d2d::dc6::Sprite, 5>, 7> class_anims;   // through hero_anims(): loaded when shown
+    [[nodiscard]] const std::array<std::array<d2d::dc6::Sprite, 5>, 7>& hero_anims() const;
+    void drop_hero_anims() const;
     d2d::font::Font       font;
     d2d::font::Font       font_small;         // font8 — long panel values
     d2d::font::Font       font_tiny;          // font6 — panel labels
@@ -232,7 +234,8 @@ struct Scene : GameData {
     // The town miniatures' cel files 1..3 (FUN_0045a2b0): Act2Map, Act4Map,
     // ExTnMap, and their "...S" for the mini map; [0] unused (MaxiMap above).
     std::array<d2d::dc6::Sprite, 4> automap_miniatures, automap_miniatures_small;
-    std::unordered_map<std::string, d2d::dcc::Sprite> missile_cels;   // a missile's CelFile DCC, by Missiles.txt row name
+    mutable std::unordered_map<std::string, d2d::dcc::Sprite> missile_cels;   // a missile's CelFile DCC, by Missiles.txt row name; loaded when first drawn
+    [[nodiscard]] const d2d::dcc::Sprite* missile_cel(const std::string& name) const;   // null: no such missile or cel
     std::array<d2d::dc6::Sprite, 4> rain_splash;       // UncompOverlays\Rain1..4 (Rain3 / 4 splash where drops fall)
     std::array<d2d::dc6::Sprite, 4> mud_bubble;        // UncompOverlays\bubble1..4 (bubble3 where a Mud level's water bubbles)
     d2d::dcc::Sprite npc_alert;                        // Overlay.txt npcalert: NPCSpeechBalloon.dcc
