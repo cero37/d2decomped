@@ -4,6 +4,7 @@
 #include "handheld_hud.hpp"
 #include "ingame.hpp"
 
+#include <bit>
 #include <overlays.hpp>
 
 #include "common.hpp"
@@ -37,6 +38,10 @@
 #include <vector>
 
 namespace d2d::client {
+
+// Black with full alpha as one RGBA pixel's word, whichever way round the bytes go.
+inline constexpr std::uint32_t kOpaqueBlack = std::endian::native == std::endian::little ? 0xFF000000u : 0x000000FFu;
+
 
 void draw_rain(std::vector<std::uint8_t>& framebuffer, const d2d::rules::Rain& rain, const d2d::palette::Palette& pal, int panel_side) {
     // FUN_00473470: drops and flakes whose spot (or a drop's end) lies in
@@ -149,11 +154,11 @@ void render_ingame(std::vector<std::uint8_t>& framebuffer,
         set_phase(MainPhase::IngameClear);
         // Clear to black — tiles don't cover every subtile so an
         // uninitialized fb would leak the previous frame's contents.
+        prof::Mark timed_setup("ingame: clear, units set up");
         {   // the rows the world draws (all of them, but for a handheld view)
             const auto row = std::size_t(world_w) * 4;
             const auto first = world.begin() + std::ptrdiff_t(row * std::size_t(g_clip_top)), last = world.begin() + std::ptrdiff_t(row * std::size_t(g_clip_bottom));
-            std::fill(first, last, std::uint8_t{0});
-            for (auto alpha = first + 3; alpha < last; alpha += 4) *alpha = 0xFF;
+            std::fill_n(reinterpret_cast<std::uint32_t*>(&*first), std::size_t(last - first) / 4, kOpaqueBlack);   // a word a pixel, not four bytes
         }
         set_phase(MainPhase::IngameFloor);   // render_world does floor+shadow+walls internally
         // Player: the camera follows them, so their feet sit on the camera
@@ -238,7 +243,9 @@ void render_ingame(std::vector<std::uint8_t>& framebuffer,
             for (auto& unit : units) if (unit.npc == *hovered_npc && unit.name) unit.highlight = true;
         std::pair<const Unit*, std::array<int, 4>> hovered{ nullptr, {} };
         std::vector<std::pair<const Unit*, std::array<int, 2>>> items;   // each drawn ground item and where it stands on screen
+        timed_setup.stop();
         { const prof::Mark timed("render_world"); render_world(world, scene, level, cam_x, cam_y, elapsed_ms, units, world_mouse_x, mouse_y, &hovered, light, rain, show_items ? &items : nullptr); }
+        prof::Mark timed_over("ingame: rain, names, labels");
         if (rain) draw_rain(world, *rain, scene.act_pal.entries().empty() ? scene.pal : scene.act_pal,
                             hud.right_open == hud.left_open ? 0 : hud.right_open ? 1 : 2);
         if (hovered_npc) *hovered_npc = hovered.first ? hovered.first->npc : -1;
@@ -325,14 +332,15 @@ void render_ingame(std::vector<std::uint8_t>& framebuffer,
             scene.font.draw_tinted(world, std::uint32_t(world_w), kScreenHeight, pal, (box[0] + box[2]) / 2 - scene.font.measure(hovered_name) / 2,
                                top, hovered_name, colour[0], colour[1], colour[2]);
         }
+        timed_over.stop();
+        prof::Mark timed_rest("ingame: after the world (HUD, panels)");
         if (g_world_only && !g_bottom_panels) {   // a handheld's HUD is its own, on the other screen (the frame's top-left 320x240)
             const prof::Mark timed("bottom hud");
             draw_bottom_hud(framebuffer, scene, { hud_stats, belt, &hud, level.name, automap, cam_x + float(level.world_x), cam_y + float(level.world_y) });
             return;
         }
         if (g_world_only) {   // a panel is open: the PC's HUD and panels on black, the second screen a window of them
-            std::fill(framebuffer.begin(), framebuffer.end(), std::uint8_t{0});
-            for (std::size_t i = 3; i < framebuffer.size(); i += 4) framebuffer[i] = 0xFF;
+            std::fill_n(reinterpret_cast<std::uint32_t*>(framebuffer.data()), framebuffer.size() / 4, kOpaqueBlack);
         } else if (wide)
             for (std::size_t y = 0; y < kScreenHeight; ++y)
                 std::copy_n(world.begin() + std::ptrdiff_t((y * std::size_t(world_w) + std::size_t(off)) * 4), kScreenWidth * 4,

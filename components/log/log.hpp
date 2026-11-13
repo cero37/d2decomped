@@ -15,6 +15,7 @@
 #include <fstream>
 #include <ios>
 #include <mutex>
+#include <thread>
 #include <optional>
 #include <ostream>
 #include <string>
@@ -57,10 +58,51 @@ inline std::optional<Level> parse_level(std::string_view name) {
     return std::nullopt;
 }
 
+// A background writer (a handheld's card: a line written and flushed there stalls the frame for
+// milliseconds). Lines gather in memory and a worker appends them to the file every `period_ms`,
+// closing it each time so a run that is cut off keeps what was written. An error is written at once.
+inline std::filesystem::path g_path;
+inline std::string g_pending;
+inline std::atomic<bool> g_background = false, g_background_stop = false;
+inline std::thread g_writer;
+
+inline void write_pending() {
+    std::string lines;
+    { std::lock_guard lock(g_mutex); lines.swap(g_pending); }
+    if (lines.empty()) return;
+    static std::mutex file_mutex;
+    std::lock_guard lock(file_mutex);
+    if (std::FILE* out = std::fopen(g_path.string().c_str(), "ab")) { std::fwrite(lines.data(), 1, lines.size(), out); std::fclose(out); }
+}
+
+inline void background(int period_ms = 1500) {
+    {
+        std::lock_guard lock(g_mutex);
+        if (g_background || g_path.empty()) return;
+        if (g_file) g_file.close();
+        g_background = true;
+    }
+    g_writer = std::thread([period_ms] {
+        while (!g_background_stop) {
+            for (int waited = 0; waited < period_ms && !g_background_stop; waited += 50) std::this_thread::sleep_for(std::chrono::milliseconds(50));
+            write_pending();
+        }
+    });
+}
+
+// The end of the run, or before something else reads the file.
+inline void finish() {
+    if (!g_background) return;
+    g_background_stop = true;
+    if (g_writer.joinable()) g_writer.join();
+    write_pending();
+}
+
 // `append`: add to the file (a server's log across restarts) instead of
 // starting it over.
 inline void open(const std::filesystem::path& path, bool append = false) {
     std::lock_guard lock(g_mutex);
+    g_path = path;
     g_file.open(path, append ? std::ios::app : std::ios::trunc);
     if (!g_file) std::fprintf(stderr, "Failed to open log file %s\n", path.string().c_str());
 }
@@ -81,7 +123,10 @@ inline void write(Level level, std::string_view tag, const std::string& msg) {
     if (!enabled(level)) return;
     const auto stamp = std::format("{:%FT%TZ} ", std::chrono::floor<std::chrono::milliseconds>(std::chrono::system_clock::now()));
     const auto line = stamp + (tag.empty() ? "" : std::string(tag) + " ") + msg + "\n";
-    {
+    if (g_background) {
+        { std::lock_guard lock(g_mutex); g_pending += line; }
+        if (level == Level::error) write_pending();
+    } else {
         std::lock_guard lock(g_mutex);
         std::FILE* out = level <= Level::warning ? stderr : stdout;
         if (level <= Level::warning && is_terminal(out))

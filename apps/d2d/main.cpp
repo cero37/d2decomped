@@ -50,6 +50,7 @@
 #include <lan.hpp>
 #include <log.hpp>
 #include <mpq.hpp>
+#include "handheld_prof.hpp"
 #include <palette.hpp>
 #include <screenshot.hpp>
 #include <sentry.h>
@@ -1887,10 +1888,15 @@ int run_windowed(std::vector<std::uint8_t>& framebuffer,
         if (dt_present > stat_present_max) stat_present_max = dt_present;
         // Any single phase > 100ms is a stall candidate — log it with
         // whichever phase spiked so we can tell CPU-side from GPU-side.
-        if (dt_input > 100 || dt_render > 100 || dt_present > 100) {
-            d2d::log::warn(
-                "slow frame: input={} ms render={} ms present={} ms screen={} cam=({},{})",
-                dt_input, dt_render, dt_present, int(screen), int(town.player.x), int(town.player.y));
+        {   // what the stall was: the frame's stages, and the files the archives were asked for during it
+            const auto reads = d2d::mpq::g_read_stats.take();
+            if (dt_input > 100 || dt_render > 100 || dt_present > 100) {
+                d2d::log::warn(
+                    "slow frame: input={} ms render={} ms present={} ms screen={} cam=({},{}) | {} | {} files read in {} ms: {}",
+                    dt_input, dt_render, dt_present, int(screen), int(town.player.x), int(town.player.y),
+                    d2d::client::prof::frame_spans(), reads.files, reads.ns / 1000000, reads.names);
+            }
+            d2d::client::prof::frame_end();
         }
         if (now_ms - stat_last_report_ms >= 5000) {
             const std::uint32_t avg_r = stat_frames ? stat_render_sum  / stat_frames : 0;
@@ -1917,6 +1923,7 @@ int run_windowed(std::vector<std::uint8_t>& framebuffer,
     g_current_phase_ptr = nullptr;
     gamepads.close();   // before SDL goes away, not at scope exit
     SDL_Quit();
+    d2d::log::finish();   // the background writer's last lines
     return 0;
 }
 
@@ -1971,6 +1978,7 @@ int main(int argc, char** argv) {
     fs::create_directories(save_dir, mk_ec);
     fs::create_directories(shot_dir, mk_ec);
     d2d::log::open(user_dir / "d2d.log");
+    if (std::getenv("D2D_HANDHELD")) d2d::log::background();   // lines written by a worker: a write to the card stalls a frame
     d2d::log::info("d2d {} — Diablo II re-implementation", d2d::build::kVersion);
     d2d::log::info("  Git hash: {}", d2d::build::kGitHash);
     d2d::log::info("  Branch: {}", d2d::build::kGitBranch);

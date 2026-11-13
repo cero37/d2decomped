@@ -19,6 +19,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
@@ -35,6 +36,30 @@
 #include <vector>
 
 namespace d2d::mpq {
+
+// What the archives were asked for since the last take(): how many files, how long the reads took
+// (waiting for another thread's read included) and the first few names. For a slow frame's report.
+struct ReadStats {
+    std::mutex mutex;
+    std::uint32_t files = 0;
+    std::uint64_t ns = 0;
+    std::string names;
+    struct Taken { std::uint32_t files; std::uint64_t ns; std::string names; };
+    Taken take() { const std::scoped_lock lock(mutex); Taken taken{ files, ns, std::move(names) }; files = 0; ns = 0; names.clear(); return taken; }
+};
+inline ReadStats g_read_stats;
+struct ReadTimed {
+    std::string_view name;
+    std::chrono::steady_clock::time_point from = std::chrono::steady_clock::now();
+    explicit ReadTimed(std::string_view file) : name(file) {}
+    ~ReadTimed() {
+        const auto took = std::uint64_t(std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - from).count());
+        const std::scoped_lock lock(g_read_stats.mutex);
+        ++g_read_stats.files; g_read_stats.ns += took;
+        if (g_read_stats.names.size() < 200) { g_read_stats.names += g_read_stats.names.empty() ? "" : ", "; g_read_stats.names += name.substr(name.find_last_of("\\/") + 1); }
+    }
+};
+
 
 // A file opened for streaming reads (videos: the D2 intro is 94 MB).
 // Only for plain archive files, not installer entries.
@@ -287,6 +312,7 @@ public:
     // from then on is missing: no retry each time a sound or frame wants it.
     [[nodiscard]] std::optional<std::vector<std::byte>>
     try_read(std::string_view name, bool strict_installer = false) const {
+        const ReadTimed timed(name);
         const std::scoped_lock lock(shared_->mutex);
         if (shared_->failed.contains(Archive::key(name))) return std::nullopt;
         try {

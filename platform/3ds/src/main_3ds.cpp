@@ -2,6 +2,7 @@
 // 3DS entry: point the game at its folders on the SD card, then run its main().
 //   sdmc:/3ds/d2d/        settings, saves, d2d.log
 //   sdmc:/3ds/d2d/data/   your Diablo II MPQs
+#include <log.hpp>
 #include <3ds.h>
 
 #include <csignal>
@@ -62,6 +63,7 @@ void __system_allocateHeaps(void) {
 // without a word. Say what it was in the log first.
 namespace {
 void last_words(const char* what, const char* detail = "") {
+    d2d::log::write_pending();   // what the background writer still holds, first
     if (std::FILE* out = std::fopen("sdmc:/3ds/d2d/d2d.log", "a")) {
         std::fprintf(out, "[FATAL] %s%s%s\n", what, *detail ? ": " : "", detail);
         std::fclose(out);
