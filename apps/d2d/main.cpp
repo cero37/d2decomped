@@ -15,6 +15,7 @@
 //   --scale <n>       window = 800x600 * n, SDL zooms (also `scale` in d2d.cfg)
 //   --seed <n>        map seed: act 1's layout and the Blood Moor
 
+#include "handheld_hud.hpp"
 #include "audio.hpp"
 #include "build_info.hpp"
 #include "common.hpp"
@@ -1782,12 +1783,17 @@ int run_windowed(std::vector<std::uint8_t>& framebuffer,
         if (!(wflags & SDL_WINDOW_MINIMIZED)) {
             current_phase.store(std::uint32_t(MainPhase::Upload),
                                 std::memory_order_relaxed);
+#ifdef __3DS__
+            current_phase.store(std::uint32_t(MainPhase::Present), std::memory_order_relaxed);
+            handheld_present(framebuffer, fb_width(framebuffer), int(kScreenHeight), g_clip_top, g_world_only, g_world_only ? g_bottom_frame : nullptr, int(kScreenWidth));
+#else
             SDL_UpdateTexture(win.texture, nullptr, framebuffer.data(), fb_width(framebuffer) * 4);
             SDL_RenderClear(win.renderer);
             SDL_RenderTexture(win.renderer, win.texture, nullptr, nullptr);
             current_phase.store(std::uint32_t(MainPhase::Present),
                                 std::memory_order_relaxed);
             SDL_RenderPresent(win.renderer);
+#endif
             crash_frame.update(framebuffer);
         }
         const std::uint32_t t_after_present = std::uint32_t(SDL_GetTicks());

@@ -41,6 +41,13 @@ struct BottomSkills {
 };
 inline BottomSkills g_bottom_skills;
 
+// The second screen's frame this frame (the UI frame, 800 wide; its top-left
+// 320x240), or null outside the game. Town::draw sets it.
+inline const std::vector<std::uint8_t>* g_bottom_frame = nullptr;
+
+// The console's own present (platform/3ds): both screens from the frame.
+void handheld_present(const std::vector<std::uint8_t>& frame, int frame_w, int frame_h, int clip_top, bool world_only, const std::vector<std::uint8_t>* bottom, int bottom_stride);
+
 void draw_bottom_hud(std::vector<std::uint8_t>& framebuffer, const Scene& scene, const BottomHud& state);
 
 }  // namespace d2d::client

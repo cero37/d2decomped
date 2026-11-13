@@ -83,6 +83,8 @@ target_include_directories(d2d SYSTEM PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/shim"
 target_link_libraries(d2d PRIVATE
     game net mpq d2s rules drlg txt userdir cof compcode dc6 dcc ds1 dt1 font palette tbl devctl screenshot switches
     SDL3_3ds CLI11 citro3d ctru m)
+# std::thread: a real stack and the other cores (src/threads_3ds.cpp).
+target_link_options(d2d PRIVATE -Wl,--wrap=threadCreate -Wl,--wrap=__syscall_thread_create)
 target_link_options(d2d PRIVATE -Wl,--gc-sections)
 
 ctr_generate_smdh(d2d.smdh NAME "D2Decomp" DESCRIPTION "Diablo II engine (bring your own game data)" AUTHOR "psi29a and contributors; 3DS port")

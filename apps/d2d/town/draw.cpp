@@ -113,6 +113,7 @@ auto Town::draw(std::vector<std::uint8_t>& framebuffer, const Mouse& mouse, std:
     ui_buffer.resize(std::size_t(kScreenWidth) * kScreenHeight * 4);
     draw_view(ui_buffer, &framebuffer, mouse, frame_ms);
     if (g_world_only) {
+        g_bottom_frame = &ui_buffer;
         // Off the 3DS (a preview): the second screen goes in the frame's spare rows,
         // its first rows above the world's and the rest below (the frame is 600 rows:
         // the world's 240 and 360 spare).
