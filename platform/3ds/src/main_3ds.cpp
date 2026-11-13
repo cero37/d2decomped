@@ -16,6 +16,9 @@ int d2d_main(int argc, char** argv);
 // The game is far bigger than libctru's defaults allow for.
 extern "C" {
 u32 __stacksize__ = 1024 * 1024;
+// libctru would set 32 MiB aside as linear (physically contiguous) memory.
+// Only sound buffers and the GPU need that; the game's heap needs the rest.
+u32 __ctru_linear_heap_size = 8 * 1024 * 1024;
 }
 
 int main(int, char**) {

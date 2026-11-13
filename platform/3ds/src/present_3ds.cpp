@@ -8,6 +8,8 @@
 #include <3ds.h>
 
 #include <cstdint>
+#include <cstdio>
+#include <malloc.h>
 #include <cstring>
 #include <vector>
 
@@ -53,6 +55,19 @@ void handheld_present(const std::vector<std::uint8_t>& frame, int frame_w, int f
         } else {
             std::memset(low, 0, 240 * 320 * 4);
         }
+    }
+    // Every ten seconds: how much memory is in use, on stdout and in the log file's folder.
+    static unsigned frames = 0;
+    static u64 last = 0;
+    ++frames;
+    if (const u64 now = osGetTime(); now - last >= 10000) {
+        const struct mallinfo heap = mallinfo();
+        if (std::FILE* out = std::fopen("sdmc:/3ds/d2d/mem.log", "a")) {
+            std::fprintf(out, "frames %u in %llu ms | heap used %u KiB of %lu KiB (arena %u KiB) | linear free %lu KiB\n", frames, static_cast<unsigned long long>(last ? now - last : 0),
+                         unsigned(heap.uordblks / 1024), static_cast<unsigned long>(envGetHeapSize() / 1024), unsigned(heap.arena / 1024), static_cast<unsigned long>(linearSpaceFree() / 1024));
+            std::fclose(out);
+        }
+        frames = 0; last = now;
     }
     gfxFlushBuffers();
     gfxSwapBuffers();

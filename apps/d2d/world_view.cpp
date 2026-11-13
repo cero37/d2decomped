@@ -330,7 +330,11 @@ void render_world(std::vector<std::uint8_t>& framebuffer,
             }
         }
     }
+#ifdef __3DS__
+    static const int floor_bands = 4;   // a New 3DS's four cores (hardware_concurrency doesn't know them)
+#else
     static const int floor_bands = std::clamp(int(std::thread::hardware_concurrency()), 1, 4);
+#endif
     draw_in_bands(floor_bands, [&](Rows rows) {
         for (const auto& queued : floors) {
             if (queued.screen_y >= rows.end || queued.screen_y + std::abs(queued.tile->height) <= rows.begin) continue;

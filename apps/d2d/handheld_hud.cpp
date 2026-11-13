@@ -5,6 +5,8 @@
 #include "panels.hpp"
 #include "scene.hpp"
 
+#include <SDL3/SDL_timer.h>
+
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -41,6 +43,11 @@ void draw_bottom_hud(std::vector<std::uint8_t>& framebuffer, const Scene& scene,
     using namespace d2d::d2s;
     const auto& pal = scene.act_pal.entries().empty() ? scene.pal : scene.act_pal;
     const Canvas canvas{ framebuffer };
+    // Ten times a second is as fast as anything here changes; the frame keeps the last one between.
+    static std::uint64_t drawn_ms = 0;
+    const std::uint64_t now_ms = SDL_GetTicks();
+    if (drawn_ms != 0 && now_ms - drawn_ms < 100) return;
+    drawn_ms = now_ms;
     const int width = kBottomWidth, height = kBottomHeight;
     // The stone the panel is cut from.
     for (int y = 0; y < height; ++y)
@@ -51,29 +58,17 @@ void draw_bottom_hud(std::vector<std::uint8_t>& framebuffer, const Scene& scene,
     if (!state.stats) return;
     const auto& stats = *state.stats;
 
-    // The globes at half size in the bottom corners (each source 2x2 averaged),
-    // their numbers beside them.
     const auto& small = scene.font_small;
-    auto centred = [&](const d2d::font::Font& font, int centre, int top, const std::string& text, std::array<std::uint8_t, 3> c) {
-        font.draw_tinted(framebuffer, kScreenWidth, kScreenHeight, pal, centre - font.measure(text) / 2, top, text, c[0], c[1], c[2]);
-    };
-    auto globe = [&](int frame, int x, int y, std::int64_t cur, std::int64_t max) {
-        constexpr int kSize = 40;
-        for (int row = -2; row < kSize + 2; ++row)                      // the socket: a dark disc with a lit rim
-            for (int column = -2; column < kSize + 2; ++column) {
-                const int dx = column * 2 - kSize + 1, dy = row * 2 - kSize + 1, reach = dx * dx + dy * dy;
-                if (reach <= (kSize + 3) * (kSize + 3)) { const bool rim = reach > (kSize - 1) * (kSize - 1); canvas.put(x + column, y + row, rim ? 96 : 8, rim ? 82 : 6, rim ? 58 : 6); }
-            }
-        if (max <= 0 || frame >= int(scene.globes.frames_per_direction())) return;
-        const auto& cel = scene.globes.frame(0, std::uint32_t(frame));
-        const int source = int(cel.height);
-        const int rows = int(std::clamp<std::int64_t>(cur * source / max, cur > 0 ? 2 : 0, source));
-        for (int row = 0; row < kSize; ++row)
-            for (int column = 0; column < kSize; ++column) {
+    const auto& tiny = scene.font_tiny.line_height() > 0 ? scene.font_tiny : scene.font_small;
+    // A cel at half size, each 2x2 of it averaged; only its last `rows` source rows (a globe's fill).
+    auto half = [&](const d2d::dc6::Frame& cel, int x, int y, int rows) {
+        const int source_w = int(cel.width), source_h = int(cel.height);
+        for (int row = 0; row < (source_h + 1) / 2; ++row)
+            for (int column = 0; column < (source_w + 1) / 2; ++column) {
                 int red = 0, green = 0, blue = 0, count = 0;
-                for (int sy = row * 2; sy < row * 2 + 2; ++sy)
-                    for (int sx = column * 2; sx < column * 2 + 2; ++sx) {
-                        if (sy < source - rows || sy >= source || sx >= int(cel.width)) continue;
+                for (int sy = row * 2; sy < row * 2 + 2 && sy < source_h; ++sy)
+                    for (int sx = column * 2; sx < column * 2 + 2 && sx < source_w; ++sx) {
+                        if (sy < source_h - rows) continue;
                         const auto idx = cel.pixels[std::size_t(sy) * cel.width + std::size_t(sx)];
                         if (!idx) continue;
                         const auto colour = pal[idx];
@@ -82,17 +77,30 @@ void draw_bottom_hud(std::vector<std::uint8_t>& framebuffer, const Scene& scene,
                 if (count >= 2) canvas.put(x + column, y + row, std::uint8_t(red / count), std::uint8_t(green / count), std::uint8_t(blue / count));
             }
     };
+    // The globes at half size in the bottom corners, the number on each.
+    constexpr int kGlobe = 42;                                  // the socket's box
+    const int globe_y = height - kGlobe - 2;
+    auto globe = [&](int frame, int x, std::int64_t cur, std::int64_t max, const std::string& text) {
+        for (int row = 0; row < kGlobe; ++row)                      // the socket: a dark disc with a lit rim
+            for (int column = 0; column < kGlobe; ++column) {
+                const int dx = column * 2 - kGlobe + 1, dy = row * 2 - kGlobe + 1, reach = dx * dx + dy * dy;
+                if (reach <= kGlobe * kGlobe) { const bool rim = reach > (kGlobe - 3) * (kGlobe - 3); canvas.put(x + column, globe_y + row, rim ? 96 : 8, rim ? 82 : 6, rim ? 58 : 6); }
+            }
+        if (max > 0 && frame < int(scene.globes.frames_per_direction())) {
+            const auto& cel = scene.globes.frame(0, std::uint32_t(frame));
+            const int source = int(cel.height);
+            const int rows = int(std::clamp<std::int64_t>(cur * source / max, cur > 0 ? 2 : 0, source));
+            half(cel, x + (kGlobe - (int(cel.width) + 1) / 2) / 2, globe_y + (kGlobe - (source + 1) / 2) / 2, rows);
+        }
+        small.draw_tinted(framebuffer, kScreenWidth, kScreenHeight, pal, x + (kGlobe - small.measure(text)) / 2, globe_y + (kGlobe - small.line_height()) / 2, text, 255, 255, 255);
+    };
     const bool poisoned = state.hud && state.hud->poisoned;
-    const int globe_y = height - 46;
-    globe(poisoned ? 2 : 0, 6, globe_y, stats.values[kLife], stats.values[kMaxLife]);
-    globe(1, width - 46, globe_y, stats.values[kMana], stats.values[kMaxMana]);
-    const auto life_text = std::format("{}", stats.values[kLife] >> 8), mana_text = std::format("{}", stats.values[kMana] >> 8);
-    small.draw_tinted(framebuffer, kScreenWidth, kScreenHeight, pal, 50, height - 20, life_text, 255, 255, 255);
-    small.draw_tinted(framebuffer, kScreenWidth, kScreenHeight, pal, width - 50 - small.measure(mana_text), height - 20, mana_text, 255, 255, 255);
+    globe(poisoned ? 2 : 0, 3, stats.values[kLife], stats.values[kMaxLife], std::format("{}", stats.values[kLife] >> 8));
+    globe(1, width - kGlobe - 3, stats.values[kMana], stats.values[kMaxMana], std::format("{}", stats.values[kMana] >> 8));
 
-    // Between them: the belt, a slot a D-pad direction.
+    // Between them, two rows: the skills on their buttons, then the belt.
     const int mid = width / 2, cell = 29;
-    const int belt_left = mid - cell * 2, belt_top = height - 4 - cell;
+    const int belt_left = mid - cell * 2, belt_top = height - 2 - cell;
     std::array<std::array<int, 2>, 4> spots{};
     for (int i = 0; i < 4; ++i) { spots[std::size_t(i)] = { belt_left + i * cell, belt_top }; canvas.slot(belt_left + i * cell, belt_top, belt_left + (i + 1) * cell, belt_top + cell); }
     if (state.belt)
@@ -104,9 +112,35 @@ void draw_bottom_hud(std::vector<std::uint8_t>& framebuffer, const Scene& scene,
                 blit_sprite(framebuffer, cel, scene.item_pal(item, pal), spot[0] + (cell - int(cel.width)) / 2, spot[1] + (cell - int(cel.height)) / 2);
             }
         }
-    // Experience and stamina: two thin lines over the belt.
+    constexpr int kIcon = 24, kPitch = 30;                       // a skill's icon at half size, its button's name beside it
+    const int skill_top = belt_top - 3 - kIcon - 2;
+    {
+        const auto& skills = g_bottom_skills;
+        const int left = mid - (7 * kPitch - (kPitch - kIcon - 2)) / 2;
+        for (int i = 0; i < 7; ++i) {
+            const int x = left + i * kPitch, id = i == 0 ? skills.main : skills.slots[std::size_t(i - 1)];
+            const std::string& label = i == 0 ? skills.main_label : skills.labels[std::size_t(i - 1)];
+            canvas.slot(x, skill_top, x + kIcon + 2, skill_top + kIcon + 2);
+            if (const auto* skill = id >= 0 ? scene.skills.get(id) : nullptr) {
+                int column = -1;
+                for (int cls = 0; cls < 7; ++cls) if (skill->cls == d2d::rules::kClassCode[std::size_t(cls)]) column = cls;
+                const auto& spr = column >= 0 ? scene.skill_icons[std::size_t(column)] : scene.generic_skill_icons;
+                if (skill->icon >= 0 && spr.frames_per_direction() > std::uint32_t(skill->icon)) { const auto& cel = spr.frame(0, std::uint32_t(skill->icon)); half(cel, x + 1, skill_top + 1, int(cel.height)); }
+            } else if (id <= -3) {
+                static constexpr std::array<const char*, 7> kActions{ "Use", "Itm", "Inv", "Chr", "Skl", "Map", "Qst" };
+                if (const int action = -3 - id; action < int(kActions.size())) tiny.draw_tinted(framebuffer, kScreenWidth, kScreenHeight, pal, x + 3, skill_top + 9, kActions[std::size_t(action)], 199, 179, 119);
+            }
+            if (!label.empty()) {                                       // the button, on a dark tab in the slot's corner
+                const int tab_w = tiny.measure(label) + 2, tab_h = tiny.line_height();
+                // font6's cells carry their glyphs low: the text sits tab_h - 3 under the y it is given.
+                canvas.rect(x + 1, skill_top + kIcon - 7, x + 1 + tab_w, skill_top + kIcon + 1, { 0, 0, 0 });
+                tiny.draw_tinted(framebuffer, kScreenWidth, kScreenHeight, pal, x + 2, skill_top + kIcon + 1 - tab_h - (tab_h > 9 ? tab_h - 9 : 0), label, skills.alternate ? 255 : 199, skills.alternate ? 210 : 179, skills.alternate ? 90 : 119);
+            }
+        }
+    }
+    // Experience and stamina: two thin lines over the skills.
     auto bar = [&](int top, std::int64_t cur, std::int64_t max, std::array<std::uint8_t, 3> c) {
-        const int left = belt_left, right = belt_left + cell * 4;
+        const int left = 3 + kGlobe + 4, right = width - 3 - kGlobe - 4;
         canvas.rect(left, top, right, top + 3, { 8, 7, 6 });
         if (max > 0 && cur > 0) canvas.rect(left, top + 1, left + int(std::clamp<std::int64_t>(cur * (right - left) / max, 1, right - left)), top + 2, c);
     };
@@ -116,52 +150,13 @@ void draw_bottom_hud(std::vector<std::uint8_t>& framebuffer, const Scene& scene,
         const auto next = scene.exp_next[std::size_t(lvl)], prev = scene.exp_next[std::size_t(lvl - 1)];
         if (next > prev) { exp_num = std::int64_t(stats.values[kExp]) > std::int64_t(prev) ? std::int64_t(stats.values[kExp]) - std::int64_t(prev) : 0; exp_den = std::int64_t(next) - std::int64_t(prev); }
     }
-    bar(belt_top - 9, exp_num, exp_den, { 214, 176, 78 });
-    bar(belt_top - 5, stats.values[kStamina], stats.values[kMaxStamina], { 150, 190, 110 });
-
-    // The skill buttons: the trigger's, then the six slots' (the second set while its button is held).
-    const int skill_top = belt_top - 12 - 48;
-    {
-        constexpr int kPitch = 45, kWide = 44;
-        const auto& skills = g_bottom_skills;
-        const int left = (width - (7 * kPitch - 1)) / 2;
-        for (int i = 0; i < 7; ++i) {
-            const int x = left + i * kPitch, id = i == 0 ? skills.main : skills.slots[std::size_t(i - 1)];
-            const std::string& label = i == 0 ? skills.main_label : skills.labels[std::size_t(i - 1)];
-            canvas.slot(x, skill_top, x + kWide, skill_top + 48);
-            if (const auto* skill = id >= 0 ? scene.skills.get(id) : nullptr) {
-                int column = -1;
-                for (int cls = 0; cls < 7; ++cls) if (skill->cls == d2d::rules::kClassCode[std::size_t(cls)]) column = cls;
-                const auto& spr = column >= 0 ? scene.skill_icons[std::size_t(column)] : scene.generic_skill_icons;
-                if (skill->icon >= 0 && spr.frames_per_direction() > std::uint32_t(skill->icon)) {
-                    const auto& cel = spr.frame(0, std::uint32_t(skill->icon));
-                    const int crop = (int(cel.width) - kWide) / 2;          // the icon's 48 in the slot's 44
-                    for (int row = 0; row < int(cel.height) && row < 48; ++row)
-                        for (int column_x = 1; column_x < kWide - 1; ++column_x) {
-                            const int source = column_x + crop;
-                            if (source < 0 || source >= int(cel.width)) continue;
-                            if (const auto idx = cel.pixels[std::size_t(row) * cel.width + std::size_t(source)]) {
-                                const auto colour = pal[idx];
-                                canvas.put(x + column_x, skill_top + row, colour.r, colour.g, colour.b);
-                            }
-                        }
-                }
-            } else if (id <= -3) {
-                static constexpr std::array<const char*, 7> kActions{ "Use", "Items", "Inv", "Char", "Tree", "Map", "Quest" };
-                const int action = -3 - id;
-                if (action < int(kActions.size())) centred(small, x + kWide / 2, skill_top + 20, kActions[std::size_t(action)], { 199, 179, 119 });
-            }
-            if (!label.empty()) {                                         // the button, on a dark tab in the corner
-                const int tab = small.measure(label) + 4;
-                canvas.rect(x + 1, skill_top + 1, x + 1 + tab, skill_top + 1 + small.line_height(), { 0, 0, 0 });
-                small.draw_tinted(framebuffer, kScreenWidth, kScreenHeight, pal, x + 3, skill_top + 1, label, skills.alternate ? 255 : 199, skills.alternate ? 210 : 179, skills.alternate ? 90 : 119);
-            }
-        }
-    }
+    const int bars_top = skill_top - 8;
+    bar(bars_top, exp_num, exp_den, { 214, 176, 78 });
+    bar(bars_top + 4, stats.values[kStamina], stats.values[kMaxStamina], { 150, 190, 110 });
 
     // The automap, always open here: the mini map's cels round the player.
     {
-        const int left = 4, top = 24, right = width - 4, bottom = skill_top - 4;
+        const int left = 3, top = 22, right = width - 3, bottom = bars_top - 3;
         canvas.slot(left, top, right, bottom);
         if (state.automap && scene.automap_cels_small.frames_per_direction() > 0) {
             const auto& map = *state.automap;
@@ -200,10 +195,10 @@ void draw_bottom_hud(std::vector<std::uint8_t>& framebuffer, const Scene& scene,
     }
 
     // The top line: where you are, and your level.
-    canvas.slot(4, 4, width - 4, 22);
-    scene.font.draw_tinted(framebuffer, kScreenWidth, kScreenHeight, pal, 10, 6, std::string(state.level_name), 199, 179, 119);
+    canvas.slot(3, 3, width - 3, 20);
+    scene.font.draw_tinted(framebuffer, kScreenWidth, kScreenHeight, pal, 9, 4, std::string(state.level_name), 199, 179, 119);
     const auto level_text = std::format("Lv {}", lvl);
-    scene.font.draw_tinted(framebuffer, kScreenWidth, kScreenHeight, pal, width - 10 - scene.font.measure(level_text), 6, level_text, 255, 255, 255);
+    scene.font.draw_tinted(framebuffer, kScreenWidth, kScreenHeight, pal, width - 9 - scene.font.measure(level_text), 4, level_text, 255, 255, 255);
 }
 
 }  // namespace d2d::client
