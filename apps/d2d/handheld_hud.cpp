@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <format>
 #include <string>
 
@@ -50,49 +51,47 @@ void draw_bottom_hud(std::vector<std::uint8_t>& framebuffer, const Scene& scene,
     if (!state.stats) return;
     const auto& stats = *state.stats;
 
-    // The globes, in the PC panel's own end pieces (the statues), at the corners.
-    auto at_bottom = [&](const d2d::dc6::Sprite& spr, int frame, int x, int bottom) {
-        if (frame >= int(spr.frames_per_direction())) return;
-        const auto& cel = spr.frame(0, std::uint32_t(frame));
-        blit_sprite(framebuffer, cel, pal, x, bottom - int(cel.height));
-    };
-    const int panel_w = scene.ctrl_panel.frames_per_direction() >= 6 ? int(scene.ctrl_panel.frame(0, 5).width) : 117;
-    at_bottom(scene.ctrl_panel, 0, 0, height);
-    at_bottom(scene.ctrl_panel, 5, width - panel_w, height);
-    auto fill = [&](int frame, int x, std::int64_t cur, std::int64_t max) {
+    // The globes at half size in the bottom corners (each source 2x2 averaged),
+    // their numbers beside them.
+    const auto& small = scene.font_small;
+    auto globe = [&](int frame, int x, int y, std::int64_t cur, std::int64_t max) {
+        constexpr int kSize = 40;
+        for (int row = -2; row < kSize + 2; ++row)                      // the socket: a dark disc with a lit rim
+            for (int column = -2; column < kSize + 2; ++column) {
+                const int dx = column * 2 - kSize + 1, dy = row * 2 - kSize + 1, reach = dx * dx + dy * dy;
+                if (reach <= (kSize + 3) * (kSize + 3)) { const bool rim = reach > (kSize - 1) * (kSize - 1); canvas.put(x + column, y + row, rim ? 96 : 8, rim ? 82 : 6, rim ? 58 : 6); }
+            }
         if (max <= 0 || frame >= int(scene.globes.frames_per_direction())) return;
         const auto& cel = scene.globes.frame(0, std::uint32_t(frame));
-        const int rows = int(std::clamp<std::int64_t>(cur * 80 / max, cur > 0 ? 2 : 0, 80));
-        const int cel_height = int(cel.height), top = height - 13 - cel_height;
-        for (int y = std::max(cel_height - rows, 0); y < cel_height; ++y)
-            for (int left = 0; left < int(cel.width); ++left)
-                if (const auto idx = cel.pixels[std::size_t(y) * cel.width + std::size_t(left)]) {
-                    const auto colour = pal[idx];
-                    canvas.put(x + left, top + y, colour.r, colour.g, colour.b);
-                }
+        const int source = int(cel.height);
+        const int rows = int(std::clamp<std::int64_t>(cur * source / max, cur > 0 ? 2 : 0, source));
+        for (int row = 0; row < kSize; ++row)
+            for (int column = 0; column < kSize; ++column) {
+                int red = 0, green = 0, blue = 0, count = 0;
+                for (int sy = row * 2; sy < row * 2 + 2; ++sy)
+                    for (int sx = column * 2; sx < column * 2 + 2; ++sx) {
+                        if (sy < source - rows || sy >= source || sx >= int(cel.width)) continue;
+                        const auto idx = cel.pixels[std::size_t(sy) * cel.width + std::size_t(sx)];
+                        if (!idx) continue;
+                        const auto colour = pal[idx];
+                        red += colour.r; green += colour.g; blue += colour.b; ++count;
+                    }
+                if (count >= 2) canvas.put(x + column, y + row, std::uint8_t(red / count), std::uint8_t(green / count), std::uint8_t(blue / count));
+            }
     };
     const bool poisoned = state.hud && state.hud->poisoned;
-    fill(poisoned ? 2 : 0, 29, stats.values[kLife], stats.values[kMaxLife]);
-    fill(1, width - 0x6f, stats.values[kMana], stats.values[kMaxMana]);
-    at_bottom(scene.globe_glass, 0, 28, height - 5);
-    at_bottom(scene.globe_glass, 1, width - 0x6e, height - 9);
+    const int globe_y = height - 46;
+    globe(poisoned ? 2 : 0, 6, globe_y, stats.values[kLife], stats.values[kMaxLife]);
+    globe(1, width - 46, globe_y, stats.values[kMana], stats.values[kMaxMana]);
+    const auto life_text = std::format("{}", stats.values[kLife] >> 8), mana_text = std::format("{}", stats.values[kMana] >> 8);
+    small.draw_tinted(framebuffer, kScreenWidth, kScreenHeight, pal, 50, height - 20, life_text, 255, 255, 255);
+    small.draw_tinted(framebuffer, kScreenWidth, kScreenHeight, pal, width - 50 - small.measure(mana_text), height - 20, mana_text, 255, 255, 255);
 
-    const auto& small = scene.font_small;
-    auto centred = [&](const d2d::font::Font& font, int centre, int top, const std::string& text, std::array<std::uint8_t, 3> c) {
-        font.draw_tinted(framebuffer, kScreenWidth, kScreenHeight, pal, centre - font.measure(text) / 2, top, text, c[0], c[1], c[2]);
-    };
-    centred(small, 29 + 40, height - 13 - 80 - small.line_height() - 2, std::format("{}/{}", stats.values[kLife] >> 8, stats.values[kMaxLife] >> 8), { 255, 255, 255 });
-    centred(small, width - 0x6f + 40, height - 13 - 80 - small.line_height() - 2, std::format("{}/{}", stats.values[kMana] >> 8, stats.values[kMaxMana] >> 8), { 255, 255, 255 });
-
-    // Between the globes: the belt as the D-pad that drinks from it, the
-    // experience and stamina bars under it.
+    // Between them: the belt, a slot a D-pad direction.
     const int mid = width / 2, cell = 29;
-    const int pad_top = height - 30 - cell * 3;
-    const std::array<std::array<int, 2>, 4> spots{ { { mid - cell / 2 - cell, pad_top + cell },      // column 0: left
-                                                     { mid - cell / 2, pad_top },                   // 1: up
-                                                     { mid - cell / 2 + cell, pad_top + cell },     // 2: right
-                                                     { mid - cell / 2, pad_top + cell * 2 } } };    // 3: down
-    for (const auto& spot : spots) canvas.slot(spot[0], spot[1], spot[0] + cell, spot[1] + cell);
+    const int belt_left = mid - cell * 2, belt_top = height - 4 - cell;
+    std::array<std::array<int, 2>, 4> spots{};
+    for (int i = 0; i < 4; ++i) { spots[std::size_t(i)] = { belt_left + i * cell, belt_top }; canvas.slot(belt_left + i * cell, belt_top, belt_left + (i + 1) * cell, belt_top + cell); }
     if (state.belt)
         for (const auto& item : *state.belt) {
             if (item.location != d2d::d2s::item_location::kBelt || item.column < 0 || item.column > 3) continue;
@@ -102,10 +101,11 @@ void draw_bottom_hud(std::vector<std::uint8_t>& framebuffer, const Scene& scene,
                 blit_sprite(framebuffer, cel, scene.item_pal(item, pal), spot[0] + (cell - int(cel.width)) / 2, spot[1] + (cell - int(cel.height)) / 2);
             }
         }
+    // Experience and stamina: two thin lines over the belt.
     auto bar = [&](int top, std::int64_t cur, std::int64_t max, std::array<std::uint8_t, 3> c) {
-        const int left = mid - 43, right = mid + 43;
-        canvas.slot(left, top, right, top + 7);
-        if (max > 0 && cur > 0) canvas.rect(left + 1, top + 1, left + 1 + int(std::clamp<std::int64_t>(cur * (right - left - 2) / max, 1, right - left - 2)), top + 6, c);
+        const int left = belt_left, right = belt_left + cell * 4;
+        canvas.rect(left, top, right, top + 3, { 8, 7, 6 });
+        if (max > 0 && cur > 0) canvas.rect(left, top + 1, left + int(std::clamp<std::int64_t>(cur * (right - left) / max, 1, right - left)), top + 2, c);
     };
     const auto lvl = stats.get(kLevel);
     std::int64_t exp_num = 0, exp_den = 0;
@@ -113,8 +113,60 @@ void draw_bottom_hud(std::vector<std::uint8_t>& framebuffer, const Scene& scene,
         const auto next = scene.exp_next[std::size_t(lvl)], prev = scene.exp_next[std::size_t(lvl - 1)];
         if (next > prev) { exp_num = std::int64_t(stats.values[kExp]) > std::int64_t(prev) ? std::int64_t(stats.values[kExp]) - std::int64_t(prev) : 0; exp_den = std::int64_t(next) - std::int64_t(prev); }
     }
-    bar(height - 26, exp_num, exp_den, { 214, 176, 78 });
-    bar(height - 16, stats.values[kStamina], stats.values[kMaxStamina], { 196, 190, 96 });
+    bar(belt_top - 9, exp_num, exp_den, { 214, 176, 78 });
+    bar(belt_top - 5, stats.values[kStamina], stats.values[kMaxStamina], { 150, 190, 110 });
+
+    // The skill buttons: six, a slot a button (ZL held: the second six).
+    const int skill_top = belt_top - 12 - 48;
+    {
+        static constexpr std::array<const char*, 6> kButtons{ "A", "B", "X", "Y", "R", "ZR" };
+        const int left = (width - 6 * 50) / 2;
+        for (int i = 0; i < 6; ++i) {
+            const int x = left + i * 50;
+            canvas.slot(x, skill_top, x + 48, skill_top + 48);
+            small.draw_tinted(framebuffer, kScreenWidth, kScreenHeight, pal, x + 3, skill_top + 2, kButtons[std::size_t(i)], 199, 179, 119);
+        }
+    }
+
+    // The automap, always open here: the mini map's cels round the player.
+    {
+        const int left = 4, top = 24, right = width - 4, bottom = skill_top - 4;
+        canvas.slot(left, top, right, bottom);
+        if (state.automap && scene.automap_cels_small.frames_per_direction() > 0) {
+            const auto& map = *state.automap;
+            const int x0 = left + 1, y0 = top + 1, x1 = right - 2, y1 = bottom - 2;
+            const int centre_x = (x0 + x1) / 2, centre_y = (y0 + y1) / 2;
+            constexpr int kDivisor = 20;
+            const int scroll_x = int(std::lround((state.map_x - state.map_y) * 80 / float(kDivisor))) + 8 - centre_x;
+            const int scroll_y = int(std::lround((state.map_x + state.map_y) * 40 / float(kDivisor))) - 8 - centre_y;
+            const auto& miniature = map.cel_file > 0 && map.cel_file < 4 && scene.automap_miniatures_small[std::size_t(map.cel_file)].frames_per_direction() > 0
+                                        ? scene.automap_miniatures_small[std::size_t(map.cel_file)] : scene.automap_miniatures[0];
+            for (int list = 0; list < 4; ++list)
+                for (const auto& cell : map.cells) {
+                    const auto& cels = list == 3 ? miniature : scene.automap_cels_small;
+                    if (cell.list != list || cell.cel < 0 || std::uint32_t(cell.cel) >= cels.frames_per_direction()) continue;
+                    const auto& cel = cels.frame(0, std::uint32_t(cell.cel));
+                    const int x = cell.x * 10 / kDivisor - scroll_x, cel_top = cell.y * 10 / kDivisor - scroll_y - int(cel.height) + 1;
+                    if (x > x1 || x + int(cel.width) < x0 || cel_top > y1 || cel_top + int(cel.height) < y0) continue;
+                    for (int row = 0; row < int(cel.height); ++row)
+                        for (int column = 0; column < int(cel.width); ++column) {
+                            const auto index = cel.pixels[std::size_t(row) * cel.width + std::size_t(column)];
+                            const int px = x + column, py = cel_top + row;
+                            if (index == 0 || px < x0 || px > x1 || py < y0 || py > y1) continue;
+                            const auto colour = pal[index];
+                            canvas.put(px, py, colour.r, colour.g, colour.b);
+                        }
+                }
+            auto mark = [&](float unit_x, float unit_y, std::array<std::uint8_t, 3> c) {
+                const int mx = int(std::lround((unit_x - unit_y) * 80 / float(kDivisor))) - scroll_x + 8;
+                const int my = int(std::lround((unit_x + unit_y) * 40 / float(kDivisor))) - scroll_y - 8;
+                for (int d = -3; d <= 3; ++d)
+                    for (int e : { d, -d }) { const int px = mx + d, py = my + e / 2; if (px >= x0 && px <= x1 && py >= y0 && py <= y1) canvas.put(px, py, c[0], c[1], c[2]); }
+            };
+            for (const auto& other : map.marks) mark(other.x, other.y, { std::uint8_t(other.rgb[0]), std::uint8_t(other.rgb[1]), std::uint8_t(other.rgb[2]) });
+            mark(state.map_x, state.map_y, { 80, 120, 255 });
+        }
+    }
 
     // The top line: where you are, and your level.
     canvas.slot(4, 4, width - 4, 22);

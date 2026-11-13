@@ -14,6 +14,7 @@ namespace d2d::client {
 
 struct Scene;
 struct Hud;
+struct Automap;
 
 inline constexpr int kBottomWidth = 320, kBottomHeight = 240;
 
@@ -22,6 +23,8 @@ struct BottomHud {
     const std::vector<d2d::d2s::Item>* belt = nullptr;
     const Hud* hud = nullptr;
     std::string_view level_name;
+    const Automap* automap = nullptr;
+    float map_x = 0, map_y = 0;   // the player on the automap, in its cells
 };
 
 void draw_bottom_hud(std::vector<std::uint8_t>& framebuffer, const Scene& scene, const BottomHud& state);

@@ -325,7 +325,7 @@ void render_ingame(std::vector<std::uint8_t>& framebuffer,
                                top, hovered_name, colour[0], colour[1], colour[2]);
         }
         if (g_world_only) {   // a handheld's HUD is its own, on the other screen (the frame's top-left 320x240)
-            draw_bottom_hud(framebuffer, scene, { hud_stats, belt, &hud, level.name });
+            draw_bottom_hud(framebuffer, scene, { hud_stats, belt, &hud, level.name, automap, cam_x + float(level.world_x), cam_y + float(level.world_y) });
             return;
         }
         if (wide)
