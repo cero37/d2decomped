@@ -99,7 +99,7 @@ struct Tile;
 class File {
 public:
     using Loader = std::function<std::optional<std::vector<std::byte>>(const std::string& path)>;
-    File(std::span<const std::byte> bytes, std::string_view key) : key_(key), bytes_(bytes.begin(), bytes.end()) {}
+    File(std::span<const std::byte> bytes, std::string_view key) : key_(key), bytes_(bytes.begin(), bytes.end()), size_(bytes.size()) {}
     ~File() {
         auto& all = registry();
         const std::scoped_lock lock(all.mutex);
@@ -127,6 +127,10 @@ public:
     // A level that draws any of its tiles (no picks: a town) holds the file whole.
     void pin() { const std::scoped_lock lock(registry().mutex); pinned_ = true; }
     void set_tile_count(std::size_t count) { if (slots_.size() != count) slots_ = std::vector<Slot>(count); }
+    // The file's tile headers, parsed once and shared by every level's archive of it
+    // (two levels of one type would each hold some thousands otherwise).
+    [[nodiscard]] std::shared_ptr<std::vector<Tile>> parsed() const { const std::scoped_lock lock(registry().mutex); return parsed_; }
+    void set_parsed(std::shared_ptr<std::vector<Tile>> tiles) { const std::scoped_lock lock(registry().mutex); parsed_ = std::move(tiles); }
 
     // The tile's pixels, decoded now if they aren't. Safe from the draw
     // threads; trim() must not run while any of them draws.
@@ -163,7 +167,7 @@ public:
         static const std::size_t budget = [] {
             if (const char* text = std::getenv("D2D_TILE_CACHE_MB"); text && *text) return std::size_t(std::atoi(text)) << 20;
 #ifdef __3DS__
-            return std::size_t(12) << 20;
+            return std::size_t(6) << 20;    // a 400x240 view shows few tiles
 #else
             return std::size_t(96) << 20;
 #endif
@@ -177,7 +181,12 @@ public:
         const std::scoped_lock lock(all.mutex);
         if (!key.empty())
             if (const auto found = all.by_key.find(std::string(key)); found != all.by_key.end())
-                if (auto file = found->second.lock(); file && file->bytes_.size() == bytes.size()) return file;
+                if (auto file = found->second.lock(); file && file->size_ == bytes.size()) {
+                    // Another level's archive of this file. Its bytes may be gone (compact()): this
+                    // level lays its own tiles and needs them to keep those tiles' blocks.
+                    if (file->bytes_.empty()) { file->bytes_.assign(bytes.begin(), bytes.end()); file->reloaded_ = false; }
+                    return file;
+                }
         auto file = std::make_shared<File>(bytes, key);
         all.files.push_back(file);
         if (!key.empty()) all.by_key[std::string(key)] = file;
@@ -206,6 +215,8 @@ private:
 
     std::string key_;
     std::vector<std::byte> bytes_;
+    std::size_t size_ = 0;                          // the file's, whether its bytes are held or not
+    std::shared_ptr<std::vector<Tile>> parsed_;
     std::vector<Slot> slots_;
     bool reloaded_ = false;
     bool pinned_ = false;
@@ -246,17 +257,26 @@ public:
     explicit Archive(std::span<const std::byte> bytes, Pixels pixels = Pixels::decode, std::string_view key = {}) {
         if (pixels == Pixels::decode) {
             file_ = File::shared(key, bytes);
-            parse(file_->bytes(), pixels);
-            file_->set_tile_count(tiles_.size());
-            for (std::size_t i = 0; i < tiles_.size(); ++i)
-                if (buf_height(tiles_[i]) != 0 && tiles_[i].width > 0) { tiles_[i].file = file_.get(); tiles_[i].index = std::uint32_t(i); }
+            if (auto have = key.empty() ? nullptr : file_->parsed()) {
+                shared_tiles_ = std::move(have);
+            } else {
+                parse(file_->bytes(), pixels);
+                file_->set_tile_count(tiles_.size());
+                for (std::size_t i = 0; i < tiles_.size(); ++i)
+                    if (buf_height(tiles_[i]) != 0 && tiles_[i].width > 0) { tiles_[i].file = file_.get(); tiles_[i].index = std::uint32_t(i); }
+                if (!key.empty()) {
+                    shared_tiles_ = std::make_shared<std::vector<Tile>>(std::move(tiles_));
+                    tiles_ = {};
+                    file_->set_parsed(shared_tiles_);
+                }
+            }
         } else {
             parse(bytes, pixels);
         }
     }
 
-    [[nodiscard]] std::span<const Tile> tiles() const noexcept { return tiles_; }
-    [[nodiscard]] std::size_t size() const noexcept { return tiles_.size(); }
+    [[nodiscard]] std::span<const Tile> tiles() const noexcept { return shared_tiles_ ? std::span<const Tile>(*shared_tiles_) : std::span<const Tile>(tiles_); }
+    [[nodiscard]] std::size_t size() const noexcept { return tiles().size(); }
     // The level is laid and its tiles kept (Tile::keep): the file's bytes can go.
     void compact() { if (file_) file_->compact(); }
     void pin() { if (file_) file_->pin(); }
@@ -458,7 +478,8 @@ private:
     }
 
     std::shared_ptr<File> file_;   // null with Pixels::skip
-    std::vector<Tile> tiles_;
+    std::vector<Tile> tiles_;                              // its own (no key: nothing to share by)
+    std::shared_ptr<std::vector<Tile>> shared_tiles_;      // else the file's, with every other archive of it
 };
 
 inline const std::uint8_t* File::pixels(const Tile& tile, std::size_t index) {
