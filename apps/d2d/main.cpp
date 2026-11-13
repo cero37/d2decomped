@@ -881,6 +881,8 @@ int run_windowed(std::vector<std::uint8_t>& framebuffer,
                     g_bottom_touch.x = touch_x; g_bottom_touch.y = touch_y;
                     if (down) { g_bottom_touch.down = true; g_bottom_touch.pressed = true; }
                     if (up) { g_bottom_touch.down = false; g_bottom_touch.released = true; }
+                } else if (g_world_only && !g_bottom_whole && touch_y >= kPanelHalf) {   // the bar under a panel's half
+                    if (down) g_bottom_bar_tap = touch_x;
                 } else {
                     if (g_world_only && !g_bottom_whole) { mouse.x = g_bottom_origin_x + touch_x; mouse.y = g_bottom_origin_y + touch_y; }
                     else { mouse.x = touch_x * 5 / 2 + 1; mouse.y = touch_y * 5 / 2 + 1; }

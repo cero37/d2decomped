@@ -7,6 +7,7 @@
 // bottom first; RGBA8 words are R in the top byte.
 #include <3ds.h>
 
+#include "handheld_hud.hpp"
 #include "handheld_prof.hpp"
 
 #include <log.hpp>
@@ -29,7 +30,15 @@ inline std::uint32_t word(const std::uint8_t* rgba) { return std::uint32_t(rgba[
 void handheld_present(const std::vector<std::uint8_t>& frame, int frame_w, int frame_h, int clip_top, bool world_only, const std::vector<std::uint8_t>* bottom, int bottom_stride, int bottom_x, int bottom_y) {
     u16 fb_w = 0, fb_h = 0;
     auto* top = reinterpret_cast<std::uint32_t*>(gfxGetFramebuffer(GFX_TOP, GFX_LEFT, &fb_w, &fb_h));   // 240 x 400
-    if (top && world_only && frame_w == 400) {
+    if (top && world_only && g_top_panel.size() >= std::size_t(320) * kPanelHalf * 4) {
+        // A panel is open: its other half at the foot of the top screen, black round it.
+        std::memset(top, 0, 240 * 400 * 4);
+        for (int x = 0; x < 320; ++x) {
+            std::uint32_t* column = top + (x + 40) * 240;
+            const std::uint8_t* source = g_top_panel.data() + (std::size_t(kPanelHalf - 1) * 320 + std::size_t(x)) * 4;
+            for (int y = 0; y < kPanelHalf; ++y, source -= 320 * 4) column[y] = word(source);
+        }
+    } else if (top && world_only && frame_w == 400) {
         for (int x = 0; x < 400; ++x) {
             std::uint32_t* column = top + x * 240;
             const std::uint8_t* source = frame.data() + (std::size_t(clip_top + 239) * 400 + std::size_t(x)) * 4;

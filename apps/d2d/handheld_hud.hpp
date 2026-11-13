@@ -38,8 +38,24 @@ struct BottomSkills {
     std::string main_label;
     std::array<std::string, 6> labels;
     bool alternate = false;
+    // The Start list of panels and the skill-assignment ring, drawn on the second screen in the map's place.
+    bool strip_on = false, wheel_on = false;
+    int strip_at = 0, wheel_at = 0, wheel_page = 0;
+    std::vector<int> wheel_ids;
+    std::string wheel_prompt, feedback;
 };
 inline BottomSkills g_bottom_skills;
+// Which of the list's nine buttons, or of the ring's `shown` icons, a touch at (x, y) is on; -1 for none.
+int bottom_strip_hit(int x, int y);
+int bottom_wheel_hit(int x, int y, int shown);
+
+// An open panel is 432 rows and a screen 240: it goes across both, 216 rows each, its upper half
+// at the foot of the top screen (this image, 320 x kPanelHalf RGBA; empty when no panel is up)
+// and its lower half on the touch screen, over a bar of two buttons (flip the halves, close).
+inline constexpr int kPanelHalf = 216;
+inline std::vector<std::uint8_t> g_top_panel;
+inline bool g_panel_flip = false;      // the upper half on the touch screen instead
+inline int g_bottom_bar_tap = -1;      // a touch on the bar: its x, for Town::draw to take
 
 // The second screen's frame this frame (the UI frame, 800 wide; its top-left
 // 320x240), or null outside the game. Town::draw sets it.

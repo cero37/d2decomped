@@ -4,6 +4,7 @@
 #include "common.hpp"
 #include "panels.hpp"
 #include "scene.hpp"
+#include "skillpad.hpp"
 
 #include <SDL3/SDL_timer.h>
 
@@ -46,8 +47,12 @@ void draw_bottom_hud(std::vector<std::uint8_t>& framebuffer, const Scene& scene,
     // Five times a second is as fast as anything here needs to change; the frame keeps the last one between.
     static std::uint64_t drawn_ms = 0;
     const std::uint64_t now_ms = SDL_GetTicks();
-    if (drawn_ms != 0 && now_ms - drawn_ms < 200) return;
-    drawn_ms = now_ms;
+    // (At once when the list, the ring or the zoom changes: those answer a button.)
+    static int drawn_state = -1;
+    const auto& lists = g_bottom_skills;
+    const int state_now = (lists.strip_on ? 1 : 0) | (lists.wheel_on ? 2 : 0) | lists.strip_at << 2 | lists.wheel_at << 8 | lists.wheel_page << 16 | g_handheld_zoom << 24 | int(lists.feedback.size()) << 26;
+    if (drawn_ms != 0 && now_ms - drawn_ms < 200 && state_now == drawn_state) return;
+    drawn_ms = now_ms; drawn_state = state_now;
     const int width = kBottomWidth, height = kBottomHeight;
     // The stone the panel is cut from.
     for (int y = 0; y < height; ++y)
@@ -154,11 +159,50 @@ void draw_bottom_hud(std::vector<std::uint8_t>& framebuffer, const Scene& scene,
     bar(bars_top, exp_num, exp_den, { 214, 176, 78 });
     bar(bars_top + 4, stats.values[kStamina], stats.values[kMaxStamina], { 150, 190, 110 });
 
-    // The automap, always open here: the mini map's cels round the player.
+    // The automap, always open here: the mini map's cels round the player. The Start list or the
+    // skill ring takes its place while it is up.
     {
         const int left = 3, top = 22, right = width - 3, bottom = bars_top - 3;
         canvas.slot(left, top, right, bottom);
-        if (state.automap && scene.automap_cels_small.frames_per_direction() > 0) {
+        if (lists.strip_on) {
+            for (int index = 0; index < int(skillpad::kPanels.size()); ++index) {
+                const int x = 6 + index % 3 * 103, y = 25 + index / 3 * 45;
+                const bool at = index == lists.strip_at;
+                canvas.rect(x, y, x + 100, y + 42, at ? std::array<std::uint8_t, 3>{ 214, 176, 78 } : std::array<std::uint8_t, 3>{ 78, 68, 52 });
+                canvas.rect(x + 1, y + 1, x + 99, y + 41, at ? std::array<std::uint8_t, 3>{ 52, 42, 26 } : std::array<std::uint8_t, 3>{ 26, 23, 20 });
+                const auto name = skillpad::kPanels[std::size_t(index)];
+                scene.font.draw_tinted(framebuffer, kScreenWidth, kScreenHeight, pal, x + 50 - scene.font.measure(name) / 2, y + 21 - scene.font.line_height() / 2, name, at ? 255 : 199, at ? 255 : 179, at ? 255 : 119);
+            }
+        } else if (lists.wheel_on) {
+            const int count = int(lists.wheel_ids.size()), start = std::clamp(lists.wheel_page, 0, std::max(count - 1, 0));
+            const int shown = std::min(skillpad::kWheelShown, count - start);
+            const int centre_x = width / 2, centre_y = (top + bottom) / 2 + 4;
+            for (int index = 0; index < shown; ++index) {
+                const float angle = (float(index) + .5f) * skillpad::kTau / float(shown);
+                const int x = centre_x + int(std::lround(std::sin(angle) * 100.f)) - 13, y = centre_y - int(std::lround(std::cos(angle) * 46.f)) - 13;
+                const int id = lists.wheel_ids[std::size_t(start + index)];
+                const bool at = start + index == lists.wheel_at;
+                canvas.rect(x - 1, y - 1, x + 27, y + 27, at ? std::array<std::uint8_t, 3>{ 255, 220, 110 } : std::array<std::uint8_t, 3>{ 60, 52, 40 });
+                canvas.rect(x, y, x + 26, y + 26, { 10, 9, 8 });
+                if (const auto* skill = id >= 0 ? scene.skills.get(id) : nullptr) {
+                    int column = -1;
+                    for (int cls = 0; cls < 7; ++cls) if (skill->cls == d2d::rules::kClassCode[std::size_t(cls)]) column = cls;
+                    const auto& spr = column >= 0 ? scene.skill_icons[std::size_t(column)] : scene.generic_skill_icons;
+                    if (skill->icon >= 0 && spr.frames_per_direction() > std::uint32_t(skill->icon)) { const auto& cel = spr.frame(0, std::uint32_t(skill->icon)); half(cel, x + 1, y + 1, int(cel.height)); }
+                } else {
+                    const auto label = skillpad::action_label(id, false);
+                    tiny.draw_tinted(framebuffer, kScreenWidth, kScreenHeight, pal, x + 13 - tiny.measure(label) / 2, y + 9, label, 199, 179, 119);
+                }
+            }
+            if (count > 0) {
+                const int id = lists.wheel_ids[std::size_t(std::clamp(lists.wheel_at, 0, count - 1))];
+                const auto* skill = id >= 0 ? scene.skills.get(id) : nullptr;
+                const std::string name = skill ? skill->name : std::string(skillpad::action_label(id, true));
+                scene.font.draw_tinted(framebuffer, kScreenWidth, kScreenHeight, pal, centre_x - scene.font.measure(name) / 2, centre_y - 16, name, 255, 255, 255);
+                const std::string how = lists.feedback.empty() ? std::string("press a button to put it there") : lists.feedback;
+                small.draw_tinted(framebuffer, kScreenWidth, kScreenHeight, pal, centre_x - small.measure(how) / 2, centre_y + 2, how, 199, 179, 119);
+            }
+        } else if (state.automap && scene.automap_cels_small.frames_per_direction() > 0) {
             const auto& map = *state.automap;
             const int x0 = left + 1, y0 = top + 1, x1 = right - 2, y1 = bottom - 2;
             const int centre_x = (x0 + x1) / 2, centre_y = (y0 + y1) / 2;
@@ -199,6 +243,22 @@ void draw_bottom_hud(std::vector<std::uint8_t>& framebuffer, const Scene& scene,
     scene.font.draw_tinted(framebuffer, kScreenWidth, kScreenHeight, pal, 9, 4, std::string(state.level_name), 199, 179, 119);
     const auto level_text = std::format("Lv {}", lvl);
     scene.font.draw_tinted(framebuffer, kScreenWidth, kScreenHeight, pal, width - 9 - scene.font.measure(level_text), 4, level_text, 255, 255, 255);
+}
+
+int bottom_strip_hit(int x, int y) {
+    if (x < 6 || y < 25 || x >= 6 + 3 * 103 || y >= 25 + 3 * 45) return -1;
+    return (y - 25) / 45 * 3 + (x - 6) / 103;
+}
+
+int bottom_wheel_hit(int x, int y, int shown) {
+    constexpr int kBarsTop = kBottomHeight - 2 - 29 - 3 - 24 - 2 - 8;
+    const int centre_x = kBottomWidth / 2, centre_y = (22 + kBarsTop - 3) / 2 + 4;
+    for (int index = 0; index < shown; ++index) {
+        const float angle = (float(index) + .5f) * skillpad::kTau / float(shown);
+        const int left = centre_x + int(std::lround(std::sin(angle) * 100.f)) - 16, top = centre_y - int(std::lround(std::cos(angle) * 46.f)) - 16;
+        if (x >= left && x < left + 32 && y >= top && y < top + 32) return index;
+    }
+    return -1;
 }
 
 void draw_loading_note(std::vector<std::uint8_t>& framebuffer, const Scene& scene, std::uint32_t now_ms) {

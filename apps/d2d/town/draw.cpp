@@ -100,9 +100,36 @@ auto Town::draw(std::vector<std::uint8_t>& framebuffer, const Mouse& mouse, std:
         shown.main = skillbar.mode_main; shown.main_label = "ZR";
         shown.slots = skillbar.mode_slots; shown.labels = { "B", "A", "Y", "X", "L", "R" };
         shown.alternate = skillbar.mode_modifier;
-        // A tap on the second screen's map: the next zoom.
-        if (std::exchange(g_bottom_touch.pressed, false) && !g_bottom_panels && g_bottom_touch.y >= 22 && g_bottom_touch.y < 166) g_handheld_zoom = (g_handheld_zoom + 1) % 3;
+        shown.strip_on = skill_strip >= 0; shown.strip_at = skill_strip;
+        shown.wheel_on = skillbar.picking == 3; shown.wheel_ids = wheel_ids; shown.wheel_at = wheel_at; shown.wheel_page = wheel_page;
+        shown.feedback = shown.wheel_on ? assignment_feedback : std::string();
+        // A touch on the HUD: a button of the Start list (opens it), a skill on the ring (picks it),
+        // the top line (the Start list), the map (the next zoom).
+        if (std::exchange(g_bottom_touch.pressed, false) && !g_bottom_panels) {
+            const int x = g_bottom_touch.x, y = g_bottom_touch.y;
+            if (skill_strip >= 0) {
+                if (const int hit = bottom_strip_hit(x, y); hit >= 0) { skill_strip = hit; pad::Actions open; open.confirm = true; drive_strip(open); }
+                else skill_strip = -1;
+            } else if (skillbar.picking == 3) {
+                const int count = int(wheel_ids.size()), rest = count - wheel_page;
+                if (const int hit = bottom_wheel_hit(x, y, std::min(skillpad::kWheelShown, rest)); hit >= 0) wheel_at = wheel_page + hit;
+            } else if (y < 22 && pad_field()) skill_strip = 0;
+            else if (y < 166) g_handheld_zoom = (g_handheld_zoom + 1) % 3;
+        }
         g_bottom_touch.released = false;
+        // A touch on the bar under an open panel: flip its halves, or close it (as Esc does).
+        if (const int bar = std::exchange(g_bottom_bar_tap, -1); bar >= 0 && g_bottom_panels && !g_bottom_whole) {
+            if (bar < 160) g_panel_flip = !g_panel_flip;
+            else {
+                for (const bool down : { true, false }) {
+                    SDL_Event event{};
+                    event.key.type = down ? SDL_EVENT_KEY_DOWN : SDL_EVENT_KEY_UP;
+                    event.key.key = SDLK_ESCAPE;
+                    event.key.down = down;
+                    SDL_PushEvent(&event);
+                }
+            }
+        }
     }
     const int screen_w = fb_width(framebuffer);
     if (screen_w == int(kScreenWidth) && !g_world_only) {
@@ -117,6 +144,7 @@ auto Town::draw(std::vector<std::uint8_t>& framebuffer, const Mouse& mouse, std:
     if (g_world_only) {
         g_bottom_frame = &ui_buffer;
         static bool panel_was_open = false;
+        if (!g_bottom_panels || g_bottom_whole) g_top_panel.clear();
         if (g_bottom_whole) {
             g_bottom_origin_x = g_bottom_origin_y = 0;
             panel_was_open = false;
@@ -124,12 +152,26 @@ auto Town::draw(std::vector<std::uint8_t>& framebuffer, const Mouse& mouse, std:
             // The side the cursor is on when both are open, else the open one; the window follows the cursor down the panel.
             const bool left_side = left_panel_open(), right_side = inv_open || tree_open;
             g_bottom_origin_x = left_side && right_side ? (mouse.x < int(kScreenWidth) / 2 ? kCharPanelX : int(kScreenWidth) / 2) : left_side ? kCharPanelX : int(kScreenWidth) / 2;
-            if (!std::exchange(panel_was_open, true)) g_bottom_origin_y = kCharPanelY;               // a panel opens at its top
-            else if (mouse.x >= g_bottom_origin_x && mouse.x < g_bottom_origin_x + 320) {
-                if (mouse.y < g_bottom_origin_y + 14) g_bottom_origin_y = mouse.y - 14;
-                if (mouse.y > g_bottom_origin_y + 225) g_bottom_origin_y = mouse.y - 225;
+            if (!std::exchange(panel_was_open, true)) g_panel_flip = false;                            // a panel opens with its upper half on the top screen
+            // Its two halves: one to the top screen (kept in g_top_panel), the other in the window, over the bar.
+            g_bottom_origin_y = kCharPanelY + (g_panel_flip ? 0 : kPanelHalf);
+            const int other_y = kCharPanelY + (g_panel_flip ? kPanelHalf : 0);
+            g_top_panel.resize(std::size_t(320) * kPanelHalf * 4);
+            for (int y = 0; y < kPanelHalf; ++y)
+                std::copy_n(ui_buffer.begin() + std::ptrdiff_t((std::size_t(other_y + y) * kScreenWidth + std::size_t(g_bottom_origin_x)) * 4), 320 * 4, g_top_panel.begin() + std::ptrdiff_t(std::size_t(y) * 320 * 4));
+            for (int y = kPanelHalf; y < 240; ++y)
+                for (int x = 0; x < 320; ++x) {
+                    const bool edge = y == kPanelHalf || x == 0 || x == 159 || x == 160 || x == 319 || y == 239;
+                    auto* pixel = ui_buffer.data() + (std::size_t(g_bottom_origin_y + y) * kScreenWidth + std::size_t(g_bottom_origin_x + x)) * 4;
+                    pixel[0] = edge ? 78 : 26; pixel[1] = edge ? 68 : 23; pixel[2] = edge ? 52 : 20; pixel[3] = 0xFF;
+                }
+            if (scene) {
+                const auto& font = scene->font;
+                const int text_y = g_bottom_origin_y + kPanelHalf + 12 - font.line_height() / 2;
+                const std::string_view flip = g_panel_flip ? "Lower half" : "Upper half", close = "Close";
+                font.draw_tinted(ui_buffer, kScreenWidth, kScreenHeight, scene->pal, g_bottom_origin_x + 80 - font.measure(flip) / 2, text_y, flip, 199, 179, 119);
+                font.draw_tinted(ui_buffer, kScreenWidth, kScreenHeight, scene->pal, g_bottom_origin_x + 240 - font.measure(close) / 2, text_y, close, 199, 179, 119);
             }
-            g_bottom_origin_y = std::clamp(g_bottom_origin_y, kCharPanelY, kCharPanelY + 432 - 240);   // the panels are 432 tall
         } else {
             g_bottom_origin_x = g_bottom_origin_y = 0;
             panel_was_open = false;
@@ -139,6 +181,11 @@ auto Town::draw(std::vector<std::uint8_t>& framebuffer, const Mouse& mouse, std:
         // the world's 240 and 360 spare).
 #ifndef __3DS__
         const int left = (screen_w - 320) / 2;
+        if (left >= 0 && !g_top_panel.empty()) {          // the top screen's half of the panel, at the foot of the world's rows
+            for (int y = g_clip_top; y < g_clip_bottom; ++y) std::fill_n(framebuffer.begin() + std::ptrdiff_t(std::size_t(y) * std::size_t(screen_w) * 4), std::size_t(screen_w) * 4, std::uint8_t{0});
+            for (int y = 0; y < kPanelHalf && g_clip_bottom - kPanelHalf + y >= 0; ++y)
+                std::copy_n(g_top_panel.begin() + std::ptrdiff_t(std::size_t(y) * 320 * 4), 320 * 4, framebuffer.begin() + std::ptrdiff_t((std::size_t(g_clip_bottom - kPanelHalf + y) * std::size_t(screen_w) + std::size_t(left)) * 4));
+        }
         if (left >= 0)
             for (int y = 0; y < 240; ++y) {
                 const int to = y < g_clip_top ? y : g_clip_bottom + (y - g_clip_top);
@@ -380,7 +427,7 @@ auto Town::draw_view(std::vector<std::uint8_t>& framebuffer, std::vector<std::ui
         if (pad_target) hovered_npc = pad_hover_npc(pad_action_pick());
         view_overlays(framebuffer, *scene, view, hovered_monster(), cam_x, cam_y, unit.x, unit.y, &light);
         draw_hold_cue(framebuffer);
-        if (!coop_hud_hidden() || skillbar.picking) skillbar.draw(framebuffer, held ? -1 : mouse.x, held ? -1 : mouse.y, tip_env());
+        if (!(g_world_only && !g_bottom_panels) && (!coop_hud_hidden() || skillbar.picking)) skillbar.draw(framebuffer, held ? -1 : mouse.x, held ? -1 : mouse.y, tip_env());
         if (pad_cue && focus_id() == hero.id) draw_pad_hint(framebuffer);
         if (net_game && net_game->trade.state != 0) {
             std::vector<d2d::d2s::Item> theirs;
