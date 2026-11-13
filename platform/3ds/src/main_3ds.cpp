@@ -4,7 +4,9 @@
 //   sdmc:/3ds/d2d/data/   your Diablo II MPQs
 #include <3ds.h>
 
+#include <csignal>
 #include <cstdio>
+#include <exception>
 #include <fstream>
 #include <string>
 #include <vector>
@@ -56,7 +58,32 @@ void __system_allocateHeaps(void) {
 }
 }
 
+// A failed assert, an abort or an uncaught exception ends a 3DS program
+// without a word. Say what it was in the log first.
+namespace {
+void last_words(const char* what, const char* detail = "") {
+    if (std::FILE* out = std::fopen("sdmc:/3ds/d2d/d2d.log", "a")) {
+        std::fprintf(out, "[FATAL] %s%s%s\n", what, *detail ? ": " : "", detail);
+        std::fclose(out);
+    }
+}
+}  // namespace
+
+extern "C" void __assert_func(const char* file, int line, const char* function, const char* expression) {
+    char text[384];
+    std::snprintf(text, sizeof text, "%s (%s:%d, %s)", expression ? expression : "?", file ? file : "?", line, function ? function : "?");
+    last_words("assertion failed", text);
+    std::abort();
+}
+
 int main(int, char**) {
+    std::signal(SIGABRT, [](int) { last_words("abort()"); });
+    std::set_terminate([] {
+        try { if (const auto error = std::current_exception()) std::rethrow_exception(error); last_words("terminate() with no exception"); }
+        catch (const std::exception& error) { last_words("uncaught exception", error.what()); }
+        catch (...) { last_words("uncaught exception of unknown type"); }
+        std::_Exit(1);
+    });
     osSetSpeedupEnable(true);   // New 3DS: 804 MHz and the L2 cache
     APT_SetAppCpuTimeLimit(80);  // core 1 is the system's; this much of it is ours (threads_3ds.cpp)
     // Too little memory (launched some way that didn't give the 124 MiB mode): say so, don't crash in a level build.

@@ -1,0 +1,35 @@
+diff --git a/src/SBaseFileTable.cpp b/src/SBaseFileTable.cpp
+index 0461be2..b491d69 100644
+--- a/src/SBaseFileTable.cpp
++++ b/src/SBaseFileTable.cpp
+@@ -954,7 +954,7 @@ static DWORD BuildFileTableFromBlockTable(
+ 
+     // Sanity checks
+     assert(ha->pFileTable != NULL);
+-    assert(ha->dwFileTableSize >= ha->dwMaxFileCount);
++    assert(ha->dwFileTableSize >= ha->dwMaxFileCount || (ha->dwFlags & MPQ_FLAG_READ_ONLY));   // d2d: a read-only archive's table is the block table's size
+ 
+     //
+     // Defragmentation of the hash table was removed. The reason is a MPQ protector,
+@@ -2141,7 +2141,7 @@ TFileEntry * AllocateFileEntry(TMPQArchive * ha, const char * szFileName, LCID l
+     DWORD dwFreeCount = 0;
+ 
+     // Sanity check: File table size must be greater or equal to max file count
+-    assert(ha->dwFileTableSize >= ha->dwMaxFileCount);
++    assert(ha->dwFileTableSize >= ha->dwMaxFileCount || (ha->dwFlags & MPQ_FLAG_READ_ONLY));   // d2d: a read-only archive's table is the block table's size
+ 
+     // If we are saving MPQ tables, we don't tale number of reserved files into account
+     dwReservedFiles = (ha->dwFlags & MPQ_FLAG_SAVING_TABLES) ? 0 : ha->dwReservedFiles;
+@@ -2778,6 +2778,12 @@ DWORD BuildFileTable(TMPQArchive * ha)
+     assert(ha->dwMaxFileCount != 0);
+ 
+     // Determine the allocation size for the file table
++    // d2d (3DS): an archive opened read-only never gains a file, so its table
++    // needs the block table's entries, not the hash table's size (D2's big
++    // archives have 64K-slot hash tables: 4 MiB of empty entries each).
++    if(ha->dwFlags & MPQ_FLAG_READ_ONLY)
++        dwFileTableSize = ha->pHeader->dwBlockTableSize;
++    else
+     dwFileTableSize = STORMLIB_MAX(ha->pHeader->dwBlockTableSize, ha->dwMaxFileCount);
+ 
+     // Allocate the file table with size determined before
