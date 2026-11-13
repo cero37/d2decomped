@@ -15,6 +15,7 @@
 //   --scale <n>       window = 800x600 * n, SDL zooms (also `scale` in d2d.cfg)
 //   --seed <n>        map seed: act 1's layout and the Blood Moor
 
+#include "handheld_script.hpp"
 #include "handheld_hud.hpp"
 #include "audio.hpp"
 #include "build_info.hpp"
@@ -1180,6 +1181,7 @@ int run_windowed(std::vector<std::uint8_t>& framebuffer,
         current_phase.store(std::uint32_t(MainPhase::Devctl),
                             std::memory_order_relaxed);
         if (channel.active()) channel.pump();
+        handheld_script_step(channel);
 
         // The in-game view widens to the window's aspect (--widescreen); the
         // menus, cinematics and endgame stay 800x600.

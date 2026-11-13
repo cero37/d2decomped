@@ -252,6 +252,7 @@ add_executable(d2d
     help.cpp
     hireling.cpp
     handheld_hud.cpp
+    handheld_script.cpp
     ingame.cpp
     items.cpp
     load.cpp

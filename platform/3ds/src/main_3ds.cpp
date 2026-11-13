@@ -12,6 +12,8 @@
 #include <sys/stat.h>
 
 int d2d_main(int argc, char** argv);
+void logs_3ds_start();
+void logs_3ds_exit();
 
 // The game is far bigger than libctru's defaults allow for.
 extern "C" {
@@ -69,6 +71,7 @@ int main(int, char**) {
     mkdir("sdmc:/3ds", 0777);
     mkdir("sdmc:/3ds/d2d", 0777);
     mkdir("sdmc:/3ds/d2d/data", 0777);
+    logs_3ds_start();            // the earlier runs' logs kept (and uploaded when a server is named: logs_3ds.cpp)
     setenv("D2D_USER_DIR", "sdmc:/3ds/d2d", 1);
     setenv("D2_MPQ_DIR", "sdmc:/3ds/d2d/data", 1);
     setenv("HOME", "sdmc:/3ds/d2d", 1);
@@ -85,7 +88,9 @@ int main(int, char**) {
     static std::vector<char*> args;
     for (auto& text : words) args.push_back(text.data());
     args.push_back(nullptr);
-    return d2d_main(int(words.size()), args.data());
+    const int result = d2d_main(int(words.size()), args.data());
+    logs_3ds_exit();
+    return result;
 }
 
 // newlib declares these and devkitARM has no users: the game's home-folder

@@ -49,6 +49,9 @@ public:
     // `err busy\n`), drain the connected client, dispatch complete lines.
     void pump();
 
+    // One line through its verb's handler, with no socket: the reply (a script's commands).
+    std::string run(std::string_view line);
+
     // Close socket, unlink file. Safe to call multiple times.
     void close();
 

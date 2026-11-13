@@ -177,6 +177,22 @@ void Channel::listen(const std::string& path) {
     std::fprintf(stderr, "[devctl] listening on %s\n", path.c_str());
 }
 
+std::string Channel::run(std::string_view line) {
+    const auto tok = tokenize(line);
+    if (tok.empty()) return "err empty\n";
+    const auto found = impl_->verbs.find(tok[0]);
+    if (found == impl_->verbs.end()) return "err unknown verb '" + tok[0] + "'\n";
+    try {
+        std::string reply = found->second(tok);
+        if (reply.empty() || reply.back() != '\n') reply += '\n';
+        return reply;
+    } catch (const std::exception& error) {
+        return std::string("err ") + error.what() + "\n";
+    } catch (...) {
+        return "err unknown exception\n";
+    }
+}
+
 void Channel::pump() {
     if (impl_->listen_fd == kNone) return;
 

@@ -9,11 +9,16 @@
 
 #include "handheld_prof.hpp"
 
+#include <log.hpp>
+
 #include <cstdint>
 #include <cstdio>
 #include <malloc.h>
 #include <cstring>
+#include <string>
 #include <vector>
+
+const char* logs_3ds_notes();
 
 namespace d2d::client {
 
@@ -74,21 +79,33 @@ void handheld_present(const std::vector<std::uint8_t>& frame, int frame_w, int f
             std::memset(low, 0, 240 * 320 * 4);
         }
     }
-    // Every ten seconds: how much memory is in use, on stdout and in the log file's folder.
+    // At the first frame: what this console gave us. Then every ten seconds: the frame rate, the
+    // memory in use and where the frames' time went, in the game's log.
     static unsigned frames = 0;
     static u64 last = 0;
+    if (last == 0) {
+        bool new_model = false;
+        APT_CheckNew3DS(&new_model);
+        d2d::log::info("3ds: {} | application memory {} MiB | heap {} MiB | linear heap {} MiB | system {}.{}.{}", new_model ? "New 3DS" : "old 3DS (not supported)",
+                       osGetMemRegionSize(MEMREGION_APPLICATION) >> 20, envGetHeapSize() >> 20, envGetLinearHeapSize() >> 20,
+                       unsigned(GET_VERSION_MAJOR(osGetFirmVersion())), unsigned(GET_VERSION_MINOR(osGetFirmVersion())), unsigned(GET_VERSION_REVISION(osGetFirmVersion())));
+        for (const char* notes = logs_3ds_notes(); *notes;) {
+            const char* end = std::strchr(notes, '\n');
+            d2d::log::info("{}", std::string(notes, end ? std::size_t(end - notes) : std::strlen(notes)));
+            if (!end) break;
+            notes = end + 1;
+        }
+        last = osGetTime();
+    }
     ++frames;
     if (const u64 now = osGetTime(); now - last >= 10000) {
         const struct mallinfo heap = mallinfo();
-        if (std::FILE* out = std::fopen("sdmc:/3ds/d2d/mem.log", "a")) {
-            for (auto& entry : prof::g_spans) {
-                if (!entry.name) break;
-                std::fprintf(out, "  %-26s %7.1f ms a frame (%u calls)\n", entry.name, double(entry.ns) / 1e6 / double(frames ? frames : 1), unsigned(entry.calls));
-                entry.ns = 0; entry.calls = 0;
-            }
-            std::fprintf(out, "frames %u in %llu ms | heap used %u KiB of %lu KiB (arena %u KiB) | linear free %lu KiB\n", frames, static_cast<unsigned long long>(last ? now - last : 0),
-                         unsigned(heap.uordblks / 1024), static_cast<unsigned long>(envGetHeapSize() / 1024), unsigned(heap.arena / 1024), static_cast<unsigned long>(linearSpaceFree() / 1024));
-            std::fclose(out);
+        d2d::log::info("perf: {} frames in {} ms ({:.1f} fps) | heap used {} of {} KiB | linear free {} KiB", frames, now - last, double(frames) * 1000.0 / double(now - last),
+                       heap.uordblks / 1024, envGetHeapSize() / 1024, linearSpaceFree() / 1024);
+        for (auto& entry : prof::g_spans) {
+            if (!entry.name) break;
+            d2d::log::info("perf:   {:<26} {:6.1f} ms a frame ({} calls)", entry.name, double(entry.ns) / 1e6 / double(frames), entry.calls);
+            entry.ns = 0; entry.calls = 0;
         }
         frames = 0; last = now;
     }
