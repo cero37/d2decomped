@@ -53,15 +53,19 @@ void handheld_present(const std::vector<std::uint8_t>& frame, int frame_w, int f
     }
     auto* low = reinterpret_cast<std::uint32_t*>(gfxGetFramebuffer(GFX_BOTTOM, GFX_LEFT, &fb_w, &fb_h));   // 240 x 320
     if (low) {
+        // bottom_x < 0: the whole 800x600 UI frame at two fifths (a mid-screen menu is up).
+        const std::vector<std::uint8_t>* whole = bottom && bottom_x < 0 && bottom_stride >= 800 && bottom->size() >= std::size_t(bottom_stride) * 600 * 4 ? bottom
+                                                : !bottom && !world_only && frame_w >= 800 && frame_h >= 600 ? &frame : nullptr;
+        const int whole_stride = whole == &frame ? frame_w : bottom_stride;
         if (bottom && bottom_x >= 0 && bottom_y >= 0 && bottom_x + 320 <= bottom_stride && bottom->size() >= std::size_t(bottom_stride) * std::size_t(bottom_y + 240) * 4) {
             for (int x = 0; x < 320; ++x) {
                 std::uint32_t* column = low + x * 240;
                 const std::uint8_t* source = bottom->data() + (std::size_t(bottom_y + 239) * std::size_t(bottom_stride) + std::size_t(bottom_x + x)) * 4;
                 for (int y = 0; y < 240; ++y, source -= std::size_t(bottom_stride) * 4) column[y] = word(source);
             }
-        } else if (!world_only && frame_w >= 800 && frame_h >= 600) {
+        } else if (whole) {
             // The menus: the whole 800x600 at two fifths, where a touch can reach all of it.
-            const int off = (frame_w - 800) / 2;
+            const int off = (whole_stride - 800) / 2;
             for (int x = 0; x < 320; ++x) {
                 std::uint32_t* column = low + x * 240;
                 const int sx0 = x * 5 / 2, sx1 = (x + 1) * 5 / 2;
@@ -69,7 +73,7 @@ void handheld_present(const std::vector<std::uint8_t>& frame, int frame_w, int f
                     const int sy0 = y * 5 / 2, sy1 = (y + 1) * 5 / 2;
                     unsigned red = 0, green = 0, blue = 0, count = 0;
                     for (int sy = sy0; sy < sy1; ++sy) {
-                        const std::uint8_t* pixel = frame.data() + (std::size_t(sy) * std::size_t(frame_w) + std::size_t(off + sx0)) * 4;
+                        const std::uint8_t* pixel = whole->data() + (std::size_t(sy) * std::size_t(whole_stride) + std::size_t(off + sx0)) * 4;
                         for (int sx = sx0; sx < sx1; ++sx, pixel += 4) { red += pixel[0]; green += pixel[1]; blue += pixel[2]; ++count; }
                     }
                     column[239 - y] = (red / count) << 24 | (green / count) << 16 | (blue / count) << 8 | 0xFFu;

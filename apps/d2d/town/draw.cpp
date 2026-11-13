@@ -97,7 +97,8 @@ auto Town::draw(std::vector<std::uint8_t>& framebuffer, const Mouse& mouse, std:
     }
     present_skill_pad();
     if (g_world_only) {
-        g_bottom_panels = left_panel_open() || inv_open || tree_open;
+        g_bottom_whole = game_menu.open || controls.open || npc_menu.npc >= 0 || speech.npc >= 0 || (view.pmode == kModeDD && !view.corpses.empty());
+        g_bottom_panels = g_bottom_whole || left_panel_open() || inv_open || tree_open;
         auto& shown = g_bottom_skills;
         // The 3DS's own names, by where each button sits (south, east, west, north, the shoulders; ZR the trigger).
         shown.main = skillbar.mode_main; shown.main_label = "ZR";
@@ -117,7 +118,10 @@ auto Town::draw(std::vector<std::uint8_t>& framebuffer, const Mouse& mouse, std:
     if (g_world_only) {
         g_bottom_frame = &ui_buffer;
         static bool panel_was_open = false;
-        if (g_bottom_panels) {
+        if (g_bottom_whole) {
+            g_bottom_origin_x = g_bottom_origin_y = 0;
+            panel_was_open = false;
+        } else if (g_bottom_panels) {
             // The side the cursor is on when both are open, else the open one; the window follows the cursor down the panel.
             const bool left_side = left_panel_open(), right_side = inv_open || tree_open;
             g_bottom_origin_x = left_side && right_side ? (mouse.x < int(kScreenWidth) / 2 ? kCharPanelX : int(kScreenWidth) / 2) : left_side ? kCharPanelX : int(kScreenWidth) / 2;
@@ -139,6 +143,12 @@ auto Town::draw(std::vector<std::uint8_t>& framebuffer, const Mouse& mouse, std:
             for (int y = 0; y < 240; ++y) {
                 const int to = y < g_clip_top ? y : g_clip_bottom + (y - g_clip_top);
                 if (to >= int(kScreenHeight)) break;
+                if (g_bottom_whole) {            // the whole frame at two fifths (the console averages; the preview takes one pixel in each 2.5)
+                    for (int x = 0; x < 320; ++x)
+                        std::copy_n(ui_buffer.begin() + std::ptrdiff_t((std::size_t(y * 5 / 2) * kScreenWidth + std::size_t(x * 5 / 2)) * 4), 4,
+                                    framebuffer.begin() + std::ptrdiff_t((std::size_t(to) * std::size_t(screen_w) + std::size_t(left + x)) * 4));
+                    continue;
+                }
                 std::copy_n(ui_buffer.begin() + std::ptrdiff_t((std::size_t(y + g_bottom_origin_y) * kScreenWidth + std::size_t(g_bottom_origin_x)) * 4), 320 * 4,
                             framebuffer.begin() + std::ptrdiff_t((std::size_t(to) * std::size_t(screen_w) + std::size_t(left)) * 4));
             }

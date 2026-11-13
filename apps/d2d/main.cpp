@@ -873,7 +873,7 @@ int run_windowed(std::vector<std::uint8_t>& framebuffer,
                     if (down) { g_bottom_touch.down = true; g_bottom_touch.pressed = true; }
                     if (up) { g_bottom_touch.down = false; g_bottom_touch.released = true; }
                 } else {
-                    if (g_world_only) { mouse.x = g_bottom_origin_x + touch_x; mouse.y = g_bottom_origin_y + touch_y; }
+                    if (g_world_only && !g_bottom_whole) { mouse.x = g_bottom_origin_x + touch_x; mouse.y = g_bottom_origin_y + touch_y; }
                     else { mouse.x = touch_x * 5 / 2 + 1; mouse.y = touch_y * 5 / 2 + 1; }
                     if (down) { mouse.down = true; mouse.press_this_frame = true; }
                     if (up) { mouse.down = false; mouse.release_this_frame = event.type == SDL_EVENT_FINGER_UP; }
@@ -1813,7 +1813,7 @@ int run_windowed(std::vector<std::uint8_t>& framebuffer,
                                 std::memory_order_relaxed);
 #ifdef __3DS__
             current_phase.store(std::uint32_t(MainPhase::Present), std::memory_order_relaxed);
-            handheld_present(framebuffer, fb_width(framebuffer), int(kScreenHeight), g_clip_top, g_world_only, g_world_only ? g_bottom_frame : nullptr, int(kScreenWidth), g_bottom_origin_x, g_bottom_origin_y);
+            handheld_present(framebuffer, fb_width(framebuffer), int(kScreenHeight), g_clip_top, g_world_only, g_world_only ? g_bottom_frame : nullptr, int(kScreenWidth), g_bottom_whole ? -1 : g_bottom_origin_x, g_bottom_origin_y);
 #else
             SDL_UpdateTexture(win.texture, nullptr, framebuffer.data(), fb_width(framebuffer) * 4);
             SDL_RenderClear(win.renderer);

@@ -51,6 +51,10 @@ inline const std::vector<std::uint8_t>* g_bottom_frame = nullptr;
 // The panels are 320 wide, so only the height scrolls: the window follows
 // the cursor.
 inline bool g_bottom_panels = false;
+// Something of the PC's that sits mid-screen is up (the game menu, an NPC's menu or speech,
+// the death message): the second screen shows the whole UI frame at two fifths, as it does
+// the menus, and a touch is the mouse on it.
+inline bool g_bottom_whole = false;
 inline int g_bottom_origin_x = 0, g_bottom_origin_y = 0;
 
 // A touch on the second screen with no panel open (the HUD's own buttons): the last one, for the HUD to take.
