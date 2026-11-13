@@ -528,10 +528,14 @@ int run_windowed(std::vector<std::uint8_t>& framebuffer,
         SDL_Event event;
         while (SDL_PollEvent(&event)) if (event.type == SDL_EVENT_QUIT) quit = true;
         if (boot_title) render_title(framebuffer, *scene, boot_title->buttons, std::uint32_t(SDL_GetTicks()));
+#ifdef __3DS__
+        handheld_present(framebuffer, int(kScreenWidth), int(kScreenHeight), 0, false, nullptr, int(kScreenWidth), 0, 0);
+#else
         SDL_UpdateTexture(win.texture, nullptr, framebuffer.data(), int(kScreenWidth * 4));
         SDL_RenderClear(win.renderer);
         SDL_RenderTexture(win.renderer, win.texture, nullptr, nullptr);
         SDL_RenderPresent(win.renderer);
+#endif
         crash_frame.update(framebuffer);
         if (++frame_count == 1) d2d::log::info("First frame presented at {} ms after launch.", d2d::log::ms());
         SDL_Delay(10);
@@ -854,6 +858,28 @@ int run_windowed(std::vector<std::uint8_t>& framebuffer,
             }
             else if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN || event.type == SDL_EVENT_MOUSE_BUTTON_UP) event.button.x -= view_off;
             else if (event.type == SDL_EVENT_MOUSE_WHEEL) event.wheel.mouse_x -= view_off;
+            // A handheld's touch screen is the second screen. In game: the HUD, or with a panel
+            // open its window of the UI frame, the touch the mouse there. Elsewhere (the menus):
+            // the whole 800x600 frame at two fifths, the touch the mouse on it.
+            static const bool handheld_touch = std::getenv("D2D_HANDHELD") != nullptr;
+            if (handheld_touch && (event.type == SDL_EVENT_FINGER_DOWN || event.type == SDL_EVENT_FINGER_UP ||
+                                   event.type == SDL_EVENT_FINGER_MOTION || event.type == SDL_EVENT_FINGER_CANCELED)) {
+                const bool unit = event.tfinger.x <= 1.f && event.tfinger.y <= 1.f;     // SDL's 0..1 when the touch has no window
+                const int touch_x = unit ? int(event.tfinger.x * 319.f + .5f) : int(event.tfinger.x), touch_y = unit ? int(event.tfinger.y * 239.f + .5f) : int(event.tfinger.y);
+                const bool down = event.type == SDL_EVENT_FINGER_DOWN, up = event.type == SDL_EVENT_FINGER_UP || event.type == SDL_EVENT_FINGER_CANCELED;
+                if (g_world_only && !g_bottom_panels) {
+                    g_bottom_touch.x = touch_x; g_bottom_touch.y = touch_y;
+                    if (down) { g_bottom_touch.down = true; g_bottom_touch.pressed = true; }
+                    if (up) { g_bottom_touch.down = false; g_bottom_touch.released = true; }
+                } else {
+                    if (g_world_only) { mouse.x = g_bottom_origin_x + touch_x; mouse.y = g_bottom_origin_y + touch_y; }
+                    else { mouse.x = touch_x * 5 / 2 + 1; mouse.y = touch_y * 5 / 2 + 1; }
+                    if (down) { mouse.down = true; mouse.press_this_frame = true; }
+                    if (up) { mouse.down = false; mouse.release_this_frame = event.type == SDL_EVENT_FINGER_UP; }
+                    pad_in_use = false; mouse_took_over = true;
+                }
+                continue;
+            }
             if (town.touch_enabled && screen == Screen::InGame) {
                 if (event.type == SDL_EVENT_WINDOW_FOCUS_LOST) { town.touch_input.clear(); town.touch_item_finger = -1; }
                 if ((event.type == SDL_EVENT_MOUSE_MOTION && event.motion.which == SDL_TOUCH_MOUSEID) ||
@@ -866,24 +892,6 @@ int run_windowed(std::vector<std::uint8_t>& framebuffer,
                 }
                 if (event.type == SDL_EVENT_MOUSE_MOTION && (event.motion.state & SDL_BUTTON_LMASK))
                     if (town.touch_event(-2, touch::Phase::Move, event.motion.x, event.motion.y)) continue;
-                if (g_world_only && (event.type == SDL_EVENT_FINGER_DOWN || event.type == SDL_EVENT_FINGER_UP ||
-                                     event.type == SDL_EVENT_FINGER_MOTION || event.type == SDL_EVENT_FINGER_CANCELED)) {
-                    // A handheld's touch screen is the second screen: a panel's window of the UI frame, or the HUD.
-                    const bool unit = event.tfinger.x <= 1.f && event.tfinger.y <= 1.f;     // SDL's 0..1 when the touch has no window
-                    const int touch_x = unit ? int(event.tfinger.x * 319.f + .5f) : int(event.tfinger.x), touch_y = unit ? int(event.tfinger.y * 239.f + .5f) : int(event.tfinger.y);
-                    const bool down = event.type == SDL_EVENT_FINGER_DOWN, up = event.type == SDL_EVENT_FINGER_UP || event.type == SDL_EVENT_FINGER_CANCELED;
-                    if (g_bottom_panels) {
-                        mouse.x = g_bottom_origin_x + touch_x; mouse.y = g_bottom_origin_y + touch_y;
-                        if (down) { mouse.down = true; mouse.press_this_frame = true; }
-                        if (up) { mouse.down = false; mouse.release_this_frame = event.type == SDL_EVENT_FINGER_UP; }
-                        pad_in_use = false;
-                    } else {
-                        g_bottom_touch.x = touch_x; g_bottom_touch.y = touch_y;
-                        if (down) { g_bottom_touch.down = true; g_bottom_touch.pressed = true; }
-                        if (up) { g_bottom_touch.down = false; g_bottom_touch.released = true; }
-                    }
-                    continue;
-                }
                 if (event.type == SDL_EVENT_FINGER_DOWN || event.type == SDL_EVENT_FINGER_UP ||
                     event.type == SDL_EVENT_FINGER_MOTION || event.type == SDL_EVENT_FINGER_CANCELED) {
                     pad_in_use = true;

@@ -19,11 +19,53 @@ u32 __stacksize__ = 1024 * 1024;
 // libctru would set 32 MiB aside as linear (physically contiguous) memory.
 // Only sound buffers and the GPU need that; the game's heap needs the rest.
 u32 __ctru_linear_heap_size = 8 * 1024 * 1024;
+
+// The heaps, in place of libctru's: all the process may commit, less the
+// linear heap above, goes to the ordinary heap, but no more than its
+// address range holds (96 MiB). In the New 3DS's 124 MiB mode libctru's own
+// sum asks for more than that and the console stops before main(); what
+// doesn't fit becomes linear memory instead.
+extern char* fake_heap_start;
+extern char* fake_heap_end;
+extern u32 __ctru_heap;
+extern u32 __ctru_heap_size;
+extern u32 __ctru_linear_heap;
+void mappableInit(u32 addrMin, u32 addrMax);
+
+void __system_allocateHeaps(void) {
+    Handle limit = 0;
+    if (R_FAILED(svcGetResourceLimit(&limit, CUR_PROCESS_HANDLE))) svcBreak(USERBREAK_PANIC);
+    s64 most = 0, now = 0;
+    ResourceLimitType type = RESLIMIT_COMMIT;
+    svcGetResourceLimitLimitValues(&most, limit, &type, 1);
+    svcGetResourceLimitCurrentValues(&now, limit, &type, 1);
+    svcCloseHandle(limit);
+    const u32 remaining = u32(most - now) & ~0xFFFu;
+    const u32 area = OS_HEAP_AREA_END - OS_HEAP_AREA_BEGIN;
+    u32 heap = remaining > __ctru_linear_heap_size ? remaining - __ctru_linear_heap_size : 0;
+    if (heap > area) heap = area;
+    __ctru_heap_size = heap;
+    __ctru_linear_heap_size = remaining - heap;
+    if (R_FAILED(svcControlMemory(&__ctru_heap, OS_HEAP_AREA_BEGIN, 0, __ctru_heap_size, MEMOP_ALLOC, MemPerm(MEMPERM_READ | MEMPERM_WRITE)))) svcBreak(USERBREAK_PANIC);
+    if (R_FAILED(svcControlMemory(&__ctru_linear_heap, 0, 0, __ctru_linear_heap_size, MEMOP_ALLOC_LINEAR, MemPerm(MEMPERM_READ | MEMPERM_WRITE)))) svcBreak(USERBREAK_PANIC);
+    mappableInit(OS_MAP_AREA_BEGIN, OS_MAP_AREA_END);
+    fake_heap_start = reinterpret_cast<char*>(__ctru_heap);
+    fake_heap_end = fake_heap_start + __ctru_heap_size;
+}
 }
 
 int main(int, char**) {
     osSetSpeedupEnable(true);   // New 3DS: 804 MHz and the L2 cache
     APT_SetAppCpuTimeLimit(80);  // core 1 is the system's; this much of it is ours (threads_3ds.cpp)
+    // Too little memory (launched some way that didn't give the 124 MiB mode): say so, don't crash in a level build.
+    if (envGetHeapSize() < 88u * 1024 * 1024) {
+        gfxInitDefault();
+        consoleInit(GFX_BOTTOM, nullptr);
+        std::printf("\n d2d needs the New 3DS's extended\n memory mode and got %lu MiB.\n\n Install the .cia and start it from\n the HOME menu (not from FBI or the\n Homebrew Launcher).\n\n START to exit.\n", static_cast<unsigned long>(envGetHeapSize() >> 20));
+        while (aptMainLoop()) { hidScanInput(); if (hidKeysDown() & KEY_START) break; gfxFlushBuffers(); gfxSwapBuffers(); gspWaitForVBlank(); }
+        gfxExit();
+        return 0;
+    }
     mkdir("sdmc:/3ds", 0777);
     mkdir("sdmc:/3ds/d2d", 0777);
     mkdir("sdmc:/3ds/d2d/data", 0777);

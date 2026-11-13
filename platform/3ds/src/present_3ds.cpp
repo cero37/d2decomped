@@ -54,6 +54,22 @@ void handheld_present(const std::vector<std::uint8_t>& frame, int frame_w, int f
                 const std::uint8_t* source = bottom->data() + (std::size_t(bottom_y + 239) * std::size_t(bottom_stride) + std::size_t(bottom_x + x)) * 4;
                 for (int y = 0; y < 240; ++y, source -= std::size_t(bottom_stride) * 4) column[y] = word(source);
             }
+        } else if (!world_only && frame_w >= 800 && frame_h >= 600) {
+            // The menus: the whole 800x600 at two fifths, where a touch can reach all of it.
+            const int off = (frame_w - 800) / 2;
+            for (int x = 0; x < 320; ++x) {
+                std::uint32_t* column = low + x * 240;
+                const int sx0 = x * 5 / 2, sx1 = (x + 1) * 5 / 2;
+                for (int y = 0; y < 240; ++y) {
+                    const int sy0 = y * 5 / 2, sy1 = (y + 1) * 5 / 2;
+                    unsigned red = 0, green = 0, blue = 0, count = 0;
+                    for (int sy = sy0; sy < sy1; ++sy) {
+                        const std::uint8_t* pixel = frame.data() + (std::size_t(sy) * std::size_t(frame_w) + std::size_t(off + sx0)) * 4;
+                        for (int sx = sx0; sx < sx1; ++sx, pixel += 4) { red += pixel[0]; green += pixel[1]; blue += pixel[2]; ++count; }
+                    }
+                    column[239 - y] = (red / count) << 24 | (green / count) << 16 | (blue / count) << 8 | 0xFFu;
+                }
+            }
         } else {
             std::memset(low, 0, 240 * 320 * 4);
         }
