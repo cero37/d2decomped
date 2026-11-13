@@ -12,6 +12,10 @@ namespace d2d::devctl { class Channel; }
 
 namespace d2d::client {
 
+// A script is running: it types with the `text` verb, so the platform's own on-screen keyboard
+// (the 3DS's, which waits for a person) isn't asked for.
+inline bool g_script_running = false;
+
 // Once a frame from the main loop: runs the commands that are due.
 void handheld_script_step(d2d::devctl::Channel& channel);
 

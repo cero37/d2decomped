@@ -33,6 +33,7 @@ void handheld_script_step(d2d::devctl::Channel& channel) {
             if (!line.empty() && line[0] != '#') lines.push_back(line);
         }
         d2d::log::info("script: {} commands from {}", lines.size(), path);
+        g_script_running = !lines.empty();
     }
     const std::uint64_t now = SDL_GetTicks();
     while (next < lines.size() && now >= wait_until) {

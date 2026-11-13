@@ -828,7 +828,7 @@ int run_windowed(std::vector<std::uint8_t>& framebuffer,
                 SDL_RenderCoordinatesToWindow(win.renderer, float(field.x + field.w), float(field.y + field.h), &right, &bottom);
                 const SDL_Rect area{ int(left), int(top), int(right - left), int(bottom - top) };
                 SDL_SetTextInputArea(win.window, &area, 0);
-                SDL_StartTextInput(win.window);
+                if (!g_script_running) SDL_StartTextInput(win.window);
             }
             else      SDL_StopTextInput(win.window);
             text_active = want;
