@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Definitions for ingame.hpp: the in-game frame and the rain.
+#include "handheld_hud.hpp"
 #include "ingame.hpp"
 
 #include <overlays.hpp>
@@ -323,7 +324,10 @@ void render_ingame(std::vector<std::uint8_t>& framebuffer,
             scene.font.draw_tinted(world, std::uint32_t(world_w), kScreenHeight, pal, (box[0] + box[2]) / 2 - scene.font.measure(hovered_name) / 2,
                                top, hovered_name, colour[0], colour[1], colour[2]);
         }
-        if (g_world_only) return;   // a handheld's HUD and panels are its own (the other screen)
+        if (g_world_only) {   // a handheld's HUD is its own, on the other screen (the frame's top-left 320x240)
+            draw_bottom_hud(framebuffer, scene, { hud_stats, belt, &hud, level.name });
+            return;
+        }
         if (wide)
             for (std::size_t y = 0; y < kScreenHeight; ++y)
                 std::copy_n(world.begin() + std::ptrdiff_t((y * std::size_t(world_w) + std::size_t(off)) * 4), kScreenWidth * 4,
