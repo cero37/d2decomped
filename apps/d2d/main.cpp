@@ -2089,6 +2089,10 @@ int main(int argc, char** argv) {
             try { return mpqs->try_read(path); } catch (const std::exception&) { return std::nullopt; }
         });
     if (scene)
+        Scene::g_anim_loader = [mpqs = &scene->mpqs](const std::string& path) -> std::optional<std::vector<std::byte>> {
+            try { return mpqs->try_read(path); } catch (const std::exception&) { return std::nullopt; }
+        };
+    if (scene)
         d2d::dc6::Sprite::set_loader([mpqs = &scene->mpqs](const std::string& path) -> std::optional<std::vector<std::byte>> {
             try { return mpqs->try_read(path); } catch (const std::exception&) { return std::nullopt; }
         });

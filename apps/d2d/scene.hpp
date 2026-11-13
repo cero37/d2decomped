@@ -19,6 +19,7 @@
 #include <cstdint>
 #include <exception>
 #include <map>
+#include <functional>
 #include <optional>
 #include <span>
 #include <string>
@@ -90,7 +91,18 @@ struct Scene : GameData {
         std::array<const std::uint8_t*, 16>            tint{};   // each layer's colormap (256), null: none
         std::string                                    kind;     // D2D_ANIM_LOG's kind (chars, monsters, objects, ...)
         mutable bool                                   noted = false;   // logged: a frame of it reached the screen
+        // Where each layer's DCC came from, and when the animation was last
+        // drawn: one not drawn for a while gives its decoded frames back
+        // (Scene::trim_anims) and reads the file again when it next shows.
+        std::array<std::string, 16>                    path;
+        mutable std::array<bool, 16>                   dropped{};
+        mutable std::uint32_t                          used_ms = 0;
         [[nodiscard]] const d2d::dcc::Sprite& layer(std::size_t layer_index) const {
+            used_ms = g_anim_now_ms;
+            if (dropped[layer_index] && g_anim_loader) {
+                if (auto bytes = g_anim_loader(path[layer_index])) dcc[layer_index] = std::move(*bytes);
+                dropped[layer_index] = false;
+            }
             if (!dcc[layer_index].empty()) {
                 try { decoded[layer_index] = d2d::dcc::Sprite(dcc[layer_index]); if (tint[layer_index]) decoded[layer_index].remap(tint[layer_index]); }
                 catch (const std::exception& error) { d2d::log::warn("{} layer {}: {}", name, layer_index, error.what()); }
@@ -102,6 +114,11 @@ struct Scene : GameData {
     // Loaded on first use and kept — decoding every composite up front
     // doubled startup. `mutable` so the const Scene renderers can fill it.
     mutable std::map<std::array<std::uint8_t, 34>, PlayerAnim> composites;
+    // The frame's clock for PlayerAnim::used_ms, and how a dropped layer is read again (main sets both).
+    static inline std::uint32_t g_anim_now_ms = 0;
+    static inline std::function<std::optional<std::vector<std::byte>>(const std::string&)> g_anim_loader;
+    // Once a frame: animations not drawn for `idle_ms` give their decoded frames back.
+    void trim_anims(std::uint32_t now_ms, std::uint32_t idle_ms = 15000) const;
     // Class animations — 7 classes × 5 states, per the RE'd class table at
     // 0x00708a00. State order matches D2's suffix scheme: nu1, nu2, fw,
     // nu3, bw. Class order (rows in the table): assassin, druid, amazon,

@@ -9,6 +9,7 @@
 #include "scene.hpp"
 #include "watchdog.hpp"
 
+#include <SDL3/SDL_timer.h>
 #include <cof.hpp>
 #include <combat.hpp>
 #include <dc6.hpp>
@@ -111,6 +112,7 @@ void render_world(std::vector<std::uint8_t>& framebuffer,
     const auto& map = level.ds1;
     if (map.width() == 0 || map.height() == 0) return;
     d2d::dt1::File::trim();   // before any tile is drawn: no draw thread holds a tile's pixels here
+    scene.trim_anims(std::uint32_t(SDL_GetTicks()));   // and no unit's animation is being drawn
     const auto& pal = scene.act_pal.entries().empty() ? scene.pal : scene.act_pal;
     const int screen_w = fb_width(framebuffer);
     const int cx0 = screen_w / 2;

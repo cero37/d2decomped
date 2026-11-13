@@ -64,6 +64,23 @@ const d2d::dcc::Sprite* Scene::missile_cel(const std::string& name) const {
 }
 
 // Record each sprite once when the optional animation audit is enabled.
+void Scene::trim_anims(std::uint32_t now_ms, std::uint32_t idle_ms) const {
+    g_anim_now_ms = now_ms;
+    static std::uint32_t checked_ms = 0;
+    if (now_ms - checked_ms < 1000) return;                 // a look a second is plenty
+    checked_ms = now_ms;
+    const auto trim = [&](const PlayerAnim& anim) {
+        if (now_ms - anim.used_ms < idle_ms) return;
+        for (std::size_t layer = 0; layer < anim.decoded.size(); ++layer)
+            if (!anim.path[layer].empty() && !anim.dropped[layer] && anim.dcc[layer].empty() && anim.decoded[layer].frames_per_direction() > 0) {
+                anim.decoded[layer] = {};
+                anim.dropped[layer] = true;
+            }
+    };
+    for (const auto& [key, anim] : composites) trim(anim);
+    for (const auto& [key, anim] : npc_anims) trim(anim);
+}
+
 void Scene::note_drawn(std::string_view kind, std::string_view name) {
     static std::unordered_set<std::string> drawn;
     static std::ofstream out = [] {
