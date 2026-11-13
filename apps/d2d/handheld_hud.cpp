@@ -126,6 +126,17 @@ void draw_bottom_hud(std::vector<std::uint8_t>& framebuffer, const Scene& scene,
                 blit_sprite(framebuffer, cel, scene.item_pal(item, pal), spot[0] + (cell - int(cel.width)) / 2, spot[1] + (cell - int(cel.height)) / 2);
             }
         }
+    // Each belt column's d-pad direction (up, down, left, right, as the pad's Belt 1..4 are bound): an arrow on a dark tab in its corner.
+    for (int column = 0; column < 4; ++column) {
+        const int x = spots[std::size_t(column)][0] + 1, y = spots[std::size_t(column)][1] + 1;
+        canvas.rect(x, y, x + 9, y + 9, { 0, 0, 0 });
+        for (int step = 0; step < 4; ++step)                         // a triangle, its point the way the arrow goes
+            for (int across = -step; across <= step; ++across) {
+                const int px = column == 0 ? x + 4 + across : column == 1 ? x + 4 + across : column == 2 ? x + 2 + step : x + 6 - step;
+                const int py = column == 0 ? y + 2 + step : column == 1 ? y + 6 - step : column == 2 ? y + 4 + across : y + 4 + across;
+                canvas.put(px, py, 255, 220, 110);
+            }
+    }
     constexpr int kIcon = 24, kPitch = 30;                       // a skill's icon at half size, its button's name beside it
     const int skill_top = belt_top - 3 - kIcon - 2;
     {

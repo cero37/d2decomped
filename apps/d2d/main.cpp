@@ -17,6 +17,7 @@
 
 #include "handheld_script.hpp"
 #include "handheld_hud.hpp"
+#include "handheld_menu.hpp"
 #include "audio.hpp"
 #include "build_info.hpp"
 #include "common.hpp"
@@ -899,6 +900,13 @@ int run_windowed(std::vector<std::uint8_t>& framebuffer,
                         mouse.x = g_bottom_zoom.source_x + int(float(touch_x - g_bottom_zoom.left) / g_bottom_zoom.scale);
                         mouse.y = g_bottom_zoom.source_y + int(float(touch_y - g_bottom_zoom.top) / g_bottom_zoom.scale);
                     } else if (g_world_only && !g_bottom_whole) { mouse.x = g_bottom_origin_x + touch_x; mouse.y = g_bottom_origin_y + touch_y; }
+                    else if (!g_world_only && g_menu_page.active) {            // a menu's page: a row is the click on its button in the frame
+                        if (down) {
+                            const auto* row = g_menu_page.hit(touch_x, touch_y);
+                            if (!row) continue;
+                            mouse.x = row->x; mouse.y = row->y;
+                        } else if (!up || !mouse.down) continue;
+                    }
                     else { mouse.x = touch_x * 5 / 2 + 1; mouse.y = touch_y * 5 / 2 + 1; }
                     if (down) { mouse.down = true; mouse.press_this_frame = true; }
                     if (up) { mouse.down = false; mouse.release_this_frame = event.type == SDL_EVENT_FINGER_UP; }
@@ -1868,6 +1876,83 @@ int run_windowed(std::vector<std::uint8_t>& framebuffer,
             paint_test_pattern(framebuffer);
         }
 
+        // A handheld's front menus: the second screen lists what this screen offers (handheld_menu.hpp).
+        {
+            static const bool handheld_menus = std::getenv("D2D_HANDHELD") != nullptr;
+            auto& page = g_menu_page;
+            page.clear();
+            if (handheld_menus && scene) {
+                const auto over = [&](const Button& button) { return mouse.x >= button.x && mouse.x < button.x + button.width && mouse.y >= button.y && mouse.y < button.y + button.height; };
+                const auto words = [](const Button& button) {
+                    std::string text = button.label ? button.label : "";
+                    if (button.label2 && *button.label2) text += std::string(" ") + button.label2;
+                    return text;
+                };
+                const auto row = [&](const Button& button, bool small = false, bool dim = false) {
+                    if (const auto text = words(button); !text.empty()) page.add(text, button.x + button.width / 2, button.y + button.height / 2, over(button), small, dim);
+                };
+                if (screen == Screen::Title) {
+                    page.active = true;
+                    page.heading = "Diablo II";
+                    for (const auto& button : title.buttons) {          // not Battle.net, its gateway or the videos: a handheld has none of them
+                        const std::string text = words(button);
+                        if (text.find("BATTLE") != std::string::npos || text.find("GATEWAY") != std::string::npos || text.find("CINEMATICS") != std::string::npos) continue;
+                        row(button);
+                    }
+                } else if (screen == Screen::OtherMultiplayer) {
+                    page.active = true;
+                    for (const auto& button : other_multiplayer.buttons) row(button);
+                } else if (screen == Screen::TcpIp && !tcpip.box_open && tcpip.popup.empty()) {
+                    page.active = true;
+                    page.heading = tcpip.heading;
+                    row(tcpip.host, false, !tcpip.has_ip); row(tcpip.join, false, !tcpip.has_ip); row(tcpip.cancel);
+                } else if (screen == Screen::CharSelect) {
+                    page.active = true;
+                    if (!csu.popup.empty()) { page.heading = csu.popup; row(csu.popup_ok); }
+                    else if (csu.confirm_delete) { page.heading = csu.delete_text; row(csu.popup_yes); row(csu.popup_no); }
+                    else if (csu.pick_difficulty) {
+                        page.heading = csu.difficulty_heading;
+                        for (int index = 0; index < 3; ++index) row(csu.difficulty_btn[std::size_t(index)], false, index == 2 && !csu.hell_open);
+                    } else {
+                        // The characters on the list's page: a touch picks one, a touch on the pick plays it (as OK).
+                        const int count = int(scene->saves.size());
+                        page.heading = count > 0 ? "Choose a hero" : "No heroes yet";
+                        for (int slot = 0; slot < 8 && csu.scroll + slot < count; ++slot) {
+                            const int index = csu.scroll + slot;
+                            const auto& header = scene->saves[std::size_t(index)];
+                            const bool picked = index == csu.selected;
+                            const int x = picked ? csu.ok_btn.x + csu.ok_btn.width / 2 : kSlotX[slot % 2] + kSlotW / 2;
+                            const int y = picked ? csu.ok_btn.y + csu.ok_btn.height / 2 : kSlotY[slot / 2] + kSlotH / 2;
+                            page.add(char_title(header) + header.name, x, y, picked, false, false, level_class_line(*scene, header));
+                        }
+                        if (charselect_max_scroll(count) > 0) {
+                            page.add("Up", kScrollX + 6, kScrollUpTop + kScrollArrow / 2, false, true);
+                            page.add("Down", kScrollX + 6, kScrollDownTop + kScrollArrow / 2, false, true);
+                        }
+                        page.add("Back", csu.cancel_btn.x + csu.cancel_btn.width / 2, csu.cancel_btn.y + csu.cancel_btn.height / 2, over(csu.cancel_btn), true);
+                        page.add("Delete", csu.delete_btn.x + csu.delete_btn.width / 2, csu.delete_btn.y + csu.delete_btn.height / 2, over(csu.delete_btn), true, csu.selected < 0);
+                        page.add("New", csu.create_btn.x + csu.create_btn.width / 2, csu.create_btn.y + csu.create_btn.height / 2, over(csu.create_btn), true);
+                        page.add("Play", csu.ok_btn.x + csu.ok_btn.width / 2, csu.ok_btn.y + csu.ok_btn.height / 2, over(csu.ok_btn), true, csu.selected < 0);
+                    }
+                } else if (screen == Screen::CharCreate) {
+                    page.active = true;
+                    page.heading = character.selected >= 0 ? std::string(kClassKey[character.selected]) + (character.name.empty() ? std::string(": name your hero") : ": " + character.name) : std::string("Choose a class");
+                    for (int index = 0; index < 7; ++index)
+                        page.add(kClassKey[index], kClassPos[index].x, kClassPos[index].y - 50, index == character.selected, false);
+                    page.add("Back", character.cancel_btn.x + character.cancel_btn.width / 2, character.cancel_btn.y + character.cancel_btn.height / 2, over(character.cancel_btn), true);
+                    page.add("Start", character.ok_btn.x + character.ok_btn.width / 2, character.ok_btn.y + character.ok_btn.height / 2, over(character.ok_btn), true, character.selected < 0);
+                }
+                if (page.active && page.rows.empty()) page.active = false;
+                if (page.active) {
+                    draw_menu_page(page, *scene);
+#ifndef __3DS__
+                    // Off the console (a preview): the page in the frame's top-left corner.
+                    for (int y = 0; y < 240; ++y)
+                        std::copy_n(page.pixels.begin() + std::ptrdiff_t(std::size_t(y) * 320 * 4), 320 * 4, framebuffer.begin() + std::ptrdiff_t(std::size_t(y) * std::size_t(fb_width(framebuffer)) * 4));
+#endif
+                }
+            }
+        }
         const std::uint32_t t_after_render = std::uint32_t(SDL_GetTicks());
         // Skip GPU work when the window is minimized — Metal's swapchain
         // stalls if we keep pushing frames to a hidden drawable, which
@@ -1879,7 +1964,8 @@ int run_windowed(std::vector<std::uint8_t>& framebuffer,
                                 std::memory_order_relaxed);
 #ifdef __3DS__
             current_phase.store(std::uint32_t(MainPhase::Present), std::memory_order_relaxed);
-            handheld_present(framebuffer, fb_width(framebuffer), int(kScreenHeight), g_clip_top, g_world_only, g_world_only ? g_bottom_frame : nullptr, int(kScreenWidth), g_bottom_whole ? -1 : g_bottom_origin_x, g_bottom_origin_y);
+            if (g_menu_page.active && !g_world_only) handheld_present(framebuffer, fb_width(framebuffer), int(kScreenHeight), g_clip_top, false, &g_menu_page.pixels, 320, 0, 0);
+            else handheld_present(framebuffer, fb_width(framebuffer), int(kScreenHeight), g_clip_top, g_world_only, g_world_only ? g_bottom_frame : nullptr, int(kScreenWidth), g_bottom_whole ? -1 : g_bottom_origin_x, g_bottom_origin_y);
 #else
             SDL_UpdateTexture(win.texture, nullptr, framebuffer.data(), fb_width(framebuffer) * 4);
             SDL_RenderClear(win.renderer);
