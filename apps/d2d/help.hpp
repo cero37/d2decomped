@@ -20,6 +20,8 @@ struct HelpScreen {
     // A frame's click; true when it closes (the close button let go over it).
     bool input(const Mouse& mouse);
     void draw(std::vector<std::uint8_t>& framebuffer, const Scene& scene, const keys::Table& table) const;
+    // A handheld's own page, in the frame's top-left 320x240 (its touch screen): the buttons, by name.
+    void draw_handheld(std::vector<std::uint8_t>& framebuffer, const Scene& scene) const;
 };
 
 }  // namespace d2d::client

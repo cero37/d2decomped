@@ -144,6 +144,17 @@ struct Scene : GameData {
             }
             return decoded[layer_index];
         }
+        // Every layer is here to draw (asks the worker for those that are not): a unit whose
+        // animation is still on its way keeps the one it last drew, it does not vanish.
+        [[nodiscard]] bool ready() const {
+            bool whole = true;
+            for (std::size_t index = 0; index < decoded.size(); ++index) {
+                if (!loading[index] && !dropped[index] && dcc[index].empty()) continue;
+                (void)layer(index);
+                if (loading[index]) whole = false;
+            }
+            return whole;
+        }
     };
     // Loaded on first use and kept — decoding every composite up front
     // doubled startup. `mutable` so the const Scene renderers can fill it.

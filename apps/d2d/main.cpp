@@ -1076,6 +1076,8 @@ int run_windowed(std::vector<std::uint8_t>& framebuffer,
                                          : town.skill_strip >= 0 ? pad::SkillUi::Strip : pad::SkillUi::None;
             pad::Actions pad_actions = pad_capture ? (void(pad_mapper.step(first, pad_context, pad_dt, skill_ui)), pad::Actions{})
                                                          : pad_mapper.step(first, pad_context, pad_dt, skill_ui);
+            pad::g_labels_mirrored = g_pad_config.swap_confirm && skill_ui == pad::SkillUi::None    // as Mapper::step has the two
+                && (pad_context == pad::Context::Panel || pad_context == pad::Context::Shop || pad_context == pad::Context::Dialog);
             const int pad_side = (win.view_w - int(kScreenWidth)) / 2;   // widescreen's world beyond the 800x600 UI
             const bool pad_active = pad_actions.move_active || pad_actions.click_press || pad_actions.click_down || pad_actions.rclick_press
                                     || pad_actions.cursor_dx != 0 || pad_actions.cursor_dy != 0 || !pad_actions.keys.empty()
@@ -1096,7 +1098,7 @@ int run_windowed(std::vector<std::uint8_t>& framebuffer,
                 pad_actions.trade_press = false;
                 pad_actions.tab_step = 0;
             } else if (pad_actions.skill_picker) town.pad_open_picker();
-            if (town.menu_handoff.drop(pad_capture_held[std::size_t(pad::Button::South)])) {
+            if (town.menu_handoff.drop(pad_capture_held[std::size_t(g_pad_config.swap_confirm ? pad::Button::East : pad::Button::South)])) {
                 pad_actions.click_press = false;
                 pad_actions.click_down = false;
                 pad_actions.click_release = false;

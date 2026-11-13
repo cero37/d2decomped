@@ -94,7 +94,7 @@ auto Town::draw(std::vector<std::uint8_t>& framebuffer, const Mouse& mouse, std:
     present_skill_pad();
     if (g_world_only) {
         g_bottom_whole = game_menu.open || controls.open || npc_menu.npc >= 0 || speech.npc >= 0 || (view.pmode == kModeDD && !view.corpses.empty());
-        g_bottom_panels = g_bottom_whole || left_panel_open() || inv_open || tree_open;
+        g_bottom_panels = g_bottom_whole || left_panel_open() || inv_open || tree_open || help.open;   // Help: its own page there, any touch closes it
         auto& shown = g_bottom_skills;
         // The 3DS's own names, by where each button sits (south, east, west, north, the shoulders; ZR the trigger).
         shown.main = skillbar.mode_main; shown.main_label = "ZR";
@@ -113,6 +113,11 @@ auto Town::draw(std::vector<std::uint8_t>& framebuffer, const Mouse& mouse, std:
             } else if (skillbar.picking == 3) {
                 const int count = int(wheel_ids.size()), rest = count - wheel_page;
                 if (const int hit = bottom_wheel_hit(x, y, std::min(skillpad::kWheelShown, rest)); hit >= 0) wheel_at = wheel_page + hit;
+                else if (const int slot = bottom_slot_hit(x, y); slot >= 0) {          // a slot of the row under the ring: the picked skill goes there
+                    pad::Actions put;
+                    if (slot == 0) put.main_skill = true; else put.skill_slot = slot - 1;
+                    drive_wheel(put);
+                }
             } else if (y < 22 && pad_field()) skill_strip = 0;
             else if (y < 166) g_handheld_zoom = (g_handheld_zoom + 1) % 3;
         }
@@ -189,8 +194,14 @@ auto Town::draw(std::vector<std::uint8_t>& framebuffer, const Mouse& mouse, std:
                 g_bottom_whole = false;                    // the screen takes the frame's top-left 320x240 as it is
             }
         }
-        if (!g_bottom_panels || g_bottom_whole || g_bottom_zoom.on) g_top_panel.clear();
-        if (g_bottom_zoom.on) {
+        const bool help_page = help.open && !game_menu.open && !controls.open;
+        if (help_page) {
+            g_bottom_zoom = { true, 0, 0, 0, 0, 1.f };     // the page as it is: a touch is the mouse there, no bar under it
+            g_bottom_whole = false;
+            help.draw_handheld(ui_buffer, *scene);
+        }
+        if (!g_bottom_panels || g_bottom_whole || g_bottom_zoom.on || help_page) g_top_panel.clear();
+        if (g_bottom_zoom.on || help_page) {
             g_bottom_origin_x = g_bottom_origin_y = 0;
             panel_was_open = false;
         } else if (g_bottom_whole) {
@@ -481,12 +492,29 @@ auto Town::draw_view(std::vector<std::uint8_t>& framebuffer, std::vector<std::ui
         // up, talk to or enter now is named at the foot of the view (monsters aren't: the swing says it).
         if (g_world_only && wide && pad_field() && focus_id() == hero.id && !skillbar.mode_hint.empty()
             && contextual_pick.kind != PadPick::kNone && contextual_pick.kind != PadPick::kMonster) {
-            std::string hint = skillbar.mode_hint;                 // "A . Use Chest": the button, then what it does
-            if (const auto dot = hint.find(" . "); dot != std::string::npos) hint.replace(dot, 3, "  ");
+            // "A . Use Chest": the button's name on a small plate, then what it does.
+            std::string button, hint = skillbar.mode_hint;
+            if (const auto dot = hint.find(" . "); dot != std::string::npos) { button = hint.substr(0, dot); hint.erase(0, dot + 3); }
             const auto& pal = scene->act_pal.entries().empty() ? scene->pal : scene->act_pal;
             const auto& font = g_handheld_zoom > 0 && scene->font24.line_height() > 0 ? scene->font24 : scene->font;   // the zoomed-out view is scaled down to the screen
-            const int width = fb_width(*wide), text_x = (width - font.measure(hint)) / 2;
-            const int text_y = g_clip_bottom - 8 - font.line_height();
+            const int width = fb_width(*wide), line = font.line_height();
+            const int plate_h = line * 5 / 4 + 1, plate_w = button.empty() ? 0 : std::max(plate_h, font.measure(button) + plate_h / 2 + 2), gap = button.empty() ? 0 : line / 3;
+            const int left = (width - plate_w - gap - font.measure(hint)) / 2;
+            const int text_y = g_clip_bottom - 8 - line;
+            if (plate_w > 0) {                                     // a pill: round ends, a gold rim, the letter in the middle
+                const int top = text_y + line * 2 / 5, radius = plate_h / 2;     // the fonts' cells carry their glyphs low
+                for (int y = 0; y < plate_h; ++y)
+                    for (int x = 0; x < plate_w; ++x) {
+                        const int near_x = std::clamp(x, radius, plate_w - 1 - radius), dx = x - near_x, dy = y - radius;
+                        const int reach = dx * dx + dy * dy;
+                        if (reach > radius * radius || top + y < 0 || top + y >= int(kScreenHeight) || left + x < 0 || left + x >= width) continue;
+                        const bool rim = reach > (radius - 2) * (radius - 2) || y == 0 || y == plate_h - 1;
+                        auto* pixel = wide->data() + (std::size_t(top + y) * std::size_t(width) + std::size_t(left + x)) * 4;
+                        pixel[0] = rim ? 214 : 12; pixel[1] = rim ? 176 : 10; pixel[2] = rim ? 78 : 8;
+                    }
+                font.draw_tinted(*wide, std::uint32_t(width), kScreenHeight, pal, left + (plate_w - font.measure(button)) / 2, text_y, button, 255, 255, 255);
+            }
+            const int text_x = left + plate_w + gap;
             font.draw_tinted(*wide, std::uint32_t(width), kScreenHeight, pal, text_x + 1, text_y + 1, hint, 0, 0, 0);
             font.draw_tinted(*wide, std::uint32_t(width), kScreenHeight, pal, text_x, text_y, hint, 255, 232, 150);
         }
@@ -590,7 +618,7 @@ auto Town::draw_view(std::vector<std::uint8_t>& framebuffer, std::vector<std::ui
         if (party.open && (net_game || coop_hud_hidden() || !party_preview.empty() || (pad_playing && pad_config.skill_buttons))) party.draw(framebuffer, *scene, party_rows(), party_own(), mouse.x, mouse.y);
         if (hireling.open && view.merc_sheet)
             hireling.draw(framebuffer, *scene, *view.merc_sheet, merc_label, character.merc_items, held, mouse.x, mouse.y);
-        if (help.open) help.draw(framebuffer, *scene, key_table);
+        if (help.open && !g_world_only) help.draw(framebuffer, *scene, key_table);   // a handheld's page: Town::draw
         if (controls.open) controls.draw(framebuffer, *scene, now_ms);
         // A joining pad's pick: down the left, clear of the action in the middle and of the portraits' column.
         const int spare = wide ? (fb_width(*wide) - int(kScreenWidth)) / 2 : 0;

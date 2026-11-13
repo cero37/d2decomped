@@ -420,11 +420,21 @@ struct Audio {
 #else
     static constexpr std::size_t kKeptWavBudget = 16 * 1024 * 1024, kKeptWavMost = 512 * 1024;
 #endif
+    struct KeptBig { int index = -1; std::shared_ptr<const std::vector<std::byte>> bytes; std::uint32_t used = 0; };
+    std::array<KeptBig, 2> kept_big;
+    static constexpr std::size_t kKeptBigMost = 1024 * 1024;
     std::shared_ptr<const std::vector<std::byte>> read_wav(const GameData& game_data, const GameData::Sound& snd, int index) {
         if (const auto kept = kept_wavs.find(index); kept != kept_wavs.end()) { kept->second.used = ++kept_wav_clock; return kept->second.bytes; }
+        for (auto& big : kept_big) if (big.index == index && big.bytes) { big.used = ++kept_wav_clock; return big.bytes; }
         auto read = read_wav_file(game_data, snd, index);
         if (!read) return nullptr;
         auto bytes = std::make_shared<const std::vector<std::byte>>(std::move(*read));
+        // A long one played again and again (a camp fire's loop, read from the card each time its
+        // turn came: 80 ms of a frame): the last two of those are kept too.
+        if (bytes->size() > kKeptWavMost && bytes->size() <= kKeptBigMost) {
+            auto& slot = kept_big[0].used <= kept_big[1].used ? kept_big[0] : kept_big[1];
+            slot = { index, bytes, ++kept_wav_clock };
+        }
         if (bytes->size() <= kKeptWavMost) {
             kept_wav_bytes += bytes->size();
             kept_wavs[index] = { bytes, ++kept_wav_clock };

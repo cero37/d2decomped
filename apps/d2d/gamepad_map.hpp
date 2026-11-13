@@ -99,7 +99,11 @@ enum class Family { Xbox, PlayStation, Nintendo, Deck };
 // What `button` is called on a `family` pad. Nintendo's face letters sit
 // mirrored (A east, B south); PlayStation's are shapes, spelled out (the
 // game's fonts have none).
+// A Nintendo pad's way round in a game's panels, shops and dialogs (Config::swap_confirm): what the
+// layout has on south is on east there and the other way about (Mapper::step), and the names follow.
+inline bool g_labels_mirrored = false;
 [[nodiscard]] inline std::string_view label(Family family, Button button) {
+    if (g_labels_mirrored) button = button == Button::South ? Button::East : button == Button::East ? Button::South : button;
     static constexpr std::array<std::array<std::string_view, std::size_t(Button::Count)>, 4> kLabels = { {
         { "A", "B", "X", "Y", "View", "Menu", "LB", "RB", "LS", "RS", "Up", "Down", "Left", "Right", "LT", "RT" },
         { "Cross", "Circle", "Square", "Triangle", "Share", "Options", "L1", "R1", "L3", "R3", "Up", "Down", "Left", "Right", "L2", "R2" },
@@ -423,6 +427,12 @@ public:
         auto held = sample.held;
         held[std::size_t(Button::LeftTrigger)] = left_trigger_;
         held[std::size_t(Button::RightTrigger)] = right_trigger_;
+        // A (east) confirms and B (south) backs out in a game's panels, shops and dialogs too: the two
+        // change places there. The field's skill buttons, the wheel and the Start list keep theirs.
+        const bool mirrored = config_.swap_confirm && skill_ui == SkillUi::None
+                              && (context == Context::Panel || context == Context::Shop || context == Context::Dialog);
+        if (mirrored != mirrored_) { std::swap(prev_[std::size_t(Button::South)], prev_[std::size_t(Button::East)]); mirrored_ = mirrored; }
+        if (mirrored) std::swap(held[std::size_t(Button::South)], held[std::size_t(Button::East)]);
         const auto pressed = [&](Button which) { return held[std::size_t(which)] && !prev_[std::size_t(which)]; };
         std::array<bool, 4> dpad_on{};             // up, down, left, right: edge, then the hold repeat
         const auto snap = [&] {
@@ -638,6 +648,7 @@ private:
     Config config_;
     std::array<bool, std::size_t(Button::Count)> prev_{};
     bool click_prev_ = false, left_trigger_ = false, right_trigger_ = false;
+    bool mirrored_ = false;
     std::array<float, 4> dpad_hold_{};             // up, down, left, right, while a menu d-pad is repeating
     float swap_hold_ = 0.f;                        // how long the left trigger has been down
     bool swap_cast_ = false;                       // a skill fired during that press

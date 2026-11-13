@@ -208,7 +208,7 @@ void draw_bottom_hud(std::vector<std::uint8_t>& framebuffer, const Scene& scene,
                 const auto* skill = id >= 0 ? scene.skills.get(id) : nullptr;
                 const std::string name = skill ? skill->name : std::string(skillpad::action_label(id, true));
                 scene.font.draw_tinted(framebuffer, kScreenWidth, kScreenHeight, pal, centre_x - scene.font.measure(name) / 2, centre_y - 16, name, 255, 255, 255);
-                const std::string how = lists.feedback.empty() ? std::string("press a button to put it there") : lists.feedback;
+                const std::string how = lists.feedback.empty() ? std::string("press a button, or touch its slot below") : lists.feedback;
                 small.draw_tinted(framebuffer, kScreenWidth, kScreenHeight, pal, centre_x - small.measure(how) / 2, centre_y + 2, how, 199, 179, 119);
             }
         } else if (state.automap && scene.automap_cels_small.frames_per_direction() > 0) {
@@ -268,6 +268,13 @@ int bottom_wheel_hit(int x, int y, int shown) {
         if (x >= left && x < left + 32 && y >= top && y < top + 32) return index;
     }
     return -1;
+}
+
+int bottom_slot_hit(int x, int y) {
+    constexpr int kPitch = 30, kIcon = 24;                       // as draw_bottom_hud lays the row
+    const int left = kBottomWidth / 2 - (7 * kPitch - (kPitch - kIcon - 2)) / 2, top = kBottomHeight - 2 - 29 - 3 - kIcon - 2;
+    if (y < top - 4 || y >= top + kIcon + 4 || x < left - 2 || x >= left + 7 * kPitch) return -1;
+    return std::clamp((x - left + 2) / kPitch, 0, 6);
 }
 
 void draw_loading_note(std::vector<std::uint8_t>& framebuffer, const Scene& scene, std::uint32_t now_ms) {

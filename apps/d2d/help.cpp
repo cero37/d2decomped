@@ -111,4 +111,43 @@ void HelpScreen::draw(std::vector<std::uint8_t>& framebuffer, const Scene& scene
     }
 }
 
+void HelpScreen::draw_handheld(std::vector<std::uint8_t>& framebuffer, const Scene& scene) const {
+    constexpr int kPageW = 320, kPageH = 240;
+    const auto fill = [&](int left, int top, int right, int bottom, std::uint8_t r, std::uint8_t g, std::uint8_t b) {
+        for (int y = top; y < bottom; ++y)
+            for (int x = left; x < right; ++x) {
+                auto* pixel = &framebuffer[(std::size_t(y) * kScreenWidth + std::size_t(x)) * 4];
+                pixel[0] = r; pixel[1] = g; pixel[2] = b; pixel[3] = 0xff;
+            }
+    };
+    fill(0, 0, kPageW, kPageH, 78, 68, 52);
+    fill(1, 1, kPageW - 1, kPageH - 1, 14, 12, 10);
+    fill(8, 24, kPageW - 8, 25, 78, 68, 52);
+    const auto& pal = scene.pal;
+    const auto& title = scene.font;
+    const auto& text = scene.font_small;
+    const std::string heading = "Controls";
+    title.draw_tinted(framebuffer, kScreenWidth, kScreenHeight, pal, (kPageW - title.measure(heading)) / 2, 4, heading, 255, 232, 150);
+    static constexpr std::array<std::array<const char*, 2>, 10> kRows = { {
+        { "Circle Pad", "Walk" },
+        { "A", "Attack, talk, open, pick up" },
+        { "B Y X L R ZR", "Your skills" },
+        { "Hold ZL", "A second set of skills" },
+        { "Tap ZL", "Swap weapons" },
+        { "D-pad", "Drink from the belt" },
+        { "START", "Character, items, skills, map" },
+        { "SELECT", "Put skills on the buttons" },
+        { "Touch", "Panels, items and menus" },
+        { "Tap the map", "Zoom the view" },
+    } };
+    const int pitch = (kPageH - 30 - 20) / int(kRows.size());
+    for (std::size_t row = 0; row < kRows.size(); ++row) {
+        const int y = 30 + int(row) * pitch + (pitch - text.line_height()) / 2;
+        text.draw_tinted(framebuffer, kScreenWidth, kScreenHeight, pal, 10, y, kRows[row][0], 214, 176, 78);
+        text.draw_tinted(framebuffer, kScreenWidth, kScreenHeight, pal, 104, y, kRows[row][1], 255, 255, 255);
+    }
+    const std::string foot = "Touch the screen or press B to close";
+    scene.font_small.draw_tinted(framebuffer, kScreenWidth, kScreenHeight, pal, (kPageW - scene.font_small.measure(foot)) / 2, kPageH - 17, foot, 150, 135, 100);
+}
+
 }  // namespace d2d::client

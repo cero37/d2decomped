@@ -180,7 +180,8 @@ auto Town::update(std::vector<std::uint8_t>& framebuffer, const Mouse& frame_mou
         }
         // The Help screen's close button; its other clicks go nowhere (FUN_00494f30).
         if (help.open && !controls.open && !game_menu.open) {
-            if (help.input(mouse)) { help.open = true; toggle_help(); }
+            if (g_world_only) { if (mouse.press_this_frame) toggle_help(); }      // a handheld's page: any touch, or the confirm button
+            else if (help.input(mouse)) { help.open = true; toggle_help(); }
             mouse.down = mouse.press_this_frame = mouse.release_this_frame = mouse.rpress_this_frame = false;
         }
         // Configure Controls (UI 0xb) takes every key and click while it's up.

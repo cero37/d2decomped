@@ -15,6 +15,7 @@
 #include <algorithm>
 #include <array>
 #include <cstddef>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
@@ -34,10 +35,10 @@ std::filesystem::path sheet_path(const std::filesystem::path& directory, const s
 }  // namespace
 
 // A handheld has no right stick to click for Interact: its A (the east slot) is Attack, which
-// also uses, opens, talks and picks up (as the left mouse button does), unless something was put there.
+// also uses, opens, talks and picks up (as the left mouse button does), and stays that (drive_wheel).
 namespace {
 void handheld_sheet(skillpad::Sheet& sheet) {
-    if (sheet.slot(false, 1) == skillpad::kEmpty) sheet.set_slot(false, 1, 0);
+    sheet.set_slot(false, 1, 0);
     if (sheet.main == skillpad::kUnset || sheet.main == skillpad::kEmpty) sheet.main = 0;
 }
 }  // namespace
@@ -320,6 +321,12 @@ auto Town::drive_wheel(const pad::Actions& actions) -> void {
     auto& sheet = skill_sheets[sheet_key(who.name)];
     const int chosen = wheel_ids[std::size_t(std::clamp(wheel_at, 0, count - 1))];
     bool changed = false;
+    // A handheld's A (the east slot) is Attack / Use, its one way to talk, open and pick up by button:
+    // it stays there (the second set's A, with ZL held, is free).
+    if (std::getenv("D2D_HANDHELD") && !actions.modifier_held && actions.skill_slot == 1) {
+        if (chosen != 0) assignment_feedback = "A stays Attack / Use: pick another button";
+        return;
+    }
     if (actions.skill_slot >= 0 && actions.skill_slot < skillpad::kSlots) {
         sheet.set_slot(actions.modifier_held, actions.skill_slot, chosen);
         static constexpr std::array<pad::Action, 6> kDestinations = {
@@ -341,6 +348,7 @@ auto Town::drive_wheel(const pad::Actions& actions) -> void {
     const auto* assigned = chosen >= 0 && scene ? scene->skills.get(chosen) : nullptr;
     assignment_feedback += " . " + (assigned ? assigned->name : std::string(skillpad::action_label(chosen, true)));
     if (sheet.main == skillpad::kUnset) sheet.main = int(who.header.right_skill);
+    d2d::log::info("skill pad: {}", assignment_feedback);
     save_skill_sheet(who.name);
 }
 

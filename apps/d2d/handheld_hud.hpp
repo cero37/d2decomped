@@ -48,6 +48,8 @@ inline BottomSkills g_bottom_skills;
 // Which of the list's nine buttons, or of the ring's `shown` icons, a touch at (x, y) is on; -1 for none.
 int bottom_strip_hit(int x, int y);
 int bottom_wheel_hit(int x, int y, int shown);
+// Which of the HUD's skill slots a touch is on: 0 the trigger's, 1..6 the buttons' in their order; -1 for none.
+int bottom_slot_hit(int x, int y);
 
 // An open panel is 432 rows and a screen 240: it goes across both, 216 rows each, its upper half
 // at the foot of the top screen (this image, 320 x kPanelHalf RGBA; empty when no panel is up)
