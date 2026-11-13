@@ -182,6 +182,8 @@ struct Bindings {
     return out;
 }
 
+inline int g_strip_columns = 1;   // the Start list's columns: 1 as the PC draws it
+
 struct Config {
     float deadzone = 0.15f;           // radial, both sticks
     float cursor_speed = 650.f;       // game pixels per second at full tilt
@@ -581,7 +583,8 @@ public:
             out.snap_x = 0;
             out.snap_y = 0;
             click_prev_ = false;
-            out.strip_step = int(dpad_on[1]) - int(dpad_on[0]);
+            // A list: up and down, a row each. A grid of g_strip_columns (a handheld's): a row is that many, left and right one.
+            out.strip_step = (int(dpad_on[1]) - int(dpad_on[0])) * g_strip_columns + (g_strip_columns > 1 ? int(dpad_on[3]) - int(dpad_on[2]) : 0);
             out.confirm = pressed(Button::South);
             out.cancel = pressed(Button::East) || pressed(Button::Start);
         }

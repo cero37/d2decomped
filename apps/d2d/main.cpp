@@ -2230,6 +2230,7 @@ int main(int argc, char** argv) {
         g_pad_config = pad::load_config([&](const char* key) { const auto found = cfg.find(key); return found == cfg.end() ? nullptr : &found->second; }, problems);
         // A handheld plays with its buttons: the skill-button layout, confirm on Nintendo's A. (Here, not
         // later: the input mapper is made from this.)
+        if (std::getenv("D2D_HANDHELD")) pad::g_strip_columns = 3;   // its Start list is a 3x3 grid (handheld_hud.cpp)
         if (std::getenv("D2D_HANDHELD") && !g_pad_config.skill_buttons) { g_pad_config = pad::skill_buttons_config(g_pad_config); g_pad_config.swap_confirm = true; }
         g_click_bindings = keys::click_load(cfg["click_attack"], cfg["click_skill"]);
         for (const auto& problem : problems) d2d::log::warn("d2d.cfg: {}", problem);

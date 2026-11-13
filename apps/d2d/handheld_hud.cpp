@@ -53,6 +53,7 @@ void draw_bottom_hud(std::vector<std::uint8_t>& framebuffer, const Scene& scene,
     const int state_now = (lists.strip_on ? 1 : 0) | (lists.wheel_on ? 2 : 0) | lists.strip_at << 2 | lists.wheel_at << 8 | lists.wheel_page << 16 | g_handheld_zoom << 24 | int(lists.feedback.size()) << 26;
     if (drawn_ms != 0 && now_ms - drawn_ms < 200 && state_now == drawn_state) return;
     drawn_ms = now_ms; drawn_state = state_now;
+    ++g_bottom_serial;
     const int width = kBottomWidth, height = kBottomHeight;
     // The stone the panel is cut from.
     for (int y = 0; y < height; ++y)

@@ -52,6 +52,7 @@ int bottom_wheel_hit(int x, int y, int shown);
 // An open panel is 432 rows and a screen 240: it goes across both, 216 rows each, its upper half
 // at the foot of the top screen (this image, 320 x kPanelHalf RGBA; empty when no panel is up)
 // and its lower half on the touch screen, over a bar of two buttons (flip the halves, close).
+inline unsigned g_bottom_serial = 0;   // goes up each time the HUD is drawn again: the console copies it to its screen only then
 inline constexpr int kPanelHalf = 216;
 inline std::vector<std::uint8_t> g_top_panel;
 inline bool g_panel_flip = false;      // the upper half on the touch screen instead

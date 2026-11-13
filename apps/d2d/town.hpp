@@ -536,6 +536,7 @@ struct Town {
                          bool expansion, const pad::Actions& actions, const Send& out);
     [[nodiscard]] int portal_tome(std::string_view name, bool charged = true) const;
     [[nodiscard]] bool skill_known(std::string_view name, int skill) const;
+    [[nodiscard]] bool skill_known_now(std::string_view name, int skill) const;   // skill_known keeps its answers a moment
     void drive_wheel(const pad::Actions& actions);
     void drive_strip(const pad::Actions& actions);
     std::unordered_map<int, Automap> other_automaps;   // other Layers' maps, while elsewhere

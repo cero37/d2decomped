@@ -17,6 +17,8 @@
 #include <malloc.h>
 #include <cstring>
 #include <string>
+#include <optional>
+#include <utility>
 #include <vector>
 
 const char* logs_3ds_notes();
@@ -28,6 +30,7 @@ inline std::uint32_t word(const std::uint8_t* rgba) { return std::uint32_t(rgba[
 }
 
 void handheld_present(const std::vector<std::uint8_t>& frame, int frame_w, int frame_h, int clip_top, bool world_only, const std::vector<std::uint8_t>* bottom, int bottom_stride, int bottom_x, int bottom_y) {
+    std::optional<prof::Mark> timed(std::in_place, "present: top screen");
     u16 fb_w = 0, fb_h = 0;
     auto* top = reinterpret_cast<std::uint32_t*>(gfxGetFramebuffer(GFX_TOP, GFX_LEFT, &fb_w, &fb_h));   // 240 x 400
     if (top && world_only && g_top_panel.size() >= std::size_t(320) * kPanelHalf * 4) {
@@ -39,20 +42,24 @@ void handheld_present(const std::vector<std::uint8_t>& frame, int frame_w, int f
             for (int y = 0; y < kPanelHalf; ++y, source -= 320 * 4) column[y] = word(source);
         }
     } else if (top && world_only && frame_w == 400) {
-        for (int x = 0; x < 400; ++x) {
-            std::uint32_t* column = top + x * 240;
-            const std::uint8_t* source = frame.data() + (std::size_t(clip_top + 239) * 400 + std::size_t(x)) * 4;
-            for (int y = 0; y < 240; ++y, source -= 400 * 4) column[y] = word(source);   // column[0] is the bottom row
-        }
+        // Sixteen columns at a time: the screen's columns are 960 bytes apart, and sixteen of them
+        // stay in the first-level cache while the frame's rows are read along (as below).
+        for (int x0 = 0; x0 < 400; x0 += 16)
+            for (int y = 0; y < 240; ++y) {
+                const std::uint8_t* source = frame.data() + (std::size_t(clip_top + y) * 400 + std::size_t(x0)) * 4;
+                std::uint32_t* out = top + x0 * 240 + (239 - y);   // a column's first word is the bottom row
+                for (int x = 0; x < 16; ++x, source += 4, out += 240) *out = word(source);
+            }
     } else if (top && world_only && frame_w == 600) {
         // Zoomed out by a half: 600x360 of the world, three pixels into two each way (weights 2:1, 1:2).
         const std::size_t pitch = 600 * 4;
+        for (int x0 = 0; x0 < 200; x0 += 8)
         for (int y = 0; y < 240; ++y) {
-            const std::uint8_t* upper = frame.data() + std::size_t(clip_top + (y / 2) * 3 + (y & 1)) * pitch;
+            const std::uint8_t* upper = frame.data() + std::size_t(clip_top + (y / 2) * 3 + (y & 1)) * pitch + std::size_t(x0) * 12;
             const std::uint8_t* lower = upper + pitch;
             const unsigned wu = (y & 1) ? 1 : 2, wl = 3 - wu;
-            std::uint32_t* out = top + (239 - y);
-            for (int x = 0; x < 200; ++x, upper += 12, lower += 12, out += 480) {
+            std::uint32_t* out = top + x0 * 480 + (239 - y);
+            for (int x = 0; x < 8; ++x, upper += 12, lower += 12, out += 480) {
                 unsigned red = wu * (2 * upper[0] + upper[4]) + wl * (2 * lower[0] + lower[4]), green = wu * (2 * upper[1] + upper[5]) + wl * (2 * lower[1] + lower[5]), blue = wu * (2 * upper[2] + upper[6]) + wl * (2 * lower[2] + lower[6]);
                 out[0] = (red * 7282u >> 16) << 24 | (green * 7282u >> 16) << 16 | (blue * 7282u >> 16) << 8 | 0xFFu;
                 red = wu * (upper[4] + 2 * upper[8]) + wl * (lower[4] + 2 * lower[8]); green = wu * (upper[5] + 2 * upper[9]) + wl * (lower[5] + 2 * lower[9]); blue = wu * (upper[6] + 2 * upper[10]) + wl * (lower[6] + 2 * lower[10]);
@@ -62,11 +69,12 @@ void handheld_present(const std::vector<std::uint8_t>& frame, int frame_w, int f
     } else if (top && world_only && frame_w == 800) {
         // Zoomed out to the PC's scale: 800x480 of the world, four pixels into one.
         const std::size_t pitch = 800 * 4;
+        for (int x0 = 0; x0 < 400; x0 += 16)
         for (int y = 0; y < 240; ++y) {
-            const std::uint8_t* upper = frame.data() + std::size_t(clip_top + y * 2) * pitch;
+            const std::uint8_t* upper = frame.data() + std::size_t(clip_top + y * 2) * pitch + std::size_t(x0) * 8;
             const std::uint8_t* lower = upper + pitch;
-            std::uint32_t* out = top + (239 - y);
-            for (int x = 0; x < 400; ++x, upper += 8, lower += 8, out += 240)
+            std::uint32_t* out = top + x0 * 240 + (239 - y);
+            for (int x = 0; x < 16; ++x, upper += 8, lower += 8, out += 240)
                 *out = ((upper[0] + upper[4] + lower[0] + lower[4]) >> 2) << 24 | ((upper[1] + upper[5] + lower[1] + lower[5]) >> 2) << 16 | ((upper[2] + upper[6] + lower[2] + lower[6]) >> 2) << 8 | 0xFFu;
         }
     } else if (top && frame_w >= 800 && frame_h >= 600) {
@@ -85,18 +93,28 @@ void handheld_present(const std::vector<std::uint8_t>& frame, int frame_w, int f
             }
         }
     }
-    auto* low = reinterpret_cast<std::uint32_t*>(gfxGetFramebuffer(GFX_BOTTOM, GFX_LEFT, &fb_w, &fb_h));   // 240 x 320
+    timed.emplace("present: touch screen");
+    // The second screen has one buffer, not two: the HUD changes five times a second and is copied
+    // only when it has (a third of a frame's copying saved); a panel or a menu is copied every frame.
+    static bool single = false;
+    if (!std::exchange(single, true)) gfxSetDoubleBuffering(GFX_BOTTOM, false);
+    static unsigned shown_serial = ~0u;
+    const bool hud = world_only && bottom && !g_bottom_panels && bottom_x == 0 && bottom_y == 0;
+    const bool same = hud && shown_serial == g_bottom_serial;
+    shown_serial = hud ? g_bottom_serial : ~0u;
+    auto* low = same ? nullptr : reinterpret_cast<std::uint32_t*>(gfxGetFramebuffer(GFX_BOTTOM, GFX_LEFT, &fb_w, &fb_h));   // 240 x 320
     if (low) {
         // bottom_x < 0: the whole 800x600 UI frame at two fifths (a mid-screen menu is up).
         const std::vector<std::uint8_t>* whole = bottom && bottom_x < 0 && bottom_stride >= 800 && bottom->size() >= std::size_t(bottom_stride) * 600 * 4 ? bottom
                                                 : !bottom && !world_only && frame_w >= 800 && frame_h >= 600 ? &frame : nullptr;
         const int whole_stride = whole == &frame ? frame_w : bottom_stride;
         if (bottom && bottom_x >= 0 && bottom_y >= 0 && bottom_x + 320 <= bottom_stride && bottom->size() >= std::size_t(bottom_stride) * std::size_t(bottom_y + 240) * 4) {
-            for (int x = 0; x < 320; ++x) {
-                std::uint32_t* column = low + x * 240;
-                const std::uint8_t* source = bottom->data() + (std::size_t(bottom_y + 239) * std::size_t(bottom_stride) + std::size_t(bottom_x + x)) * 4;
-                for (int y = 0; y < 240; ++y, source -= std::size_t(bottom_stride) * 4) column[y] = word(source);
-            }
+            for (int x0 = 0; x0 < 320; x0 += 16)
+                for (int y = 0; y < 240; ++y) {
+                    const std::uint8_t* source = bottom->data() + (std::size_t(bottom_y + y) * std::size_t(bottom_stride) + std::size_t(bottom_x + x0)) * 4;
+                    std::uint32_t* out = low + x0 * 240 + (239 - y);
+                    for (int x = 0; x < 16; ++x, source += 4, out += 240) *out = word(source);
+                }
         } else if (whole) {
             // The menus: the whole 800x600 at two fifths, where a touch can reach all of it.
             // Each pixel covers 2.5 x 2.5 of the frame: the first, the second and the last of its
@@ -121,6 +139,7 @@ void handheld_present(const std::vector<std::uint8_t>& frame, int frame_w, int f
             std::memset(low, 0, 240 * 320 * 4);
         }
     }
+    timed.reset();
     // At the first frame: what this console gave us. Then every ten seconds: the frame rate, the
     // memory in use and where the frames' time went, in the game's log.
     static unsigned frames = 0;
@@ -151,9 +170,15 @@ void handheld_present(const std::vector<std::uint8_t>& frame, int frame_w, int f
         }
         frames = 0; last = now;
     }
+    const prof::Mark waited("present: flush, swap, wait");
     gfxFlushBuffers();
     gfxSwapBuffers();
-    gspWaitForVBlank();
+    // The swap happens at the next refresh. A frame that took longer than one (they all do in game)
+    // needn't wait for it: the next one is drawn into the other buffer long after.
+    static u64 presented = 0;
+    const u64 present_now = osGetTime();
+    if (present_now - presented < 20) gspWaitForVBlank();
+    presented = osGetTime();
 }
 
 }  // namespace d2d::client

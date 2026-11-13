@@ -175,7 +175,7 @@ auto Town::present_skill_pad() -> void {
     skillbar.mode_main_label = alternate ? trigger + "+" + main_label : main_label;
     skillbar.mode_set = trigger;
     skillbar.mode_aura = view.aura;
-    rebuild_wheel();
+    if (skillbar.picking == 3 || wheel_ids.empty()) rebuild_wheel();   // every learned skill asked about: not each frame
     skillbar.wheel_ids = wheel_ids;
     skillbar.wheel_at = wheel_at;
     skillbar.wheel_page = wheel_page;
@@ -341,7 +341,7 @@ auto Town::drive_wheel(const pad::Actions& actions) -> void {
 auto Town::drive_strip(const pad::Actions& actions) -> void {
     const int count = int(skillpad::kPanels.size());
     if (actions.cancel) { skill_strip = -1; return; }
-    if (actions.strip_step != 0) skill_strip = (skill_strip + (actions.strip_step > 0 ? 1 : count - 1) + count) % count;
+    if (actions.strip_step != 0) skill_strip = ((skill_strip + actions.strip_step) % count + count) % count;
     if (!actions.confirm) return;
     menu_handoff.armed = true;                         // this South press must not click the screen it opens
     switch (skill_strip) {
@@ -510,6 +510,20 @@ auto Town::portal_tome(std::string_view name, bool charged) const -> int {
  * while ordinary skills require a learned or granted skill level.
  */
 auto Town::skill_known(std::string_view name, int skill) const -> bool {
+    if (!scene || skill < 0 || name.empty()) return false;
+    // Asked a dozen times a frame (the tray's slots), and the answer walks every item worn:
+    // an answer is kept a quarter of a second.
+    struct Kept { std::string name; int skill; bool known; };
+    static std::vector<Kept> kept;
+    static std::uint64_t kept_ms = 0;
+    if (const std::uint64_t now = SDL_GetTicks(); now - kept_ms > 250) { kept.clear(); kept_ms = now; }
+    for (const auto& entry : kept) if (entry.skill == skill && entry.name == name) return entry.known;
+    const bool known = skill_known_now(name, skill);
+    kept.push_back({ std::string(name), skill, known });
+    return known;
+}
+
+auto Town::skill_known_now(std::string_view name, int skill) const -> bool {
     if (!scene || skill < 0 || name.empty()) return false;
     const Character* who = name == character.name ? &character : nullptr;
     if (!who)
