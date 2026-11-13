@@ -4,7 +4,9 @@
 // 800x600 frame, so every blitter and font works on it as on the PC's.
 #pragma once
 
+#include <array>
 #include <cstdint>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -26,6 +28,18 @@ struct BottomHud {
     const Automap* automap = nullptr;
     float map_x = 0, map_y = 0;   // the player on the automap, in its cells
 };
+
+// The skills on the buttons, as the pad's skill buttons have them
+// (Town::present_skill_pad): the trigger's, then the six slots', with the
+// buttons' names. `alternate`: the second set is held.
+struct BottomSkills {
+    int main = -1;
+    std::array<int, 6> slots{ -1, -1, -1, -1, -1, -1 };
+    std::string main_label;
+    std::array<std::string, 6> labels;
+    bool alternate = false;
+};
+inline BottomSkills g_bottom_skills;
 
 void draw_bottom_hud(std::vector<std::uint8_t>& framebuffer, const Scene& scene, const BottomHud& state);
 

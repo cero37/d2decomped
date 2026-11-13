@@ -54,6 +54,9 @@ void draw_bottom_hud(std::vector<std::uint8_t>& framebuffer, const Scene& scene,
     // The globes at half size in the bottom corners (each source 2x2 averaged),
     // their numbers beside them.
     const auto& small = scene.font_small;
+    auto centred = [&](const d2d::font::Font& font, int centre, int top, const std::string& text, std::array<std::uint8_t, 3> c) {
+        font.draw_tinted(framebuffer, kScreenWidth, kScreenHeight, pal, centre - font.measure(text) / 2, top, text, c[0], c[1], c[2]);
+    };
     auto globe = [&](int frame, int x, int y, std::int64_t cur, std::int64_t max) {
         constexpr int kSize = 40;
         for (int row = -2; row < kSize + 2; ++row)                      // the socket: a dark disc with a lit rim
@@ -116,15 +119,43 @@ void draw_bottom_hud(std::vector<std::uint8_t>& framebuffer, const Scene& scene,
     bar(belt_top - 9, exp_num, exp_den, { 214, 176, 78 });
     bar(belt_top - 5, stats.values[kStamina], stats.values[kMaxStamina], { 150, 190, 110 });
 
-    // The skill buttons: six, a slot a button (ZL held: the second six).
+    // The skill buttons: the trigger's, then the six slots' (the second set while its button is held).
     const int skill_top = belt_top - 12 - 48;
     {
-        static constexpr std::array<const char*, 6> kButtons{ "A", "B", "X", "Y", "R", "ZR" };
-        const int left = (width - 6 * 50) / 2;
-        for (int i = 0; i < 6; ++i) {
-            const int x = left + i * 50;
-            canvas.slot(x, skill_top, x + 48, skill_top + 48);
-            small.draw_tinted(framebuffer, kScreenWidth, kScreenHeight, pal, x + 3, skill_top + 2, kButtons[std::size_t(i)], 199, 179, 119);
+        constexpr int kPitch = 45, kWide = 44;
+        const auto& skills = g_bottom_skills;
+        const int left = (width - (7 * kPitch - 1)) / 2;
+        for (int i = 0; i < 7; ++i) {
+            const int x = left + i * kPitch, id = i == 0 ? skills.main : skills.slots[std::size_t(i - 1)];
+            const std::string& label = i == 0 ? skills.main_label : skills.labels[std::size_t(i - 1)];
+            canvas.slot(x, skill_top, x + kWide, skill_top + 48);
+            if (const auto* skill = id >= 0 ? scene.skills.get(id) : nullptr) {
+                int column = -1;
+                for (int cls = 0; cls < 7; ++cls) if (skill->cls == d2d::rules::kClassCode[std::size_t(cls)]) column = cls;
+                const auto& spr = column >= 0 ? scene.skill_icons[std::size_t(column)] : scene.generic_skill_icons;
+                if (skill->icon >= 0 && spr.frames_per_direction() > std::uint32_t(skill->icon)) {
+                    const auto& cel = spr.frame(0, std::uint32_t(skill->icon));
+                    const int crop = (int(cel.width) - kWide) / 2;          // the icon's 48 in the slot's 44
+                    for (int row = 0; row < int(cel.height) && row < 48; ++row)
+                        for (int column_x = 1; column_x < kWide - 1; ++column_x) {
+                            const int source = column_x + crop;
+                            if (source < 0 || source >= int(cel.width)) continue;
+                            if (const auto idx = cel.pixels[std::size_t(row) * cel.width + std::size_t(source)]) {
+                                const auto colour = pal[idx];
+                                canvas.put(x + column_x, skill_top + row, colour.r, colour.g, colour.b);
+                            }
+                        }
+                }
+            } else if (id <= -3) {
+                static constexpr std::array<const char*, 7> kActions{ "Use", "Items", "Inv", "Char", "Tree", "Map", "Quest" };
+                const int action = -3 - id;
+                if (action < int(kActions.size())) centred(small, x + kWide / 2, skill_top + 20, kActions[std::size_t(action)], { 199, 179, 119 });
+            }
+            if (!label.empty()) {                                         // the button, on a dark tab in the corner
+                const int tab = small.measure(label) + 4;
+                canvas.rect(x + 1, skill_top + 1, x + 1 + tab, skill_top + 1 + small.line_height(), { 0, 0, 0 });
+                small.draw_tinted(framebuffer, kScreenWidth, kScreenHeight, pal, x + 3, skill_top + 1, label, skills.alternate ? 255 : 199, skills.alternate ? 210 : 179, skills.alternate ? 90 : 119);
+            }
         }
     }
 

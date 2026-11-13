@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Town (town.hpp): drawing: menus, the view, chat, hints and portraits. The rest is in this
 // directory.
+#include "handheld_hud.hpp"
 #include "town.hpp"
 
 #include "common.hpp"
@@ -88,7 +89,19 @@ auto Town::open_menu(int npc) -> void {
  * Draw the current Town view and enabled UI overlays, including the optional touch controls.
  */
 auto Town::draw(std::vector<std::uint8_t>& framebuffer, const Mouse& mouse, std::uint32_t frame_ms) -> void {
+    if (g_world_only && !pad_config.skill_buttons) {      // a handheld plays with its buttons: the skill-button layout, Nintendo's names
+        pad_config = pad::skill_buttons_config(pad_config);
+        pad_config.swap_confirm = true;
+        pad_family = pad::Family::Nintendo;
+    }
     present_skill_pad();
+    if (g_world_only) {
+        auto& shown = g_bottom_skills;
+        // The 3DS's own names, by where each button sits (south, east, west, north, the shoulders; ZR the trigger).
+        shown.main = skillbar.mode_main; shown.main_label = "ZR";
+        shown.slots = skillbar.mode_slots; shown.labels = { "B", "A", "Y", "X", "L", "R" };
+        shown.alternate = skillbar.mode_modifier;
+    }
     const int screen_w = fb_width(framebuffer);
     if (screen_w == int(kScreenWidth)) {
         draw_view(framebuffer, nullptr, mouse, frame_ms);
