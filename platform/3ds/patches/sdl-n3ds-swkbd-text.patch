@@ -1,0 +1,26 @@
+diff --git a/src/video/n3ds/SDL_n3dsswkb.c b/src/video/n3ds/SDL_n3dsswkb.c
+index dd54a4c..3837e95 100644
+--- a/src/video/n3ds/SDL_n3dsswkb.c
++++ b/src/video/n3ds/SDL_n3dsswkb.c
+@@ -26,6 +26,8 @@
+ #include <3ds.h>
+ 
+ #include "SDL_n3dsswkb.h"
++#include "../SDL_sysvideo.h"
++#include "../../events/SDL_keyboard_c.h"
+ 
+ static SwkbdState sw_keyboard;
+ static const size_t BUFFER_SIZE = 256;
+@@ -56,6 +58,12 @@ bool N3DS_StartTextInput(SDL_VideoDevice *_this, SDL_Window *window, SDL_Propert
+     SwkbdButton button_pressed;
+     button_pressed = swkbdInputText(&sw_keyboard, buffer, BUFFER_SIZE);
+     if (button_pressed == SWKBD_BUTTON_CONFIRM) {
++        // The keyboard has come and gone inside this call: the text is dropped
++        // unless the window already counts as focused and taking text.
++        if (window) {
++            SDL_SetKeyboardFocus(window);
++            window->text_input_active = true;
++        }
+         SDL_SendKeyboardText(buffer);
+     }
+     return true;
