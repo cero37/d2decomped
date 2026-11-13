@@ -1638,6 +1638,25 @@ int run_windowed(std::vector<std::uint8_t>& framebuffer,
                 if (const int act = town.view_act(); act != scene->palette_act)
                     load_act_palettes(*scene, scene->mpqs, act);
                 town.update(framebuffer, mouse, keys_this_frame, screen, audio, now_ms, last_ms);
+                // A handheld arriving in another act's town: the game is saved and entered again
+                // there, as Save and Exit then the same character would, so the act left behind
+                // gives its levels' memory back (set_map_seed). Single player on this machine only,
+                // and only once the save itself says the new act (a real journey, not a debug hop).
+                if (g_world_only && town.level && !town.net_game && !town.lan_host && town.world.players.size() == 1) {
+                    static int in_act = -1;
+                    const int act = d2d::rules::level_ids::act_of(town.level->id);
+                    if (in_act >= 0 && act != in_act && d2d::rules::level_ids::is_town(town.level->id)) {
+                        const auto why = town.save();
+                        if (town.character.header.active_act() == act) {
+                            d2d::log::info("handheld: act {} reached; the game is entered again there{}", act + 1, why.empty() ? "" : " (not saved: " + why + ")");
+                            set_map_seed(*scene, game_seed(town.character.header), town.character.header.active_difficulty());
+                            town.enter();
+                        } else {
+                            d2d::log::info("handheld: in act {} with the save still in act {}: its levels stay", act + 1, town.character.header.active_act() + 1);
+                        }
+                    }
+                    in_act = act;
+                }
                 // A panel key moved the cursor with the view (FUN_00468770's SetCursorPos):
                 // the game's copy, and the OS cursor unless a pad drives it.
                 if (const auto moved = std::exchange(town.cursor_move, std::nullopt)) {

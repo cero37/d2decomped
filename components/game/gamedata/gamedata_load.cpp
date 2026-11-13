@@ -1863,7 +1863,13 @@ std::optional<GameData> load_game_data(const fs::path& data_dir, const fs::path&
 
 // A new game's seed and difficulty (the mazes' room counts, LvlMaze Rooms(N) / Rooms(H)).
 void set_map_seed(GameData& game_data, std::uint32_t seed, int difficulty) {
-    if ((seed == game_data.map_seed && difficulty == game_data.difficulty) || !game_data.builder || !game_data.builder->act1) return;
+    // A handheld (the 3DS's memory) starts every game with only the camp and what it
+    // builds from there: the levels a last game left built are what its memory went on.
+    static const bool handheld = std::getenv("D2D_HANDHELD") != nullptr;
+    const bool same = seed == game_data.map_seed && difficulty == game_data.difficulty;
+    const bool crowded = handheld && game_data.levels.size() > 4;
+    if ((same && !crowded) || !game_data.builder || !game_data.builder->act1) return;
+    if (same) d2d::log::info("map: {} levels of the last game let go", game_data.levels.size());
     for (auto& [id, job] : game_data.builder->jobs) job.wait();
     game_data.builder->jobs.clear();
     game_data.difficulty = difficulty;                  // the builds read it (build_maze): after they're done
