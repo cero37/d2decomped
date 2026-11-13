@@ -147,8 +147,12 @@ void render_ingame(std::vector<std::uint8_t>& framebuffer,
         set_phase(MainPhase::IngameClear);
         // Clear to black — tiles don't cover every subtile so an
         // uninitialized fb would leak the previous frame's contents.
-        std::fill(world.begin(), world.end(), std::uint8_t{0});
-        for (std::size_t i = 3; i < world.size(); i += 4) world[i] = 0xFF;
+        {   // the rows the world draws (all of them, but for a handheld view)
+            const auto row = std::size_t(world_w) * 4;
+            const auto first = world.begin() + std::ptrdiff_t(row * std::size_t(g_clip_top)), last = world.begin() + std::ptrdiff_t(row * std::size_t(g_clip_bottom));
+            std::fill(first, last, std::uint8_t{0});
+            for (auto alpha = first + 3; alpha < last; alpha += 4) *alpha = 0xFF;
+        }
         set_phase(MainPhase::IngameFloor);   // render_world does floor+shadow+walls internally
         // Player: the camera follows them, so their feet sit on the camera
         // point (kW/2, kViewY), off it by `player_offset` in local co-op
@@ -319,6 +323,7 @@ void render_ingame(std::vector<std::uint8_t>& framebuffer,
             scene.font.draw_tinted(world, std::uint32_t(world_w), kScreenHeight, pal, (box[0] + box[2]) / 2 - scene.font.measure(hovered_name) / 2,
                                top, hovered_name, colour[0], colour[1], colour[2]);
         }
+        if (g_world_only) return;   // a handheld's HUD and panels are its own (the other screen)
         if (wide)
             for (std::size_t y = 0; y < kScreenHeight; ++y)
                 std::copy_n(world.begin() + std::ptrdiff_t((y * std::size_t(world_w) + std::size_t(off)) * 4), kScreenWidth * 4,

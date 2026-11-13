@@ -1164,6 +1164,12 @@ int run_windowed(std::vector<std::uint8_t>& framebuffer,
                 want = g_forced_view_w > 0 ? g_forced_view_w
                      : pixels_h > 0 ? std::clamp(int(kScreenHeight) * pixels_w / pixels_h & ~1, int(kScreenWidth), kMaxViewWidth) : int(kScreenWidth);
             }
+            // A handheld: the game view is 400 wide and draws 240 of its rows.
+            static const bool handheld = std::getenv("D2D_HANDHELD") != nullptr;
+            g_world_only = handheld && screen == Screen::InGame;
+            if (g_world_only) want = kHandheldWidth;
+            g_clip_top = g_world_only ? kHandheldTop : 0;
+            g_clip_bottom = g_world_only ? kHandheldTop + kHandheldHeight : int(kScreenHeight);
             if (want != win.view_w && win.set_view(want)) {
                 framebuffer.assign(std::size_t(want) * kScreenHeight * 4, 0);
                 for (std::size_t i = 3; i < framebuffer.size(); i += 4) framebuffer[i] = 0xFF;

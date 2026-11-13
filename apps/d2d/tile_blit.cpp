@@ -103,7 +103,7 @@ void blit_dt1_shadow(std::vector<std::uint8_t>& framebuffer, const d2d::dt1::Til
                      const d2d::palette::Palette& pal, int screen_x, int screen_y) {
     const int screen_w = fb_width(framebuffer);
     const int x_begin = std::max(0, -screen_x), x_end = std::min<int>(tile.width, screen_w - screen_x);
-    const int y_begin = std::max(0, -screen_y), y_end = std::min<int>(std::abs(tile.height), int(kScreenHeight) - screen_y);
+    const int y_begin = std::max(0, g_clip_top - screen_y), y_end = std::min<int>(std::abs(tile.height), g_clip_bottom - screen_y);
     if (x_begin >= x_end) return;
     const auto* tile_pixels = tile.pixels();
     if (!tile_pixels) return;
@@ -216,8 +216,8 @@ void blit_dt1_wall_lit(std::vector<std::uint8_t>& framebuffer, const d2d::dt1::T
 }
 
 void draw_in_bands(int bands, const std::function<void(Rows)>& draw) {
-    const int band_height = (int(kScreenHeight) + bands - 1) / bands;
-    const std::function<void(int)> band = [&](int index) { draw({ index * band_height, (index + 1) * band_height }); };
+    const int band_height = (g_clip_bottom - g_clip_top + bands - 1) / bands;
+    const std::function<void(int)> band = [&](int index) { draw({ g_clip_top + index * band_height, std::min(g_clip_bottom, g_clip_top + (index + 1) * band_height) }); };
     if (bands <= 1) { band(0); return; }
     // Made on the first call and never destroyed: at exit a static pool's
     // destructor would run while its workers still wait on it, and hang.

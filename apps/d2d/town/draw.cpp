@@ -99,6 +99,7 @@ auto Town::draw(std::vector<std::uint8_t>& framebuffer, const Mouse& mouse, std:
     const int off = (screen_w - int(kScreenWidth)) / 2;
     ui_buffer.resize(std::size_t(kScreenWidth) * kScreenHeight * 4);
     draw_view(ui_buffer, &framebuffer, mouse, frame_ms);
+    if (g_world_only) return;
     draw_touch(ui_buffer);
     for (std::size_t y = 0; y < kScreenHeight; ++y)
         std::copy_n(ui_buffer.begin() + std::ptrdiff_t(y * kScreenWidth * 4), kScreenWidth * 4,

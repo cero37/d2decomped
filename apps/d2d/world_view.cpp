@@ -149,14 +149,14 @@ void render_world(std::vector<std::uint8_t>& framebuffer,
     // {-0x20, -0x20, W, H + 0x20}, a side panel taking its half
     // (FUN_005130a0, the driver's wall draw).
     auto floor_drawn = [&](int screen_x, int screen_y) {
-        return screen_x >= -0x50 && screen_x < screen_w + 0x50 && screen_y >= -0x50 && screen_y < int(kScreenHeight) - 0x2f;
+        return screen_x >= -0x50 && screen_x < screen_w + 0x50 && screen_y >= g_clip_top - 0x50 && screen_y < g_clip_bottom - (g_world_only ? 0 : 0x2f);
     };
     auto wall_drawn = [&](int screen_x, int screen_y, const d2d::dt1::Tile& tile) {
         const int left = g_drawn.panel_side == 2 ? screen_w / 2 - 0x20 : -0x20;
         const int right = g_drawn.panel_side == 1 ? screen_w - screen_w / 2 : screen_w;
         return std::ranges::any_of(tile.blocks, [&](const auto& block) {
             const int block_x = screen_x + block.first, block_y = screen_y + block.second;
-            return block_x >= left && block_x < right && block_y > -0x21 && block_y < int(kScreenHeight) + 0x20;
+            return block_x >= left && block_x < right && block_y > g_clip_top - 0x21 && block_y < g_clip_bottom + 0x20;
         });
     };
     // A floor is queued in the sweep's order and drawn once the sweep is done,
@@ -350,7 +350,7 @@ void render_world(std::vector<std::uint8_t>& framebuffer,
         const int left = g_drawn.panel_side == 2 ? screen_w / 4 * 2 : 0, right = g_drawn.panel_side == 1 ? screen_w - screen_w / 4 * 2 : screen_w;
         const auto overlay = [&](const std::array<d2d::dc6::Sprite, 4>& sprites, const d2d::rules::Rain::Splash& piece) {
             const int at_x = piece.x + shift;
-            if (at_x < left || at_x >= right || piece.y < 0 || piece.y >= int(kScreenHeight) - 0x2f) return;
+            if (at_x < left || at_x >= right || piece.y < g_clip_top || piece.y >= g_clip_bottom - (g_world_only ? 0 : 0x2f)) return;
             if (const auto frames = sprites[std::size_t(piece.kind)].frames(); piece.frame < int(frames.size()))
                 blit_additive(framebuffer, frames[std::size_t(piece.frame)], upal_splash, nullptr, at_x, piece.y);
         };
@@ -388,7 +388,7 @@ void render_world(std::vector<std::uint8_t>& framebuffer,
             if (!unit.anim || !unit.shadow) continue;
             const float back = unit.object ? 0.1f : 0.f;      // game.exe's position, as the unit's draw
             const auto [anchor_x, anchor_y] = iso_point(unit.x - back, unit.y - back);
-            if (anchor_x < -200 || anchor_x > screen_w + 200 || anchor_y < -100 || anchor_y > int(kScreenHeight) + 300) continue;
+            if (anchor_x < -200 || anchor_x > screen_w + 200 || anchor_y < g_clip_top - 100 || anchor_y > g_clip_bottom + 300) continue;
             if (++id == 0) { std::ranges::fill(mask, std::uint16_t{ 0 }); id = 1; }
             auto elapsed = std::uint32_t(float(elapsed_ms - unit.mode_ms) * unit.rate);
             if (unit.hold && !unit.frames) elapsed = std::min(elapsed, std::uint32_t(std::max(int(unit.anim->cof.frames_per_direction()), 1) - 1) * unit.anim->ms_per_frame());
@@ -461,7 +461,7 @@ void render_world(std::vector<std::uint8_t>& framebuffer,
                 }
             };
             draw_overs(true);
-            if (anchor_x < -200 || anchor_x > screen_w + 200 || anchor_y < -100 || anchor_y > int(kScreenHeight) + 300) continue;
+            if (anchor_x < -200 || anchor_x > screen_w + 200 || anchor_y < g_clip_top - 100 || anchor_y > g_clip_bottom + 300) continue;
             std::array<int, 4> bounds{};
             if (unit.missile) {
                 const auto* cel = scene.missile_cel(unit.missile->name);

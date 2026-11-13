@@ -55,6 +55,16 @@ constexpr int kMaxViewWidth = 1400;
 // (see main.cpp's resize handling). Read by the world's light grid and rain.
 inline int g_view_width = int(kScreenWidth);
 
+// A handheld view (the 3DS's 400x240 top screen; D2D_HANDHELD elsewhere, to
+// try it): in game the frame is 400 wide, the world draws only its rows
+// [g_clip_top, g_clip_bottom) and nothing of the PC's HUD or panels goes
+// over it. The frame keeps its 600 rows, so every screen position the game
+// works out (the camera point, the cursor, the hover boxes) is unchanged.
+inline constexpr int kHandheldWidth = 400, kHandheldHeight = 240;
+inline constexpr int kHandheldTop = int(kScreenHeight) / 2 - 8 - 136;   // the player's feet 136 rows down the 240
+inline int g_clip_top = 0, g_clip_bottom = int(kScreenHeight);
+inline bool g_world_only = false;
+
 // What the last render_world drew, as game.exe's tile flag 0x20000 (its
 // tile draws, FUN_004de410 / FUN_005130a0). The automap reveals only
 // those, and only for the level they were drawn in (automap.md
