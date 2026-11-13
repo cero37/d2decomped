@@ -32,8 +32,8 @@ template <class ColourAt>
 void blit_tile_pixels(std::vector<std::uint8_t>& framebuffer, const d2d::dt1::Tile& tile,
                       int screen_x, int screen_y, int alpha_all, const Hole* hole, Rows rows, ColourAt colour_at) {
     const int screen_w = fb_width(framebuffer);
-    const int x_begin = std::max(0, -screen_x), x_end = std::min(tile.width, screen_w - screen_x);
-    const int y_begin = std::max(0, rows.begin - screen_y), y_end = std::min(std::abs(tile.height), std::min(int(kScreenHeight), rows.end) - screen_y);
+    const int x_begin = std::max(0, -screen_x), x_end = std::min<int>(tile.width, screen_w - screen_x);
+    const int y_begin = std::max(0, rows.begin - screen_y), y_end = std::min<int>(std::abs(tile.height), std::min(int(kScreenHeight), rows.end) - screen_y);
     if (x_begin >= x_end) return;
     const bool opaque = !hole && alpha_all >= 255;
     for (int y = y_begin; y < y_end; ++y) {
@@ -73,8 +73,8 @@ void blit_dt1_tile(std::vector<std::uint8_t>& framebuffer,
     // pixel, alpha 0xFF as blit_tile_pixels writes it, so one store a pixel.
     if (!hole && alpha_all >= 255) {
         const int screen_w = fb_width(framebuffer);
-        const int x_begin = std::max(0, -screen_x), x_end = std::min(tile.width, screen_w - screen_x);
-        const int y_begin = std::max(0, rows.begin - screen_y), y_end = std::min(std::abs(tile.height), std::min(int(kScreenHeight), rows.end) - screen_y);
+        const int x_begin = std::max(0, -screen_x), x_end = std::min<int>(tile.width, screen_w - screen_x);
+        const int y_begin = std::max(0, rows.begin - screen_y), y_end = std::min<int>(std::abs(tile.height), std::min(int(kScreenHeight), rows.end) - screen_y);
         if (x_begin >= x_end) return;
         std::array<std::uint32_t, 256> lut{};
         for (std::size_t i = 0; i < 256; ++i) {
@@ -98,8 +98,8 @@ void blit_dt1_tile(std::vector<std::uint8_t>& framebuffer,
 void blit_dt1_shadow(std::vector<std::uint8_t>& framebuffer, const d2d::dt1::Tile& tile,
                      const d2d::palette::Palette& pal, int screen_x, int screen_y) {
     const int screen_w = fb_width(framebuffer);
-    const int x_begin = std::max(0, -screen_x), x_end = std::min(tile.width, screen_w - screen_x);
-    const int y_begin = std::max(0, -screen_y), y_end = std::min(std::abs(tile.height), int(kScreenHeight) - screen_y);
+    const int x_begin = std::max(0, -screen_x), x_end = std::min<int>(tile.width, screen_w - screen_x);
+    const int y_begin = std::max(0, -screen_y), y_end = std::min<int>(std::abs(tile.height), int(kScreenHeight) - screen_y);
     if (x_begin >= x_end) return;
     for (int y = y_begin; y < y_end; ++y) {
         const auto* row = tile.pixels.data() + std::size_t(y) * std::size_t(tile.width);

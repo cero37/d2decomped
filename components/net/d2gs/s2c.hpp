@@ -55,7 +55,7 @@ inline auto monster_tail(std::span<const std::uint8_t> packet, const std::array<
     auto bits = [&](int count) {
         std::uint32_t value = 0;
         for (int bit = 0; bit < count; ++bit, ++bit_at) {
-            if (bit_at >= end) { over = true; return 0u; }
+            if (bit_at >= end) { over = true; return std::uint32_t(0); }
             value |= std::uint32_t(packet[bit_at / 8] >> (bit_at % 8) & 1) << bit;
         }
         return value;

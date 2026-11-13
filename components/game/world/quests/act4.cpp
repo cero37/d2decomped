@@ -202,7 +202,7 @@ auto World::act4_kill(const Fight::Kill& kill, std::uint32_t now_ms) -> void {
                 music_cue("music_quest_diablo");
             });
             if (!expansion) {
-                diablo_dead_at = std::max(now_ms, 1u);
+                diablo_dead_at = std::max<std::uint32_t>(now_ms, 1);
                 end_movie = d2d::rules::quest::bit(quests(), kTerrorQuest, 13);
             }
             d2d::log::info("Terror's End: Diablo is dead{}", expansion ? "" : " (classic: the next difficulty is open)");

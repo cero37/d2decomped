@@ -222,7 +222,7 @@ auto World::act5_kill(const Fight::Kill& kill, std::uint32_t now_ms) -> void {
                 const float dx = statue_at->x - kill.x, dy = statue_at->y - kill.y, length = std::max(std::hypot(dx, dy), 0.01f), speed = missile_speed(velocity);
                 const int apart = std::max(d2d::rules::ai_distance(subtile(statue_at->x) - subtile(kill.x), subtile(statue_at->y) - subtile(kill.y)), 1);
                 const auto frames = velocity > 0 ? std::uint32_t((std::int64_t(apart) << 16) / (std::int64_t(velocity) << 4)) : 0u;
-                Missile missile{ &center->second, kill.x, kill.y, dx / length * speed, dy / length * speed, missile_facing(kill.x, kill.y, dx, dy), now_ms, now_ms + std::max(frames, 1u) * kTickMs, {} };
+                Missile missile{ &center->second, kill.x, kill.y, dx / length * speed, dy / length * speed, missile_facing(kill.x, kill.y, dx, dy), now_ms, now_ms + std::max<std::uint32_t>(frames, 1) * kTickMs, {} };
                 missile.visual_only = true; missile.owner = kill.id; missile.sub = &cloud->second;
                 missile.to = std::pair{ statue_at->x, statue_at->y };
                 fight.missiles.push_back(std::move(missile));

@@ -10,6 +10,33 @@
 // fixed 24 fps and in-file interleaving.
 #pragma once
 
+#ifdef D2D_NO_VIDEO
+// A build without FFmpeg (the 3DS): no cinematics, open() says so.
+#include <mpq.hpp>
+
+#include <cstdint>
+#include <vector>
+
+namespace d2d::video {
+
+class Player {
+public:
+    bool open(mpq::File, int, int) { return false; }
+    [[nodiscard]] int width() const noexcept { return 0; }
+    [[nodiscard]] int height() const noexcept { return 0; }
+    [[nodiscard]] int sample_rate() const noexcept { return 0; }
+    [[nodiscard]] const std::vector<std::uint8_t>& rgba() const noexcept { return rgba_; }
+    std::vector<std::int16_t>& audio() noexcept { return audio_; }
+    bool advance(double) { return false; }
+    void close() {}
+
+private:
+    std::vector<std::uint8_t> rgba_;
+    std::vector<std::int16_t> audio_;
+};
+
+}   // namespace d2d::video
+#else
 #include <mpq.hpp>
 
 #include <algorithm>
@@ -181,3 +208,4 @@ private:
 };
 
 }  // namespace d2d::video
+#endif   // D2D_NO_VIDEO
