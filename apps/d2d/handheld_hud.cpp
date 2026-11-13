@@ -201,4 +201,27 @@ void draw_bottom_hud(std::vector<std::uint8_t>& framebuffer, const Scene& scene,
     scene.font.draw_tinted(framebuffer, kScreenWidth, kScreenHeight, pal, width - 9 - scene.font.measure(level_text), 4, level_text, 255, 255, 255);
 }
 
+void draw_loading_note(std::vector<std::uint8_t>& framebuffer, const Scene& scene, std::uint32_t now_ms) {
+    const int width = int(kScreenWidth), height = int(kScreenHeight);
+    if (framebuffer.size() < std::size_t(width) * std::size_t(height) * 4) return;
+    for (int y = 230; y < height; ++y) {
+        std::uint8_t* pixel = framebuffer.data() + std::size_t(y) * std::size_t(width) * 4;
+        for (int x = 0; x < width; ++x, pixel += 4) { pixel[0] >>= 2; pixel[1] >>= 2; pixel[2] >>= 2; }
+    }
+    const std::string_view words = "Loading";
+    scene.font42.draw_tinted_baseline(framebuffer, kScreenWidth, kScreenHeight, scene.pal, (width - scene.font42.measure(words)) / 2, 380, words, 255, 255, 255);
+    // The bar: a 400x20 trough and a bright piece that crosses it every two seconds.
+    const int left = 200, top = 420, wide = 400, tall = 20, piece = 100;
+    const int at = int(now_ms % 2000) * (wide + piece) / 2000 - piece;
+    for (int y = top; y < top + tall; ++y) {
+        std::uint8_t* pixel = framebuffer.data() + (std::size_t(y) * std::size_t(width) + left) * 4;
+        const bool edge = y < top + 2 || y >= top + tall - 2;
+        for (int x = 0; x < wide; ++x, pixel += 4) {
+            const bool lit = !edge && x >= 2 && x < wide - 2 && x >= at && x < at + piece;
+            const bool rim = edge || x < 2 || x >= wide - 2;
+            pixel[0] = lit ? 220 : rim ? 120 : 20; pixel[1] = lit ? 170 : rim ? 95 : 14; pixel[2] = lit ? 80 : rim ? 60 : 10;
+        }
+    }
+}
+
 }  // namespace d2d::client

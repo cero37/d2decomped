@@ -85,9 +85,30 @@ int main(int, char**) {
         std::_Exit(1);
     });
     osSetSpeedupEnable(true);   // New 3DS: 804 MHz and the L2 cache
-    APT_SetAppCpuTimeLimit(80);  // core 1 is the system's; this much of it is ours (threads_3ds.cpp)
-    // Too little memory (launched some way that didn't give the 124 MiB mode): say so, don't crash in a level build.
-    if (envGetHeapSize() < 88u * 1024 * 1024) {
+    mkdir("sdmc:/3ds", 0777);
+    mkdir("sdmc:/3ds/d2d", 0777);
+    mkdir("sdmc:/3ds/d2d/data", 0777);
+    // What this start was given, kept across runs (the game's own log starts later and rotates).
+    const char* const flag = "sdmc:/3ds/d2d/relaunch.flag";
+    const bool short_of_memory = envGetHeapSize() < 88u * 1024 * 1024;
+    struct stat seen{};
+    const bool retried = stat(flag, &seen) == 0;
+    if (std::FILE* out = std::fopen("sdmc:/3ds/d2d/boot.log", "a")) {
+        std::fprintf(out, "start: application memory %lu MiB (type %u), heap %lu MiB, linear %lu MiB%s%s\n", static_cast<unsigned long>(osGetMemRegionSize(MEMREGION_APPLICATION) >> 20),
+                     unsigned(*reinterpret_cast<const u8*>(0x1FF80030)), static_cast<unsigned long>(envGetHeapSize() >> 20), static_cast<unsigned long>(envGetLinearHeapSize() >> 20),
+                     short_of_memory ? " -- too little" : "", short_of_memory && !retried ? ", starting again" : "");
+        std::fclose(out);
+    }
+    // Too little memory: the console started us in its 64 MiB mode (seen on a first start from the
+    // HOME menu; the second got the 124 MiB mode). Start ourselves again once; if that doesn't
+    // help either, say so instead of crashing in a level build.
+    if (short_of_memory && !retried) {
+        if (std::FILE* out = std::fopen(flag, "w")) std::fclose(out);
+        aptSetChainloaderToSelf();
+        return 0;
+    }
+    std::remove(flag);
+    if (short_of_memory) {
         gfxInitDefault();
         consoleInit(GFX_BOTTOM, nullptr);
         std::printf("\n d2d needs the New 3DS's extended\n memory mode and got %lu MiB.\n\n Install the .cia and start it from\n the HOME menu (not from FBI or the\n Homebrew Launcher).\n\n START to exit.\n", static_cast<unsigned long>(envGetHeapSize() >> 20));
@@ -95,9 +116,6 @@ int main(int, char**) {
         gfxExit();
         return 0;
     }
-    mkdir("sdmc:/3ds", 0777);
-    mkdir("sdmc:/3ds/d2d", 0777);
-    mkdir("sdmc:/3ds/d2d/data", 0777);
     logs_3ds_start();            // the earlier runs' logs kept (and uploaded when a server is named: logs_3ds.cpp)
     setenv("D2D_USER_DIR", "sdmc:/3ds/d2d", 1);
     setenv("D2_MPQ_DIR", "sdmc:/3ds/d2d/data", 1);

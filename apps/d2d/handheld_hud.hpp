@@ -66,4 +66,7 @@ void handheld_present(const std::vector<std::uint8_t>& frame, int frame_w, int f
 
 void draw_bottom_hud(std::vector<std::uint8_t>& framebuffer, const Scene& scene, const BottomHud& state);
 
+// Over the title while the game loads: the frame dimmed below the logo, "Loading" and a moving bar.
+void draw_loading_note(std::vector<std::uint8_t>& framebuffer, const Scene& scene, std::uint32_t now_ms);
+
 }  // namespace d2d::client

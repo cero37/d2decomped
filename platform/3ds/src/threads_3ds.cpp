@@ -4,7 +4,7 @@
 // loader, the level builders, the floor bands) need a desktop-sized stack
 // and are the reason a New 3DS has four cores, so the two calls are wrapped
 // (--wrap in CMakeLists.txt): a thread made through pthread gets 768 KiB
-// and the next of cores 2, 3 and 1; a core that refuses falls back to the
+// and the next of cores 2 and 3; a core that refuses falls back to the
 // caller's. Threads libctru or SDL make for themselves are left alone.
 #include <3ds.h>
 
@@ -22,8 +22,8 @@ static std::atomic<unsigned> g_next_core{ 0 };
 
 Thread __wrap_threadCreate(ThreadFunc entrypoint, void* arg, size_t stack_size, int prio, int core_id, bool detached) {
     if (g_from_pthread.load() > 0) {
-        static constexpr int kCores[] = { 2, 3, 1 };
-        const int core = kCores[g_next_core.fetch_add(1) % 3];
+        static constexpr int kCores[] = { 2, 3 };   // not 1: the system's own core (HOME menu, input, sound)
+        const int core = kCores[g_next_core.fetch_add(1) % 2];
         if (Thread made = __real_threadCreate(entrypoint, arg, stack_size, prio, core, detached)) return made;
     }
     return __real_threadCreate(entrypoint, arg, stack_size, prio, core_id, detached);

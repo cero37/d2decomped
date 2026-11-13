@@ -21,6 +21,10 @@
 #include <string>
 #include <vector>
 
+#if __has_include("log_url_local.h")
+#include "log_url_local.h"   // a test build's own server (not in git): #define D2D_LOG_URL "http://..."
+#endif
+
 namespace {
 
 std::string g_url;
@@ -91,7 +95,7 @@ void logs_3ds_start() {
     if (g_url.empty()) g_url = D2D_LOG_URL;
 #endif
     if (g_url.rfind("http://", 0) != 0) g_url.clear();              // the local network: plain http only
-    upload({ { "sdmc:/3ds/d2d/d2d-prev2.log", "prev2" }, { "sdmc:/3ds/d2d/d2d-prev.log", "prev" } });
+    upload({ { "sdmc:/3ds/d2d/d2d-prev2.log", "prev2" }, { "sdmc:/3ds/d2d/d2d-prev.log", "prev" }, { "sdmc:/3ds/d2d/boot.log", "boot" } });
 }
 
 // What the start's uploads did, for the game's log (it wasn't open then).
@@ -99,5 +103,6 @@ const char* logs_3ds_notes() { return g_notes.c_str(); }
 
 // Leaving by the game's own exit: this run's log now.
 void logs_3ds_exit() {
+    if (aptShouldClose()) return;   // closed from the HOME menu: it is waiting for us, no time for the network
     upload({ { "sdmc:/3ds/d2d/d2d.log", "exit" } });
 }

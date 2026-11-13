@@ -529,7 +529,11 @@ int run_windowed(std::vector<std::uint8_t>& framebuffer,
         SDL_Event event;
         while (SDL_PollEvent(&event)) if (event.type == SDL_EVENT_QUIT) quit = true;
         if (boot_title) render_title(framebuffer, *scene, boot_title->buttons, std::uint32_t(SDL_GetTicks()));
+        // The handheld loads for a good while: say so over the buttons, which don't answer yet.
+        if (boot_title && std::getenv("D2D_HANDHELD")) draw_loading_note(framebuffer, *scene, std::uint32_t(SDL_GetTicks()));
 #ifdef __3DS__
+        // Closed from the HOME menu: it waits for us to be gone, and the loader has minutes to go.
+        if (quit) { d2d::log::info("3ds: closed while loading"); SDL_Quit(); std::_Exit(0); }
         handheld_present(framebuffer, int(kScreenWidth), int(kScreenHeight), 0, false, nullptr, int(kScreenWidth), 0, 0);
 #else
         SDL_UpdateTexture(win.texture, nullptr, framebuffer.data(), int(kScreenWidth * 4));

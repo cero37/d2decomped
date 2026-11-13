@@ -36,18 +36,18 @@ void handheld_present(const std::vector<std::uint8_t>& frame, int frame_w, int f
             for (int y = 0; y < 240; ++y, source -= 400 * 4) column[y] = word(source);   // column[0] is the bottom row
         }
     } else if (top && frame_w >= 800 && frame_h >= 600) {
-        // 800x600 -> 400x240: two columns and five rows into two (2.5 rows a row).
+        // 800x600 -> 400x240: two columns and three rows a pixel (rows step 2.5, so they
+        // overlap by one now and then, which keeps thin lines). Six samples: no division by a variable.
         const int off = (frame_w - 800) / 2;
-        for (int x = 0; x < 400; ++x) {
-            std::uint32_t* column = top + x * 240;
-            for (int y = 0; y < 240; ++y) {
-                const int first = y * 5 / 2, last = (y + 1) * 5 / 2 + ((y & 1) ? 0 : 1);   // 3 rows, then 2... overlapping by one keeps thin lines
-                unsigned red = 0, green = 0, blue = 0, count = 0;
-                for (int row = first; row < last && row < 600; ++row) {
-                    const std::uint8_t* pixel = frame.data() + (std::size_t(row) * std::size_t(frame_w) + std::size_t(off + x * 2)) * 4;
-                    red += pixel[0] + pixel[4]; green += pixel[1] + pixel[5]; blue += pixel[2] + pixel[6]; count += 2;
-                }
-                column[239 - y] = (red / count) << 24 | (green / count) << 16 | (blue / count) << 8 | 0xFFu;
+        const std::size_t pitch = std::size_t(frame_w) * 4;
+        for (int y = 0; y < 240; ++y) {
+            const int first = y * 5 / 2 > 597 ? 597 : y * 5 / 2;
+            const std::uint8_t* pixel = frame.data() + std::size_t(first) * pitch + std::size_t(off) * 4;
+            std::uint32_t* out = top + (239 - y);
+            for (int x = 0; x < 400; ++x, pixel += 8, out += 240) {
+                const std::uint8_t *a = pixel, *b = pixel + pitch, *c = pixel + 2 * pitch;
+                const unsigned red = a[0] + a[4] + b[0] + b[4] + c[0] + c[4], green = a[1] + a[5] + b[1] + b[5] + c[1] + c[5], blue = a[2] + a[6] + b[2] + b[6] + c[2] + c[6];
+                *out = (red * 10923u >> 16) << 24 | (green * 10923u >> 16) << 16 | (blue * 10923u >> 16) << 8 | 0xFFu;
             }
         }
     }
@@ -65,18 +65,22 @@ void handheld_present(const std::vector<std::uint8_t>& frame, int frame_w, int f
             }
         } else if (whole) {
             // The menus: the whole 800x600 at two fifths, where a touch can reach all of it.
+            // Each pixel covers 2.5 x 2.5 of the frame: the first, the second and the last of its
+            // columns and rows (the last is the second again half the time). Nine samples, fixed.
             const int off = (whole_stride - 800) / 2;
-            for (int x = 0; x < 320; ++x) {
-                std::uint32_t* column = low + x * 240;
-                const int sx0 = x * 5 / 2, sx1 = (x + 1) * 5 / 2;
-                for (int y = 0; y < 240; ++y) {
-                    const int sy0 = y * 5 / 2, sy1 = (y + 1) * 5 / 2;
-                    unsigned red = 0, green = 0, blue = 0, count = 0;
-                    for (int sy = sy0; sy < sy1; ++sy) {
-                        const std::uint8_t* pixel = whole->data() + (std::size_t(sy) * std::size_t(whole_stride) + std::size_t(off + sx0)) * 4;
-                        for (int sx = sx0; sx < sx1; ++sx, pixel += 4) { red += pixel[0]; green += pixel[1]; blue += pixel[2]; ++count; }
+            const std::size_t pitch = std::size_t(whole_stride) * 4;
+            for (int y = 0; y < 240; ++y) {
+                const int sy = y * 5 / 2, sy_last = (y + 1) * 5 / 2 - 1;
+                const std::uint8_t* rows[3] = { whole->data() + std::size_t(sy) * pitch, whole->data() + std::size_t(sy + 1) * pitch, whole->data() + std::size_t(sy_last) * pitch };
+                std::uint32_t* out = low + (239 - y);
+                for (int x = 0; x < 320; ++x, out += 240) {
+                    const int sx = off + x * 5 / 2, last = off + (x + 1) * 5 / 2 - 1;
+                    unsigned red = 0, green = 0, blue = 0;
+                    for (const std::uint8_t* row : rows) {
+                        const std::uint8_t *a = row + sx * 4, *c = row + last * 4;
+                        red += a[0] + a[4] + c[0]; green += a[1] + a[5] + c[1]; blue += a[2] + a[6] + c[2];
                     }
-                    column[239 - y] = (red / count) << 24 | (green / count) << 16 | (blue / count) << 8 | 0xFFu;
+                    *out = (red * 7282u >> 16) << 24 | (green * 7282u >> 16) << 16 | (blue * 7282u >> 16) << 8 | 0xFFu;
                 }
             }
         } else {
