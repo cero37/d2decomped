@@ -23,6 +23,8 @@
 #include <cstdint>
 #include <filesystem>
 #include <functional>
+#include <memory>
+#include <mutex>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -249,30 +251,30 @@ struct Verified {
 class Stack {
 public:
     // Highest priority first. D2 pushes patch_d2.mpq before base archives.
-    void push(const std::filesystem::path& path) { archives_.emplace_back(path); sources_.emplace_back(path, false); }
+    void push(const std::filesystem::path& path) { const std::scoped_lock lock(shared_->mutex); shared_->archives.emplace_back(path); shared_->sources.emplace_back(path, false); }
     void push_installer(const std::filesystem::path& path) {
-        archives_.push_back(Archive::installer(path));
-        sources_.emplace_back(path, true);
+        const std::scoped_lock lock(shared_->mutex);
+        shared_->archives.push_back(Archive::installer(path));
+        shared_->sources.emplace_back(path, true);
     }
-    // The same archives opened again: handles for another thread
-    // (StormLib's aren't shared across threads).
-    [[nodiscard]] Stack reopen() const {
-        Stack copy;
-        for (const auto& [path, inst] : sources_) inst ? copy.push_installer(path) : copy.push(path);
-        return copy;
-    }
+    // The same archives for another thread. StormLib's handles aren't safe
+    // to use from two threads at once, and opening every archive again
+    // costs its tables again (9 MB for the game's six), so the copy shares
+    // the handles and every read takes the stack's lock.
+    [[nodiscard]] Stack reopen() const { return *this; }
 
-    [[nodiscard]] bool empty() const noexcept { return archives_.empty(); }
-    [[nodiscard]] std::size_t size() const noexcept { return archives_.size(); }
+    [[nodiscard]] bool empty() const noexcept { return shared_->archives.empty(); }
+    [[nodiscard]] std::size_t size() const noexcept { return shared_->archives.size(); }
 
     [[nodiscard]] bool contains(std::string_view name) const {
-        for (const auto& archive : archives_) if (archive.contains(name)) return true;
+        const std::scoped_lock lock(shared_->mutex);
+        for (const auto& archive : shared_->archives) if (archive.contains(name)) return true;
         return false;
     }
 
     [[nodiscard]] std::vector<std::byte> read(std::string_view name) const {
         auto data = try_read(name);
-        if (!data) throw std::runtime_error((failed_.contains(Archive::key(name)) ? "MPQ read failed: " : "MPQ stack: file not found: ")
+        if (!data) throw std::runtime_error((shared_->failed.contains(Archive::key(name)) ? "MPQ read failed: " : "MPQ stack: file not found: ")
                                             + std::string(name));
         return std::move(*data);
     }
@@ -285,25 +287,28 @@ public:
     // from then on is missing: no retry each time a sound or frame wants it.
     [[nodiscard]] std::optional<std::vector<std::byte>>
     try_read(std::string_view name, bool strict_installer = false) const {
-        if (failed_.contains(Archive::key(name))) return std::nullopt;
+        const std::scoped_lock lock(shared_->mutex);
+        if (shared_->failed.contains(Archive::key(name))) return std::nullopt;
         try {
             return find(name, strict_installer);
         } catch (const InstallerMismatch& error) {   // not damage: a later plain read still gets the base
             d2d::log::warn("{}.", error.what());
             return std::nullopt;
         } catch (const std::exception& error) {
-            failed_.insert(Archive::key(name));
+            shared_->failed.insert(Archive::key(name));
             d2d::log::warn("{}. A damaged MPQ? Run Verify files in the launcher. Not read again this run.", error.what());
             return std::nullopt;
         }
     }
 
     // There but unreadable: try_read logged it already.
-    [[nodiscard]] bool failed(std::string_view name) const { return failed_.contains(Archive::key(name)); }
+    [[nodiscard]] bool failed(std::string_view name) const { const std::scoped_lock lock(shared_->mutex); return shared_->failed.contains(Archive::key(name)); }
 
-    // First plain archive that has the file, for streaming.
+    // First plain archive that has the file, for streaming. The File reads
+    // outside the stack's lock: only where no other thread reads this stack.
     [[nodiscard]] std::optional<File> open(std::string_view name) const {
-        for (const auto& archive : archives_)
+        const std::scoped_lock lock(shared_->mutex);
+        for (const auto& archive : shared_->archives)
             if (auto file = archive.open(name)) return file;
         return std::nullopt;
     }
@@ -314,8 +319,8 @@ private:
 
     [[nodiscard]] std::optional<std::vector<std::byte>>
     find(std::string_view name, bool strict_installer) const {
-        for (std::size_t i = 0; i < archives_.size(); ++i) {
-            const auto& archive = archives_[i];
+        for (std::size_t i = 0; i < shared_->archives.size(); ++i) {
+            const auto& archive = shared_->archives[i];
             if (auto data = archive.try_read(name)) return data;
             if (!archive.is_installer()) continue;
             const auto entry = archive.installer_entry(name);
@@ -323,8 +328,8 @@ private:
                 if (strict_installer && archive.installer_lists(name)) throw InstallerMismatch("installer entry missing: " + std::string(name));
                 continue;
             }
-            for (std::size_t j = i + 1; j < archives_.size(); ++j)
-                if (auto base = archives_[j].try_read(name)) {
+            for (std::size_t j = i + 1; j < shared_->archives.size(); ++j)
+                if (auto base = shared_->archives[j].try_read(name)) {
                     if (auto out = bnpatch::apply(*entry, *base)) return out;
                     break;
                 }
@@ -333,11 +338,14 @@ private:
         return std::nullopt;
     }
 
-    std::vector<Archive> archives_;
-    std::vector<std::pair<std::filesystem::path, bool>> sources_;   // what was pushed: path, installer
-    // Keys of files that failed to read. Mutable from const reads: a Stack
-    // is one thread's, like its StormLib handles (reopen for another).
-    mutable std::unordered_set<std::string> failed_;
+    struct Shared {
+        std::recursive_mutex mutex;
+        std::vector<Archive> archives;
+        std::vector<std::pair<std::filesystem::path, bool>> sources;   // what was pushed: path, installer
+        // Keys of files that failed to read.
+        std::unordered_set<std::string> failed;
+    };
+    std::shared_ptr<Shared> shared_ = std::make_shared<Shared>();
 };
 
 }  // namespace d2d::mpq

@@ -672,6 +672,13 @@ struct GameData {
     // builds and links outdoor neighbours (Level::nearby). load.hpp.
     mutable std::map<int, std::unique_ptr<Level>> levels;
     const Level* level(int id) const;
+    // The level if it is already built (or the town); never starts a build.
+    // For per-tick checks that have nothing to do in a level nobody has reached.
+    [[nodiscard]] const Level* built(int id) const {
+        if (id == town.id) return &town;
+        const auto found = levels.find(id);
+        return found != levels.end() ? found->second.get() : nullptr;
+    }
     // The town of level `id`'s act: the camp, or a later act's town (built
     // on demand like any level; null while its act isn't built).
     [[nodiscard]] const Level* town_of(int id) const { return level(d2d::rules::level_ids::kActTowns[std::size_t(d2d::rules::level_ids::act_of(id))]); }

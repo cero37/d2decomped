@@ -47,6 +47,7 @@
 #include <string_view>
 #include <tuple>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -771,6 +772,25 @@ void finish_level(Level& level) {
     level.tile_walk = level.walk;
 }
 
+// A laid level keeps its own tiles' blocks and lets its DT1 files' bytes go
+// (dt1.hpp File): the tiles it placed and every tile of the same type, style
+// and sequence (the alternatives an edge is re-picked from when a room comes
+// up). A level drawn through tile_lookup (no picks) keeps its files whole.
+void keep_laid_tiles(Level& level) {
+    if (level.picks.empty()) { for (auto& archive : level.dt1s) archive.pin(); return; }
+    auto key = [](const d2d::dt1::Tile& tile) { return std::uint64_t(std::uint32_t(tile.type)) << 40 | std::uint64_t(std::uint32_t(tile.style) & 0xFFFFF) << 20 | (std::uint32_t(tile.sequence) & 0xFFFFF); };
+    std::unordered_set<std::uint64_t> placed;
+    for (const auto* grid : { &level.picks, &level.drawn })
+        for (const auto& cell : *grid)
+            for (const auto& pick : cell) if (pick.tile) placed.insert(key(*pick.tile));
+    for (const auto& patch : level.patches)
+        for (const auto* tile : { patch.old_tile, patch.tile }) if (tile) placed.insert(key(*tile));
+    for (auto& archive : level.dt1s) {
+        for (const auto& tile : archive.tiles()) if (placed.contains(key(tile))) tile.keep();
+        archive.compact();
+    }
+}
+
 LevelDt1s load_level_dt1s(Level& level, d2d::mpq::Stack& mpqs, d2d::drlg::OutdoorAssets& assets, int type, d2d::dt1::Pixels pixels) {
     LevelDt1s dt1s;
     dt1s.heads = d2d::drlg::load_room_dt1s(assets, [&](const std::string& path) { return mpqs.try_read(path); }, type);
@@ -1255,6 +1275,7 @@ std::unique_ptr<Level> build_level(const GameData& game_data, GameData::LevelBui
     const bool outdoor = d2d::drlg::to_int(assets.levels.get(*row, "DrlgType")) == 3 &&
                          std::ranges::any_of(game_data.layout_of(id), [&](const auto& placement) { return placement.level == id; });
     if (!(outdoor ? build_outdoor(game_data, *builder.mpqs, assets, *level) : build_maze(game_data, *builder.mpqs, assets, *level, *row))) return nullptr;
+    keep_laid_tiles(*level);
     auto num = [](std::string_view text) { return std::atoi(std::string(text).c_str()); };
     for (std::size_t row_index = 0; row_index < builder.levels.size(); ++row_index) {
         if (num(builder.levels.get(row_index, "Id")) != id) continue;
@@ -1394,7 +1415,13 @@ std::unique_ptr<Level> finish_job(std::future<std::unique_ptr<Level>>& job, int 
 void GameData::want_level(int id) const {
     if (!builder || !builder->act1 || id == town.id || levels.contains(id) || builder->jobs.contains(id)
         || !std::ranges::contains(kBuiltLevels, id)) return;
-    builder->jobs.emplace(id, std::async(std::launch::async, [this, id] { return build_level(*this, *builder, id); }));
+    // One at a time: a level's tile files are whole in memory while it is
+    // laid (5 to 17 MB each), and several at once is the load's peak.
+    builder->jobs.emplace(id, std::async(std::launch::async, [this, id] {
+        static std::mutex one_at_a_time;
+        const std::scoped_lock lock(one_at_a_time);
+        return build_level(*this, *builder, id);
+    }));
 }
 
 void GameData::poll_levels() const {

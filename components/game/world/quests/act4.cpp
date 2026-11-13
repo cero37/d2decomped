@@ -264,7 +264,7 @@ auto World::act4_update(std::uint32_t now_ms) -> void {
                                     { &terror.news, d2d::rules::TerrorQuest::kQuest } })
             if (std::exchange(*news, false) && d2d::rules::act4_detail::told(quests(), quest)) actor->events.push_back(ev::QuestNews{ quest });
         // The seals' bosses at their flash's event 7 (FUN_005b5750 -> FUN_00545c30).
-        const Level* sanctuary = game_data->level(d2d::rules::level_ids::kChaosSanctuary);
+        const Level* sanctuary = game_data->built(d2d::rules::level_ids::kChaosSanctuary);
         for (auto due = seal_bosses.begin(); due != seal_bosses.end();)
             if (now_ms >= due->at && sanctuary) { seal_boss(*sanctuary, due->superunique, due->x, due->y); due = seal_bosses.erase(due); }
             else ++due;
@@ -273,7 +273,7 @@ auto World::act4_update(std::uint32_t now_ms) -> void {
         // seed (FUN_005438b0; skulls the seventh); LoD, a rune rand(11) on by
         // difficulty after the last. They fall at the forge wherever the
         // player is (the River of Flame's floor kept till they're back).
-        const Level* river = game_data->level(d2d::rules::level_ids::kRiverOfFlame);
+        const Level* river = game_data->built(d2d::rules::level_ids::kRiverOfFlame);
         const Npc* forge = nullptr;
         if (river)
             if (const auto found = std::ranges::find(river->npcs, d2d::rules::operate_fn::kHellforge, &Npc::operate_fn); found != river->npcs.end()) forge = &*found;

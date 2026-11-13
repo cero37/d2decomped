@@ -392,7 +392,7 @@ auto World::rescue_update(std::uint32_t now_ms) -> void {
 auto World::act5_hide() -> void {
         // Anya in town (InitFn 66, FUN_0058eac0 / FUN_005891d0): within 1 of her
         // marker (459) once +0x84 is 2.
-        if (const Level* town = game_data->level(d2d::rules::level_ids::kHarrogath); town && prison.anya == 2
+        if (const Level* town = game_data->built(d2d::rules::level_ids::kHarrogath); town && prison.anya == 2
             && std::ranges::none_of(town->npcs, [](const Npc& npc) { return npc.hc_idx == d2d::rules::PrisonQuest::kAnya; })) {
             const auto marker = std::ranges::find(town->npcs, d2d::rules::PrisonQuest::kAnyaMarker, &Npc::object_id);
             const auto& anya = game_data->mon_npc[std::size_t(game_data->mon_bin[std::size_t(d2d::rules::PrisonQuest::kAnya)])];

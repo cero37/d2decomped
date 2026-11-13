@@ -70,8 +70,10 @@
 #include <cstdint>
 #include <cstring>
 #include <cstdlib>
+#include <functional>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -89,14 +91,41 @@ struct Tile;
 // pixels), so a tile decodes when it is first drawn and the least recently
 // drawn ones are dropped when the cache is over its budget (trim()).
 // Archives of one file (two levels of a level type) share one of these.
+//
+// The files themselves add up too (a level type's are 5 to 17 MB), so once
+// a level is laid it keeps only its own tiles' blocks (Tile::keep, then
+// Archive::compact). A tile that wasn't kept and is drawn after all (a
+// re-picked edge) reads its file again through the loader.
 class File {
 public:
-    explicit File(std::span<const std::byte> bytes) : bytes_(bytes.begin(), bytes.end()) {}
-    ~File() { for (auto& slot : slots_) delete slot.pixels.load(std::memory_order_relaxed); }
+    using Loader = std::function<std::optional<std::vector<std::byte>>(const std::string& path)>;
+    File(std::span<const std::byte> bytes, std::string_view key) : key_(key), bytes_(bytes.begin(), bytes.end()) {}
+    ~File() {
+        auto& all = registry();
+        const std::scoped_lock lock(all.mutex);
+        std::erase(all.reloaded, this);
+        for (auto& slot : slots_)
+            if (const auto* pixels = slot.pixels.load(std::memory_order_relaxed)) { all.decoded_bytes -= pixels->size(); delete pixels; }
+    }
     File(const File&) = delete;
     File& operator=(const File&) = delete;
 
     [[nodiscard]] std::span<const std::byte> bytes() const noexcept { return bytes_; }
+
+    // How a dropped file is read again (the client's MPQs). Without one, files are never dropped.
+    static void set_loader(Loader loader) { auto& all = registry(); const std::scoped_lock lock(all.mutex); all.loader = std::move(loader); }
+    // Keep this tile's blocks past compact().
+    void keep(const Tile& tile, std::size_t index);
+    // Drop the file's bytes: kept tiles decode from their own blocks, the rest reload the file.
+    void compact() {
+        auto& all = registry();
+        const std::scoped_lock lock(all.mutex);
+        if (!all.loader || key_.empty() || pinned_) return;
+        std::vector<std::byte>().swap(bytes_);   // `= {}` would keep the capacity
+        reloaded_ = false;
+    }
+    // A level that draws any of its tiles (no picks: a town) holds the file whole.
+    void pin() { const std::scoped_lock lock(registry().mutex); pinned_ = true; }
     void set_tile_count(std::size_t count) { if (slots_.size() != count) slots_ = std::vector<Slot>(count); }
 
     // The tile's pixels, decoded now if they aren't. Safe from the draw
@@ -107,7 +136,7 @@ public:
     // Over `budget` bytes of decoded pixels, the stalest go.
     static void trim(std::size_t budget = default_budget()) {
         auto& all = registry();
-        const std::lock_guard lock(all.mutex);
+        const std::scoped_lock lock(all.mutex);
         const auto now = all.clock.fetch_add(1, std::memory_order_relaxed);
         if (all.decoded_bytes <= budget) return;
         struct Old { std::uint32_t age; Slot* slot; };
@@ -128,7 +157,7 @@ public:
             delete pixels;
         }
     }
-    [[nodiscard]] static std::size_t decoded_bytes() { auto& all = registry(); const std::lock_guard lock(all.mutex); return all.decoded_bytes; }
+    [[nodiscard]] static std::size_t decoded_bytes() { auto& all = registry(); const std::scoped_lock lock(all.mutex); return all.decoded_bytes; }
     // D2D_TILE_CACHE_MB, else 12 MB on the 3DS and 96 MB elsewhere.
     [[nodiscard]] static std::size_t default_budget() {
         static const std::size_t budget = [] {
@@ -145,11 +174,11 @@ public:
     // The file of `key` (its path) if an archive still holds it, else a new one of `bytes`.
     [[nodiscard]] static std::shared_ptr<File> shared(std::string_view key, std::span<const std::byte> bytes) {
         auto& all = registry();
-        const std::lock_guard lock(all.mutex);
+        const std::scoped_lock lock(all.mutex);
         if (!key.empty())
             if (const auto found = all.by_key.find(std::string(key)); found != all.by_key.end())
                 if (auto file = found->second.lock(); file && file->bytes_.size() == bytes.size()) return file;
-        auto file = std::make_shared<File>(bytes);
+        auto file = std::make_shared<File>(bytes, key);
         all.files.push_back(file);
         if (!key.empty()) all.by_key[std::string(key)] = file;
         return file;
@@ -159,18 +188,27 @@ private:
     struct Slot {
         std::atomic<const std::vector<std::uint8_t>*> pixels{ nullptr };
         std::atomic<std::uint32_t> used{ 0 };
+        std::vector<std::byte> blocks;   // the tile's block headers and data, cut from the file (keep)
     };
     struct Registry {
-        std::mutex mutex;
+        std::recursive_mutex mutex;   // recursive: the last archive of a file may let go of it under the lock
         std::vector<std::weak_ptr<File>> files;
         std::unordered_map<std::string, std::weak_ptr<File>> by_key;
         std::size_t decoded_bytes = 0;
         std::atomic<std::uint32_t> clock{ 1 };
+        Loader loader;
+        std::vector<File*> reloaded;   // files read again for a stray tile, oldest first; a few stay
     };
+    void keep_locked(const Tile& tile, std::size_t index);
+    bool reload_locked(Registry& all);
+
     static Registry& registry() { static Registry all; return all; }
 
+    std::string key_;
     std::vector<std::byte> bytes_;
     std::vector<Slot> slots_;
+    bool reloaded_ = false;
+    bool pinned_ = false;
 };
 
 struct Tile {
@@ -189,6 +227,8 @@ struct Tile {
     // with no area or of an archive read with Pixels::skip. Valid until the
     // next File::trim().
     [[nodiscard]] const std::uint8_t* pixels() const { return file ? file->pixels(*this, index) : nullptr; }
+    // This tile is one a level placed: its blocks stay when the file's bytes go (Archive::compact).
+    void keep() const { if (file) file->keep(*this, index); }
     File* file{};                       // the archive's; decodes this tile on demand
     std::uint32_t index{};              // this tile's number in its DT1
     std::int32_t block_headers{}, block_count{};   // where its blocks are in the file
@@ -217,21 +257,44 @@ public:
 
     [[nodiscard]] std::span<const Tile> tiles() const noexcept { return tiles_; }
     [[nodiscard]] std::size_t size() const noexcept { return tiles_.size(); }
+    // The level is laid and its tiles kept (Tile::keep): the file's bytes can go.
+    void compact() { if (file_) file_->compact(); }
+    void pin() { if (file_) file_->pin(); }
 
-    // A tile's pixels from its blocks (File::pixels calls this once per decode).
+    // A tile's pixels from its blocks: `bytes` from its block headers on
+    // (the file from Tile::block_headers, or what cut_blocks made).
     static void decode(const Tile& tile, std::span<const std::byte> bytes, std::vector<std::uint8_t>& out) {
         constexpr std::size_t kBlockHdr = 20;
         out.assign(std::size_t(tile.width) * buf_height(tile), 0);
         for (std::int32_t j = 0; j < tile.block_count; ++j) {
-            const std::byte* block_header = bytes.data() + tile.block_headers + j * kBlockHdr;
+            const std::byte* block_header = bytes.data() + j * kBlockHdr;
             const auto x = rd_i16(block_header + 0);
             const auto y = rd_i16(block_header + 2);
             const auto format = rd_i16(block_header + 8);
             const auto length = rd_i32(block_header + 10);
-            const auto data = std::span(bytes.data() + std::size_t(tile.block_headers) + std::size_t(rd_i32(block_header + 16)), std::size_t(length));
+            const auto data = std::span(bytes.data() + std::size_t(rd_i32(block_header + 16)), std::size_t(length));
             if (format == 1) decode_isometric(tile, out, x, y, data);
             else decode_rle(tile, out, x, y, data);
         }
+    }
+    // A tile's block headers and their data alone, the data offsets counted from the copy's start.
+    static std::vector<std::byte> cut_blocks(const Tile& tile, std::span<const std::byte> file) {
+        constexpr std::size_t kBlockHdr = 20;
+        const auto count = std::size_t(tile.block_count);
+        std::size_t size = count * kBlockHdr;
+        for (std::size_t j = 0; j < count; ++j) size += std::size_t(rd_i32(file.data() + tile.block_headers + j * kBlockHdr + 10));
+        std::vector<std::byte> cut(size);
+        std::size_t at = count * kBlockHdr;
+        for (std::size_t j = 0; j < count; ++j) {
+            const std::byte* block_header = file.data() + tile.block_headers + j * kBlockHdr;
+            const auto length = std::size_t(rd_i32(block_header + 10));
+            std::memcpy(cut.data() + j * kBlockHdr, block_header, kBlockHdr);
+            const auto offset = std::int32_t(at);
+            std::memcpy(cut.data() + j * kBlockHdr + 16, &offset, 4);
+            std::memcpy(cut.data() + at, file.data() + std::size_t(tile.block_headers) + std::size_t(rd_i32(block_header + 16)), length);
+            at += length;
+        }
+        return cut;
     }
 
 private:
@@ -403,13 +466,45 @@ inline const std::uint8_t* File::pixels(const Tile& tile, std::size_t index) {
     auto& all = registry();
     slot.used.store(all.clock.load(std::memory_order_relaxed), std::memory_order_relaxed);
     if (const auto* ready = slot.pixels.load(std::memory_order_acquire)) return ready->data();
-    const std::lock_guard lock(all.mutex);
+    const std::scoped_lock lock(all.mutex);
     if (const auto* ready = slot.pixels.load(std::memory_order_acquire)) return ready->data();
+    if (slot.blocks.empty() && tile.block_count > 0) {
+        if (bytes_.empty() && !reload_locked(all)) return nullptr;   // the file is gone and won't read: not drawn
+        if (reloaded_) keep_locked(tile, index);                     // so the reloaded file needn't stay for it
+    }
     auto* decoded = new std::vector<std::uint8_t>;
-    Archive::decode(tile, bytes_, *decoded);
+    if (!slot.blocks.empty()) Archive::decode(tile, slot.blocks, *decoded);
+    else Archive::decode(tile, std::span(bytes_).subspan(std::size_t(tile.block_headers)), *decoded);
     all.decoded_bytes += decoded->size();
     slot.pixels.store(decoded, std::memory_order_release);
     return decoded->data();
+}
+
+inline void File::keep_locked(const Tile& tile, std::size_t index) {
+    auto& slot = slots_[index];
+    if (slot.blocks.empty() && tile.block_count > 0 && !bytes_.empty()) slot.blocks = Archive::cut_blocks(tile, bytes_);
+}
+
+inline void File::keep(const Tile& tile, std::size_t index) {
+    const std::scoped_lock lock(registry().mutex);
+    keep_locked(tile, index);
+}
+
+// The file read again for a tile no level kept. The last few such files stay, for the tile's neighbours.
+inline bool File::reload_locked(Registry& all) {
+    if (!all.loader || key_.empty()) return false;
+    auto bytes = all.loader(key_);
+    if (!bytes || bytes->empty()) return false;
+    bytes_ = std::move(*bytes);
+    if (pinned_) return true;   // back for good
+    reloaded_ = true;
+    all.reloaded.push_back(this);
+    while (all.reloaded.size() > 4) {
+        File* oldest = all.reloaded.front();
+        all.reloaded.erase(all.reloaded.begin());
+        if (oldest->reloaded_) { std::vector<std::byte>().swap(oldest->bytes_); oldest->reloaded_ = false; }
+    }
+    return true;
 }
 
 }  // namespace d2d::dt1

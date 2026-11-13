@@ -96,7 +96,7 @@ void load_town(GameData& game_data, d2d::mpq::Stack& mpqs, const char* ds1_path)
         auto dt1_bytes = mpqs.try_read(mpq_path);
         if (!dt1_bytes) continue;
         try {
-            game_data.town.dt1s.emplace_back(*dt1_bytes, game_data.tile_pixels ? d2d::dt1::Pixels::decode : d2d::dt1::Pixels::skip, mpq_path);
+            game_data.town.dt1s.emplace_back(*dt1_bytes, game_data.tile_pixels ? d2d::dt1::Pixels::decode : d2d::dt1::Pixels::skip, mpq_path).pin();   // drawn through tile_lookup: any tile
         } catch (const std::exception& error) {
             d2d::log::warn("world: {}: {}", mpq_path, error.what());
         }
