@@ -68,7 +68,8 @@ void DebugVerbs::add_level() {
         std::tie(town.player.x, town.player.y) = town.level->nearest_free(town.level->warps[npc_index].x + 0.5f, town.level->warps[npc_index].y + 1.5f);
         town.target_x = town.player.x; town.target_y = town.player.y;
         town.player.walking = false;
-        town.hero.take_warp = int(npc_index);
+        const auto [click_x, click_y] = d2d::game::World::warp_click(town.level->warps[npc_index]);
+        town.send(d2d::game::cmd::Move{ click_x, click_y, true });   // as a click on it (or a pad's use of it)
         return std::string("ok\n");
     });
     add("goto", [this](const Args& args) -> Reply {   // arrive on level id, at a free spot by its middle (quest tests); [player]: that one (a host's joiner)

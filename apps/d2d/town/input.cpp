@@ -160,7 +160,25 @@ auto Town::pad_pick(const PadPlayer& player_pad, const UnitState& unit, bool use
         for (const auto& corpse : view.corpses) things.push_back({ -3000 - corpse.which, corpse.x, corpse.y });
         if (const int pick = pad::pick_target(hero_x, hero_y, face_x, face_y, things, -1, pad::Aim{ 4.5f, 4.5f, -0.2f }); pick >= 0)
             return { PadPick::kThing, things[std::size_t(pick)].id, things[std::size_t(pick)].x, things[std::size_t(pick)].y };
+        // A cave mouth, stairs or a door to another level: the pad has no cursor to click it with, so
+        // the one in reach is A's. The point sent is the middle of its select box (World::warp_clicked).
+        std::vector<pad::Candidate> ways;
+        if (level)
+            for (std::size_t i = 0; i < level->warps.size(); ++i) ways.push_back({ int(i), level->warps[i].unit_x, level->warps[i].unit_y });
+        if (const int pick = pad::pick_target(hero_x, hero_y, face_x, face_y, ways, -1, pad::Aim{ 6.f, 6.f, -0.2f }); pick >= 0) {
+            const auto& warp = level->warps[std::size_t(ways[std::size_t(pick)].id)];
+            const auto [click_x, click_y] = d2d::game::World::warp_click(warp);
+            return { PadPick::kWarp, ways[std::size_t(pick)].id, click_x, click_y };
+        }
         return {};
+    }
+
+auto Town::pad_use(const PadPick& pick, const Send& out) const -> bool {
+        if (pick.kind == PadPick::kItem) out(cmd::Pickup{ pick.id });
+        else if (pick.kind == PadPick::kThing) out(cmd::Interact{ pick.id });
+        else if (pick.kind == PadPick::kWarp) out(cmd::Move{ pick.x, pick.y, true });
+        else return false;
+        return true;
     }
 
 // The pad's buttons in the field: hit what is in reach in the facing, else
@@ -196,8 +214,7 @@ auto Town::pad_act(PadPlayer& player_pad, const UnitState& unit, bool dead, bool
                 out(cmd::UseSkill{ skill, hero_x + face_x * 3.f, hero_y + face_y * 3.f, -1, left, item });
             return;
         }
-        if (pick.kind == PadPick::kItem) { out(cmd::Pickup{ pick.id }); return; }
-        if (pick.kind == PadPick::kThing) { out(cmd::Interact{ pick.id }); return; }
+        if (pad_use(pick, out)) return;
         // Nothing in reach: the left skill swings only with a monster about (in camp A never just walks); the right one always casts (buffs, teleport).
         const bool foe_near = std::ranges::any_of(view.monsters, [&](const auto& foe) { return foe.alive() && !foe.ally_not_interact(*scene, level ? level->id : 0) && std::hypot(foe.unit.x - hero_x, foe.unit.y - hero_y) < 10.f; });
         if (move.alt || (move.attack && foe_near))

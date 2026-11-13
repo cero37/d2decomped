@@ -296,8 +296,11 @@ struct Town {
     // The pad's walk and its buttons for the hero at `unit` (`field`: no
     // panel or menu is up), the commands out through `out`.
     void pad_walk(PadPlayer& player_pad, const UnitState& unit, bool dead, bool field, const Send& out);
-    struct PadPick { enum Kind { kNone, kMonster, kItem, kThing } kind = kNone; int id = -1; float x = 0, y = 0; };
+    struct PadPick { enum Kind { kNone, kMonster, kItem, kThing, kWarp } kind = kNone; int id = -1; float x = 0, y = 0; };
     PadPick contextual_pick;
+    // What a pick's use sends: an item picked up, a thing used; a warp (a cave mouth, stairs: x, y a
+    // point in its select box) is walked through as a click on it is. False when there's nothing to use.
+    bool pad_use(const PadPick& pick, const Send& out) const;
     [[nodiscard]] PadPick pad_pick(const PadPlayer& player_pad, const UnitState& unit, bool uses, const pad::Aim& aim = {}, bool monsters = true) const;
     // The pad's reach for `skill`: a ranged one's (it fires a missile, srvmissile, or its Skills.txt
     // range is "range") locks on across the screen, the nearest any way round unless the stick

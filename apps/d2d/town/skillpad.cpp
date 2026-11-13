@@ -229,6 +229,12 @@ auto Town::pick_label(const PadPick& pick) const -> std::string {
         const auto found = std::ranges::find(view.ground, pick.id, &Loot::GroundItem::id);
         return "Pick up " + (found != view.ground.end() ? found->label : std::string("item"));
     }
+    if (pick.kind == PadPick::kWarp && level && scene && std::size_t(pick.id) < level->warps.size()) {
+        const auto found = scene->level_names.find(level->warps[std::size_t(pick.id)].destination);
+        if (found == scene->level_names.end()) return "Enter";
+        const auto text = lookup_string(*scene, std::string_view(found->second));
+        return "Enter " + (text ? u16_to_latin1(*text) : found->second);
+    }
     if (pick.kind == PadPick::kThing) {
         if (pick.id <= -3000) return "Pick up corpse";
         if (pick.id < 0) return "Use portal";
@@ -387,8 +393,7 @@ auto Town::apply_skill_pad(PadPlayer& player_pad, const UnitState& unit, bool de
     if (actions.swap_tap && expansion) out(cmd::SwapWeapons{});
     const auto interact = [&]() {
         const PadPick pick = pad_pick(player_pad, unit, true, {}, false);
-        if (pick.kind == PadPick::kItem) out(cmd::Pickup{ pick.id });
-        else if (pick.kind == PadPick::kThing) out(cmd::Interact{ pick.id });
+        pad_use(pick, out);
     };
     if (actions.interact_press) interact();
     const auto found = skill_sheets.find(sheet_key(std::string(name)));
@@ -422,8 +427,7 @@ auto Town::apply_skill_pad(PadPlayer& player_pad, const UnitState& unit, bool de
             return;
         }
         player_pad.target = -1;
-        if (pick.kind == PadPick::kItem) { used = true; out(cmd::Pickup{ pick.id }); return; }
-        if (pick.kind == PadPick::kThing) { used = true; out(cmd::Interact{ pick.id }); return; }
+        if (pad_use(pick, out)) { used = true; return; }
         out(cmd::UseSkill{ skill, unit.x + player_pad.face_x * 3.f, unit.y + player_pad.face_y * 3.f, -1, swing, -1 });
     };
     const auto cast = [&](int skill, bool press, bool button_down, bool& used) {

@@ -302,8 +302,7 @@ void Town::drive_touch() {
     if (touch_input.attack_press) touch_attack_used = false;
     if (touch_input.attack_down && !touch_attack_used) {
         const auto picked = touch_input.attack_press ? touch_attack_pick : pad_pick(touch_player, view.player, false);
-        if (picked.kind == PadPick::kItem) { send(cmd::Pickup{ picked.id }); touch_attack_used = true; }
-        else if (picked.kind == PadPick::kThing) { send(cmd::Interact{ picked.id }); touch_attack_used = true; }
+        if (pad_use(picked, out)) touch_attack_used = true;
         else if (picked.kind == PadPick::kMonster) send(cmd::UseSkill{ 0, picked.x, picked.y, picked.id, true, -1 });
     }
     if (touch_input.belt >= 0) send(cmd::UseBelt{ touch_input.belt });

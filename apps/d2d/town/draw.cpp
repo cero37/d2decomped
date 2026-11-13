@@ -429,6 +429,19 @@ auto Town::draw_view(std::vector<std::uint8_t>& framebuffer, std::vector<std::ui
         draw_hold_cue(framebuffer);
         if (!(g_world_only && !g_bottom_panels) && (!coop_hud_hidden() || skillbar.picking)) skillbar.draw(framebuffer, held ? -1 : mouse.x, held ? -1 : mouse.y, tip_env());
         if (pad_cue && focus_id() == hero.id) draw_pad_hint(framebuffer);
+        // A handheld's view has no cursor and no bottom bar: what the Attack / Use button would open, pick
+        // up, talk to or enter now is named at the foot of the view (monsters aren't: the swing says it).
+        if (g_world_only && wide && pad_field() && focus_id() == hero.id && !skillbar.mode_hint.empty()
+            && contextual_pick.kind != PadPick::kNone && contextual_pick.kind != PadPick::kMonster) {
+            std::string hint = skillbar.mode_hint;                 // "A . Use Chest": the button, then what it does
+            if (const auto dot = hint.find(" . "); dot != std::string::npos) hint.replace(dot, 3, "  ");
+            const auto& pal = scene->act_pal.entries().empty() ? scene->pal : scene->act_pal;
+            const auto& font = g_handheld_zoom > 0 && scene->font24.line_height() > 0 ? scene->font24 : scene->font;   // the zoomed-out view is scaled down to the screen
+            const int width = fb_width(*wide), text_x = (width - font.measure(hint)) / 2;
+            const int text_y = g_clip_bottom - 8 - font.line_height();
+            font.draw_tinted(*wide, std::uint32_t(width), kScreenHeight, pal, text_x + 1, text_y + 1, hint, 0, 0, 0);
+            font.draw_tinted(*wide, std::uint32_t(width), kScreenHeight, pal, text_x, text_y, hint, 255, 232, 150);
+        }
         if (net_game && net_game->trade.state != 0) {
             std::vector<d2d::d2s::Item> theirs;
             for (const auto& [id, stocked] : net_game->store_items) {

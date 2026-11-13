@@ -878,6 +878,13 @@ struct World {
         const auto [select_x, select_y, select_dx, select_dy] = warp.select;
         return pixel_x >= float(select_x) && pixel_x <= float(select_x + select_dx) && pixel_y >= float(select_y) && pixel_y <= float(select_y + select_dy);
     }
+    // A point warp_clicked takes: the middle of the warp's select box (a pad's use of it, with no cursor).
+    [[nodiscard]] static std::pair<float, float> warp_click(const Level::Warp& warp) {
+        const int unit_x = int(std::floor(warp.unit_x * 5)), unit_y = int(std::floor(warp.unit_y * 5));
+        const float across = (float(warp.select[0]) + float(warp.select[2]) / 2 + float((unit_x - unit_y) * 16)) / 80;   // x - y
+        const float down = (float(warp.select[1]) + float(warp.select[3]) / 2 + float((unit_x + unit_y) * 8)) / 40;      // x + y
+        return { (down + across) / 2, (down - across) / 2 };
+    }
     // Within reach of the warp's tile unit: rules::unit_distance (the
     // player's size 2, a warp unit's 0) under 5 (FUN_00641530).
     [[nodiscard]] static bool warp_close(const Level::Warp& warp, float x, float y) {
