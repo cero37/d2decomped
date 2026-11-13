@@ -325,12 +325,15 @@ void render_ingame(std::vector<std::uint8_t>& framebuffer,
             scene.font.draw_tinted(world, std::uint32_t(world_w), kScreenHeight, pal, (box[0] + box[2]) / 2 - scene.font.measure(hovered_name) / 2,
                                top, hovered_name, colour[0], colour[1], colour[2]);
         }
-        if (g_world_only) {   // a handheld's HUD is its own, on the other screen (the frame's top-left 320x240)
+        if (g_world_only && !g_bottom_panels) {   // a handheld's HUD is its own, on the other screen (the frame's top-left 320x240)
             const prof::Mark timed("bottom hud");
             draw_bottom_hud(framebuffer, scene, { hud_stats, belt, &hud, level.name, automap, cam_x + float(level.world_x), cam_y + float(level.world_y) });
             return;
         }
-        if (wide)
+        if (g_world_only) {   // a panel is open: the PC's HUD and panels on black, the second screen a window of them
+            std::fill(framebuffer.begin(), framebuffer.end(), std::uint8_t{0});
+            for (std::size_t i = 3; i < framebuffer.size(); i += 4) framebuffer[i] = 0xFF;
+        } else if (wide)
             for (std::size_t y = 0; y < kScreenHeight; ++y)
                 std::copy_n(world.begin() + std::ptrdiff_t((y * std::size_t(world_w) + std::size_t(off)) * 4), kScreenWidth * 4,
                             framebuffer.begin() + std::ptrdiff_t(y * kScreenWidth * 4));

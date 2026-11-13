@@ -21,7 +21,7 @@ namespace {
 inline std::uint32_t word(const std::uint8_t* rgba) { return std::uint32_t(rgba[0]) << 24 | std::uint32_t(rgba[1]) << 16 | std::uint32_t(rgba[2]) << 8 | 0xFFu; }
 }
 
-void handheld_present(const std::vector<std::uint8_t>& frame, int frame_w, int frame_h, int clip_top, bool world_only, const std::vector<std::uint8_t>* bottom, int bottom_stride) {
+void handheld_present(const std::vector<std::uint8_t>& frame, int frame_w, int frame_h, int clip_top, bool world_only, const std::vector<std::uint8_t>* bottom, int bottom_stride, int bottom_x, int bottom_y) {
     u16 fb_w = 0, fb_h = 0;
     auto* top = reinterpret_cast<std::uint32_t*>(gfxGetFramebuffer(GFX_TOP, GFX_LEFT, &fb_w, &fb_h));   // 240 x 400
     if (top && world_only && frame_w == 400) {
@@ -48,10 +48,10 @@ void handheld_present(const std::vector<std::uint8_t>& frame, int frame_w, int f
     }
     auto* low = reinterpret_cast<std::uint32_t*>(gfxGetFramebuffer(GFX_BOTTOM, GFX_LEFT, &fb_w, &fb_h));   // 240 x 320
     if (low) {
-        if (bottom && bottom_stride >= 320 && bottom->size() >= std::size_t(bottom_stride) * 240 * 4) {
+        if (bottom && bottom_x >= 0 && bottom_y >= 0 && bottom_x + 320 <= bottom_stride && bottom->size() >= std::size_t(bottom_stride) * std::size_t(bottom_y + 240) * 4) {
             for (int x = 0; x < 320; ++x) {
                 std::uint32_t* column = low + x * 240;
-                const std::uint8_t* source = bottom->data() + (std::size_t(239) * std::size_t(bottom_stride) + std::size_t(x)) * 4;
+                const std::uint8_t* source = bottom->data() + (std::size_t(bottom_y + 239) * std::size_t(bottom_stride) + std::size_t(bottom_x + x)) * 4;
                 for (int y = 0; y < 240; ++y, source -= std::size_t(bottom_stride) * 4) column[y] = word(source);
             }
         } else {

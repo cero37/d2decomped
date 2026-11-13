@@ -97,6 +97,7 @@ auto Town::draw(std::vector<std::uint8_t>& framebuffer, const Mouse& mouse, std:
     }
     present_skill_pad();
     if (g_world_only) {
+        g_bottom_panels = left_panel_open() || inv_open || tree_open;
         auto& shown = g_bottom_skills;
         // The 3DS's own names, by where each button sits (south, east, west, north, the shoulders; ZR the trigger).
         shown.main = skillbar.mode_main; shown.main_label = "ZR";
@@ -115,6 +116,21 @@ auto Town::draw(std::vector<std::uint8_t>& framebuffer, const Mouse& mouse, std:
     draw_view(ui_buffer, &framebuffer, mouse, frame_ms);
     if (g_world_only) {
         g_bottom_frame = &ui_buffer;
+        static bool panel_was_open = false;
+        if (g_bottom_panels) {
+            // The side the cursor is on when both are open, else the open one; the window follows the cursor down the panel.
+            const bool left_side = left_panel_open(), right_side = inv_open || tree_open;
+            g_bottom_origin_x = left_side && right_side ? (mouse.x < int(kScreenWidth) / 2 ? kCharPanelX : int(kScreenWidth) / 2) : left_side ? kCharPanelX : int(kScreenWidth) / 2;
+            if (!std::exchange(panel_was_open, true)) g_bottom_origin_y = kCharPanelY;               // a panel opens at its top
+            else if (mouse.x >= g_bottom_origin_x && mouse.x < g_bottom_origin_x + 320) {
+                if (mouse.y < g_bottom_origin_y + 14) g_bottom_origin_y = mouse.y - 14;
+                if (mouse.y > g_bottom_origin_y + 225) g_bottom_origin_y = mouse.y - 225;
+            }
+            g_bottom_origin_y = std::clamp(g_bottom_origin_y, kCharPanelY, kCharPanelY + 432 - 240);   // the panels are 432 tall
+        } else {
+            g_bottom_origin_x = g_bottom_origin_y = 0;
+            panel_was_open = false;
+        }
         // Off the 3DS (a preview): the second screen goes in the frame's spare rows,
         // its first rows above the world's and the rest below (the frame is 600 rows:
         // the world's 240 and 360 spare).
@@ -123,7 +139,7 @@ auto Town::draw(std::vector<std::uint8_t>& framebuffer, const Mouse& mouse, std:
             for (int y = 0; y < 240; ++y) {
                 const int to = y < g_clip_top ? y : g_clip_bottom + (y - g_clip_top);
                 if (to >= int(kScreenHeight)) break;
-                std::copy_n(ui_buffer.begin() + std::ptrdiff_t(std::size_t(y) * kScreenWidth * 4), 320 * 4,
+                std::copy_n(ui_buffer.begin() + std::ptrdiff_t((std::size_t(y + g_bottom_origin_y) * kScreenWidth + std::size_t(g_bottom_origin_x)) * 4), 320 * 4,
                             framebuffer.begin() + std::ptrdiff_t((std::size_t(to) * std::size_t(screen_w) + std::size_t(left)) * 4));
             }
         return;
@@ -140,7 +156,7 @@ auto Town::draw(std::vector<std::uint8_t>& framebuffer, const Mouse& mouse, std:
 // panel, so the cursor maps to the world through the same view the frame's
 // input uses (FUN_0045aea0 sets 0x7a5214 in the call that moves the cursor).
 auto Town::sync_panel_cam() -> void {
-    const int shift = d2d::rules::panel_view_shift(view_state(), g_view_width);
+    const int shift = g_world_only ? 0 : d2d::rules::panel_view_shift(view_state(), g_view_width);   // a handheld's panels are on the other screen
     const float want_x = float(shift) / kIsoW, want_y = -float(shift) / kIsoW;
     cam_x += want_x - panel_cam_x; cam_y += want_y - panel_cam_y;
     panel_cam_x = want_x; panel_cam_y = want_y;

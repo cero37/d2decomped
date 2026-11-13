@@ -866,6 +866,24 @@ int run_windowed(std::vector<std::uint8_t>& framebuffer,
                 }
                 if (event.type == SDL_EVENT_MOUSE_MOTION && (event.motion.state & SDL_BUTTON_LMASK))
                     if (town.touch_event(-2, touch::Phase::Move, event.motion.x, event.motion.y)) continue;
+                if (g_world_only && (event.type == SDL_EVENT_FINGER_DOWN || event.type == SDL_EVENT_FINGER_UP ||
+                                     event.type == SDL_EVENT_FINGER_MOTION || event.type == SDL_EVENT_FINGER_CANCELED)) {
+                    // A handheld's touch screen is the second screen: a panel's window of the UI frame, or the HUD.
+                    const bool unit = event.tfinger.x <= 1.f && event.tfinger.y <= 1.f;     // SDL's 0..1 when the touch has no window
+                    const int touch_x = unit ? int(event.tfinger.x * 319.f + .5f) : int(event.tfinger.x), touch_y = unit ? int(event.tfinger.y * 239.f + .5f) : int(event.tfinger.y);
+                    const bool down = event.type == SDL_EVENT_FINGER_DOWN, up = event.type == SDL_EVENT_FINGER_UP || event.type == SDL_EVENT_FINGER_CANCELED;
+                    if (g_bottom_panels) {
+                        mouse.x = g_bottom_origin_x + touch_x; mouse.y = g_bottom_origin_y + touch_y;
+                        if (down) { mouse.down = true; mouse.press_this_frame = true; }
+                        if (up) { mouse.down = false; mouse.release_this_frame = event.type == SDL_EVENT_FINGER_UP; }
+                        pad_in_use = false;
+                    } else {
+                        g_bottom_touch.x = touch_x; g_bottom_touch.y = touch_y;
+                        if (down) { g_bottom_touch.down = true; g_bottom_touch.pressed = true; }
+                        if (up) { g_bottom_touch.down = false; g_bottom_touch.released = true; }
+                    }
+                    continue;
+                }
                 if (event.type == SDL_EVENT_FINGER_DOWN || event.type == SDL_EVENT_FINGER_UP ||
                     event.type == SDL_EVENT_FINGER_MOTION || event.type == SDL_EVENT_FINGER_CANCELED) {
                     pad_in_use = true;
@@ -1785,7 +1803,7 @@ int run_windowed(std::vector<std::uint8_t>& framebuffer,
                                 std::memory_order_relaxed);
 #ifdef __3DS__
             current_phase.store(std::uint32_t(MainPhase::Present), std::memory_order_relaxed);
-            handheld_present(framebuffer, fb_width(framebuffer), int(kScreenHeight), g_clip_top, g_world_only, g_world_only ? g_bottom_frame : nullptr, int(kScreenWidth));
+            handheld_present(framebuffer, fb_width(framebuffer), int(kScreenHeight), g_clip_top, g_world_only, g_world_only ? g_bottom_frame : nullptr, int(kScreenWidth), g_bottom_origin_x, g_bottom_origin_y);
 #else
             SDL_UpdateTexture(win.texture, nullptr, framebuffer.data(), fb_width(framebuffer) * 4);
             SDL_RenderClear(win.renderer);

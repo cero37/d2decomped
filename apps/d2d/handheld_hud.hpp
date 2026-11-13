@@ -45,8 +45,20 @@ inline BottomSkills g_bottom_skills;
 // 320x240), or null outside the game. Town::draw sets it.
 inline const std::vector<std::uint8_t>* g_bottom_frame = nullptr;
 
+// A panel is open (inventory, character, stash, a store...): the second
+// screen shows the PC's own panel, a 320x240 window of the UI frame from
+// (g_bottom_origin_x, g_bottom_origin_y), and a touch is the mouse there.
+// The panels are 320 wide, so only the height scrolls: the window follows
+// the cursor.
+inline bool g_bottom_panels = false;
+inline int g_bottom_origin_x = 0, g_bottom_origin_y = 0;
+
+// A touch on the second screen with no panel open (the HUD's own buttons): the last one, for the HUD to take.
+struct BottomTouch { int x = 0, y = 0; bool down = false, pressed = false, released = false; };
+inline BottomTouch g_bottom_touch;
+
 // The console's own present (platform/3ds): both screens from the frame.
-void handheld_present(const std::vector<std::uint8_t>& frame, int frame_w, int frame_h, int clip_top, bool world_only, const std::vector<std::uint8_t>* bottom, int bottom_stride);
+void handheld_present(const std::vector<std::uint8_t>& frame, int frame_w, int frame_h, int clip_top, bool world_only, const std::vector<std::uint8_t>* bottom, int bottom_stride, int bottom_x, int bottom_y);
 
 void draw_bottom_hud(std::vector<std::uint8_t>& framebuffer, const Scene& scene, const BottomHud& state);
 
