@@ -20,6 +20,8 @@
 #include <exception>
 #include <map>
 #include <functional>
+#include <memory>
+#include <atomic>
 #include <optional>
 #include <span>
 #include <string>
@@ -82,6 +84,18 @@ struct Scene : GameData {
     // 2 LG, 3 RA, 4 LA, 5 RH, 6 LH, 7 SH, 8.. S1..S8). What each layer
     // wears comes from 16 appearance bytes — a .d2s header's, or a new
     // character's starting gear — through `comp` (components/compcode).
+    // A handheld reads and decodes an animation's layers on a worker (a monster's first frame on the
+    // card took a tenth of a second and more of the frame that first drew it): the unit shows when its
+    // layers are back. `path` empty: `bytes` are the file already.
+    struct AnimLoad {
+        std::string path, name;
+        std::vector<std::byte> bytes;
+        const std::uint8_t* tint = nullptr;
+        d2d::dcc::Sprite result;
+        std::atomic<bool> done{ false };
+    };
+    static inline bool g_anim_async = false;
+    static void anim_load(std::shared_ptr<AnimLoad> load);   // scene/render.cpp
     struct PlayerAnim : AnimTiming {
         d2d::cof::Cof                     cof;
         // Each layer's DCC file, decoded when it's first drawn: the World
@@ -97,8 +111,28 @@ struct Scene : GameData {
         std::array<std::string, 16>                    path;
         mutable std::array<bool, 16>                   dropped{};
         mutable std::uint32_t                          used_ms = 0;
+        // A layer being read and decoded by the worker (g_anim_async): it draws nothing until it's back.
+        mutable std::array<std::shared_ptr<AnimLoad>, 16> loading;
         [[nodiscard]] const d2d::dcc::Sprite& layer(std::size_t layer_index) const {
             used_ms = g_anim_now_ms;
+            if (auto& load = loading[layer_index]) {
+                if (!load->done.load(std::memory_order_acquire)) return decoded[layer_index];
+                decoded[layer_index] = std::move(load->result);
+                load.reset();
+                return decoded[layer_index];
+            }
+            if (g_anim_async && g_anim_loader && (dropped[layer_index] || !dcc[layer_index].empty())) {
+                auto load = std::make_shared<AnimLoad>();
+                if (dropped[layer_index]) load->path = path[layer_index];
+                load->bytes = std::move(dcc[layer_index]);
+                load->tint = tint[layer_index];
+                load->name = name;
+                dcc[layer_index] = {};
+                dropped[layer_index] = false;
+                loading[layer_index] = load;
+                anim_load(std::move(load));
+                return decoded[layer_index];
+            }
             if (dropped[layer_index] && g_anim_loader) {
                 if (auto bytes = g_anim_loader(path[layer_index])) dcc[layer_index] = std::move(*bytes);
                 dropped[layer_index] = false;

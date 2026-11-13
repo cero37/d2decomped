@@ -1917,11 +1917,21 @@ int run_windowed(std::vector<std::uint8_t>& framebuffer,
         // whichever phase spiked so we can tell CPU-side from GPU-side.
         {   // what the stall was: the frame's stages, and the files the archives were asked for during it
             const auto reads = d2d::mpq::g_read_stats.take();
-            if (dt_input > 100 || dt_render > 100 || dt_present > 100) {
+            const auto tiles = d2d::dt1::File::take_stats();
+            static std::uint32_t tiles_decoded = 0, tiles_dropped = 0, files_read = 0;   // since the last "alive" line
+            static std::uint64_t tiles_ns = 0, files_ns = 0;
+            tiles_decoded += tiles.decodes; tiles_dropped += tiles.dropped; tiles_ns += tiles.ns; files_read += reads.files; files_ns += reads.ns;
+            static const std::uint32_t slow_ms = [] { const char* text = std::getenv("D2D_SLOW_MS"); return text && *text ? std::uint32_t(std::atoi(text)) : 100u; }();   // a fast machine standing in for a slow one
+            if (dt_input > slow_ms || dt_render > slow_ms || dt_present > slow_ms) {
                 d2d::log::warn(
-                    "slow frame: input={} ms render={} ms present={} ms screen={} cam=({},{}) | {} | {} files read in {} ms: {}",
+                    "slow frame: input={} ms render={} ms present={} ms screen={} cam=({},{}) | {} | {} tiles decoded in {} ms | {} files read in {} ms: {}",
                     dt_input, dt_render, dt_present, int(screen), int(town.player.x), int(town.player.y),
-                    d2d::client::prof::frame_spans(), reads.files, reads.ns / 1000000, reads.names);
+                    d2d::client::prof::frame_spans(), tiles.decodes, tiles.ns / 1000000, reads.files, reads.ns / 1000000, reads.names);
+            }
+            if (now_ms - stat_last_report_ms >= 5000) {
+                d2d::log::info("loads/5s: {} tiles decoded in {} ms, {} dropped, tile cache {} of {} KiB | {} files read in {} ms",
+                               tiles_decoded, tiles_ns / 1000000, tiles_dropped, d2d::dt1::File::decoded_bytes() / 1024, d2d::dt1::File::default_budget() / 1024, files_read, files_ns / 1000000);
+                tiles_decoded = tiles_dropped = files_read = 0; tiles_ns = files_ns = 0;
             }
             d2d::client::prof::frame_end();
         }
@@ -2159,6 +2169,8 @@ int main(int argc, char** argv) {
         d2d::dt1::File::set_loader([mpqs = &scene->mpqs](const std::string& path) -> std::optional<std::vector<std::byte>> {
             try { return mpqs->try_read(path); } catch (const std::exception&) { return std::nullopt; }
         });
+    if (scene)
+        Scene::g_anim_async = std::getenv("D2D_HANDHELD") != nullptr;
     if (scene)
         Scene::g_anim_loader = [mpqs = &scene->mpqs](const std::string& path) -> std::optional<std::vector<std::byte>> {
             try { return mpqs->try_read(path); } catch (const std::exception&) { return std::nullopt; }

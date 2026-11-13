@@ -2,6 +2,10 @@
 // The Scene's rendering support: overlay sprites and drawn-sprite tracking.
 #include "scene.hpp"
 
+#include <thread>
+#include <mutex>
+#include <deque>
+#include <condition_variable>
 #include <dc6.hpp>
 #include <dcc.hpp>
 #include <log.hpp>
@@ -64,6 +68,39 @@ const d2d::dcc::Sprite* Scene::missile_cel(const std::string& name) const {
 }
 
 // Record each sprite once when the optional animation audit is enabled.
+// The animation worker: one thread, the layers in the order they were asked for.
+void Scene::anim_load(std::shared_ptr<AnimLoad> load) {
+    struct Worker {
+        std::mutex mutex;
+        std::condition_variable wake;
+        std::deque<std::shared_ptr<AnimLoad>> queue;
+        std::thread thread{ [this] {
+            for (;;) {
+                std::shared_ptr<AnimLoad> job;
+                {
+                    std::unique_lock lock(mutex);
+                    wake.wait(lock, [this] { return !queue.empty(); });
+                    job = std::move(queue.front());
+                    queue.pop_front();
+                }
+                try {
+                    if (!job->path.empty() && g_anim_loader)
+                        if (auto bytes = g_anim_loader(job->path)) job->bytes = std::move(*bytes);
+                    if (!job->bytes.empty()) {
+                        job->result = d2d::dcc::Sprite(job->bytes);
+                        if (job->tint) job->result.remap(job->tint);
+                    }
+                } catch (const std::exception& error) { d2d::log::warn("{} ({}): {}", job->name, job->path, error.what()); }
+                std::vector<std::byte>().swap(job->bytes);
+                job->done.store(true, std::memory_order_release);
+            }
+        } };
+    };
+    static Worker* worker = new Worker;      // never joined: it runs to the end of the program
+    { const std::scoped_lock lock(worker->mutex); worker->queue.push_back(std::move(load)); }
+    worker->wake.notify_one();
+}
+
 void Scene::trim_anims(std::uint32_t now_ms, std::uint32_t idle_ms) const {
     g_anim_now_ms = now_ms;
     static std::uint32_t checked_ms = 0;

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Town (town.hpp): walking, and handling the frame's events. The rest is in this directory.
+#include "../handheld_prof.hpp"
 #include "town.hpp"
 
 #include "audio.hpp"
@@ -406,7 +407,12 @@ auto Town::walk(const Mouse& mouse, bool over_ui, Audio& audio, std::uint32_t fr
         lan_poll();
         bool ticked = false;
         lan_cue_from = 0;                                   // the frame's cues (publish takes them after its ticks): each turn sends from where the last left off
-        for (int ticks = 0; frame_ms - world_ms >= kTickMs && ticks < 5; ++ticks) {
+        // A handheld that fell behind (a stall, a slow stretch) doesn't run the lost turns after it: five
+        // turns in a frame make that frame slow too, and the next. Two a frame at most, the rest let go.
+        const int most_ticks = g_world_only ? 2 : 5;
+        if (g_world_only && frame_ms - world_ms > 3 * kTickMs) world_ms = frame_ms - 2 * kTickMs;
+        prof::Mark timed_ticks("update: world turns");
+        for (int ticks = 0; frame_ms - world_ms >= kTickMs && ticks < most_ticks; ++ticks) {
             prev_x = view.player.x; prev_y = view.player.y;
             std::vector<Order> orders;
             for (auto& command : net.receive()) orders.push_back({ focus_id(), std::move(command) });   // the screen's player's
@@ -426,6 +432,8 @@ auto Town::walk(const Mouse& mouse, bool over_ui, Audio& audio, std::uint32_t fr
             world_ms += kTickMs;
             ticked = true;
         }
+        timed_ticks.stop();
+        const prof::Mark timed_after("update: after the turns (view, sounds)");
         if (ticked && focused().interact_npc < 0) hold_interact = false;   // talked, gone, or nothing queued (a portal, corpse or non-menu unit sets none)
         if (!ticked && view.level == world.level) return;
         if (ticked && g_unit_slide && view.level == world.level) remember_slides(view, slide_from);   // where the View had them: the slide's start

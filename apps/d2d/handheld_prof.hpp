@@ -39,7 +39,7 @@ struct Mark {
 };
 
 // This frame's spans of `least_ms` or more ("town.draw 212, light 180"), for a slow frame's report.
-inline std::string frame_spans(double least_ms = 8) {
+inline std::string frame_spans(double least_ms = 2) {
     std::string out;
     for (const auto& entry : g_spans) {
         if (!entry.name) break;

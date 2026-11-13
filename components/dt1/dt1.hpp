@@ -66,6 +66,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -162,8 +163,12 @@ public:
             const auto* pixels = entry.slot->pixels.exchange(nullptr, std::memory_order_relaxed);
             all.decoded_bytes -= pixels->size();
             delete pixels;
+            all.dropped.fetch_add(1, std::memory_order_relaxed);
         }
     }
+    // Tiles decoded and dropped since the last call, and the time the decoding took (for a slow frame's report).
+    struct Stats { std::uint32_t decodes, dropped; std::uint64_t ns; };
+    [[nodiscard]] static Stats take_stats() { auto& all = registry(); return { all.decodes.exchange(0), all.dropped.exchange(0), all.decode_ns.exchange(0) }; }
     [[nodiscard]] static std::size_t decoded_bytes() { auto& all = registry(); const std::scoped_lock lock(all.mutex); return all.decoded_bytes; }
     // D2D_TILE_CACHE_MB, else 12 MB on the 3DS and 96 MB elsewhere.
     [[nodiscard]] static std::size_t default_budget() {
@@ -210,6 +215,8 @@ private:
         std::atomic<std::uint32_t> clock{ 1 };
         Loader loader;
         std::vector<File*> reloaded;   // files read again for a stray tile, oldest first; a few stay
+        std::atomic<std::uint32_t> decodes{ 0 }, dropped{ 0 };   // since take_stats(): tiles decoded, tiles trim() let go
+        std::atomic<std::uint64_t> decode_ns{ 0 };
     };
     void keep_locked(const Tile& tile, std::size_t index);
     bool reload_locked(Registry& all);
@@ -503,6 +510,7 @@ inline const std::uint8_t* File::pixels(const Tile& tile, std::size_t index) {
         if (bytes_.empty() && !reload_locked(all)) return nullptr;   // the file is gone and won't read: not drawn
         if (reloaded_) keep_locked(tile, index);                     // so the reloaded file needn't stay for it
     }
+    const auto decode_from = std::chrono::steady_clock::now();
     auto* decoded = new std::vector<std::uint8_t>;
     if (!slot.blocks.empty()) Archive::decode(tile, slot.blocks, *decoded);
     else Archive::decode(tile, std::span(bytes_).subspan(std::size_t(tile.block_headers)), *decoded);
@@ -520,6 +528,8 @@ inline const std::uint8_t* File::pixels(const Tile& tile, std::size_t index) {
         }
     }
     all.decoded_bytes += decoded->size();
+    all.decodes.fetch_add(1, std::memory_order_relaxed);
+    all.decode_ns.fetch_add(std::uint64_t(std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - decode_from).count()), std::memory_order_relaxed);
     slot.pixels.store(decoded, std::memory_order_release);
     return decoded->data();
 }

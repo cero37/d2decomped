@@ -49,6 +49,19 @@
 
 namespace d2d::client {
 
+// A layer's DCC: its bytes now, or on a handheld only its path, the worker reading it when it's first drawn.
+static bool take_layer(const d2d::mpq::Stack& mpqs, Scene::PlayerAnim& out, std::size_t type, const char* path) {
+    if (Scene::g_anim_async) {
+        if (!mpqs.contains(path)) return false;
+        out.path[type] = path; out.dropped[type] = true;
+        return true;
+    }
+    auto bytes = mpqs.try_read(path);
+    if (!bytes) return false;
+    out.dcc[type] = std::move(*bytes); out.path[type] = path;
+    return true;
+}
+
 Scene::PlayerAnim load_composite(const d2d::mpq::Stack& mpqs,
                                  const std::vector<d2d::compcode::Entry>& comp,
                                  const std::array<std::vector<std::uint8_t>, 9>& colormaps,
@@ -76,11 +89,11 @@ Scene::PlayerAnim load_composite(const d2d::mpq::Stack& mpqs,
                           kModeCode[mode], weapon_class.c_str());
             if (d2d::compcode::Tint tint; d2d::compcode::tint_of(gfx[16 + layer.type], tint) && colormaps[std::size_t(tint.transform)].size() >= 21 * 256)
                 out.tint[layer.type] = colormaps[std::size_t(tint.transform)].data() + tint.colour * 256;
-            if (auto bytes = mpqs.try_read(path)) { out.dcc[layer.type] = std::move(*bytes); out.path[layer.type] = path; }
+            if (take_layer(mpqs, out, layer.type, path)) {}
             else if (code != "LIT") {                     // no such piece in this mode (death has only LIT's): the lit one
                 std::snprintf(path, sizeof(path), R"(data\global\CHARS\%s\%s\%s%sLIT%s%s.dcc)",
                               class_code, kLayerCode[layer.type], class_code, kLayerCode[layer.type], kModeCode[mode], weapon_class.c_str());
-                if (auto piece_bytes = mpqs.try_read(path)) { out.dcc[layer.type] = std::move(*piece_bytes); out.path[layer.type] = path; }
+                take_layer(mpqs, out, layer.type, path);
             }
         }
     } catch (const std::exception& error) {
@@ -106,7 +119,7 @@ Scene::PlayerAnim load_npc_composite(const d2d::mpq::Stack& mpqs, const Npc& npc
             std::snprintf(path, sizeof(path), R"(data\global\%s\%s\%s\%s%s%s%s%s.dcc)",
                           npc.root.c_str(), npc.code.c_str(), kLayerCode[layer.type], npc.code.c_str(),
                           kLayerCode[layer.type], comp.c_str(), mode.c_str(), weapon_class.c_str());
-            if (auto bytes = mpqs.try_read(path)) { out.dcc[layer.type] = std::move(*bytes); out.path[layer.type] = path; continue; }
+            if (take_layer(mpqs, out, layer.type, path)) continue;
             // Some objects' parts are DC6 (the hellgate's): its frames as the DCC's, anchored at their offsets.
             std::strcpy(path + std::strlen(path) - 3, "dc6");
             if (auto bytes = mpqs.try_read(path)) out.decoded[layer.type] = dc6_as_dcc(*bytes);

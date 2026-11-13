@@ -21,6 +21,10 @@
 #include <thread>
 #include <vector>
 
+#ifdef __3DS__
+extern "C" void d2d_urgent_threads(int on);   // platform/3ds/src/threads_3ds.cpp: the threads made next are a frame's own
+#endif
+
 namespace d2d::client {
 
 namespace {
@@ -306,41 +310,60 @@ void run_parallel(int bands, const std::function<void(int)>& band) {
     if (bands <= 1) { band(0); return; }
     // Made on the first call and never destroyed: at exit a static pool's
     // destructor would run while its workers still wait on it, and hang.
+    // A round's jobs are taken one at a time by whoever is free, the caller included: a worker
+    // whose core is busy with something else delays nothing, the caller does its share.
     struct Pool {
         std::mutex mutex;
         std::condition_variable wake, done;
         const std::function<void(int)>* job = nullptr;
-        int jobs = 0;          // this round's bands, the caller's (0) included
-        int pending = 0;       // the workers' bands not drawn yet
+        int jobs = 0;          // this round's jobs
+        int next = 0;          // the first not taken yet
+        int finished = 0;
         std::uint64_t round = 0;
         int workers = 0;
     };
     static Pool& pool = *new Pool;
     std::unique_lock lock(pool.mutex);
-    for (; pool.workers < bands - 1; ++pool.workers)
-        std::thread([index = pool.workers + 1] {
-            std::uint64_t seen = 0;
-            std::unique_lock worker_lock(pool.mutex);
-            for (;;) {
-                pool.wake.wait(worker_lock, [&] { return pool.round != seen; });
-                seen = pool.round;
-                if (index >= pool.jobs) continue;
-                const auto* work = pool.job;
-                worker_lock.unlock();
-                (*work)(index);
-                worker_lock.lock();
-                if (--pool.pending == 0) pool.done.notify_one();
-            }
-        }).detach();
+    if (pool.workers < bands - 1) {
+#ifdef __3DS__
+        d2d_urgent_threads(1);
+#endif
+        for (; pool.workers < bands - 1; ++pool.workers)
+            std::thread([] {
+                std::uint64_t seen = 0;
+                std::unique_lock worker_lock(pool.mutex);
+                for (;;) {
+                    pool.wake.wait(worker_lock, [&] { return pool.round != seen && pool.job && pool.next < pool.jobs; });
+                    const std::uint64_t round = pool.round;
+                    while (pool.round == round && pool.job && pool.next < pool.jobs) {
+                        const int index = pool.next++;
+                        const auto* work = pool.job;
+                        worker_lock.unlock();
+                        (*work)(index);
+                        worker_lock.lock();
+                        if (++pool.finished == pool.jobs) pool.done.notify_one();
+                    }
+                    seen = round;
+                }
+            }).detach();
+#ifdef __3DS__
+        d2d_urgent_threads(0);
+#endif
+    }
     pool.job = &band;
     pool.jobs = bands;
-    pool.pending = bands - 1;
+    pool.next = 0;
+    pool.finished = 0;
     ++pool.round;
-    lock.unlock();
     pool.wake.notify_all();
-    band(0);
-    lock.lock();
-    pool.done.wait(lock, [&] { return pool.pending == 0; });
+    while (pool.next < pool.jobs) {
+        const int index = pool.next++;
+        lock.unlock();
+        band(index);
+        lock.lock();
+        ++pool.finished;
+    }
+    pool.done.wait(lock, [&] { return pool.finished == pool.jobs; });
     pool.job = nullptr;
 }
 
