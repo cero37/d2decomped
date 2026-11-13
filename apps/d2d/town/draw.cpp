@@ -144,8 +144,56 @@ auto Town::draw(std::vector<std::uint8_t>& framebuffer, const Mouse& mouse, std:
     if (g_world_only) {
         g_bottom_frame = &ui_buffer;
         static bool panel_was_open = false;
-        if (!g_bottom_panels || g_bottom_whole) g_top_panel.clear();
-        if (g_bottom_whole) {
+        // An NPC's menu or speech: its box alone, as large as the screen takes (the whole frame at two fifths is too small to read).
+        g_bottom_zoom.on = false;
+        if (g_bottom_whole && !game_menu.open && !controls.open && view.pmode != kModeDD && (npc_menu.npc >= 0 || speech.npc >= 0)) {
+            int left = int(kScreenWidth), top = int(kScreenHeight), right = 0, bottom = 0;
+            const auto take = [&](int x, int y, int width, int height) {
+                left = std::min(left, x); top = std::min(top, y); right = std::max(right, x + width); bottom = std::max(bottom, y + height);
+            };
+            if (npc_menu.npc >= 0 && npc_menu.box_width > 0) take(npc_menu.x, npc_menu.y, npc_menu.box_width, npc_menu.box_height);
+            if (speech.npc >= 0) take((int(kScreenWidth) - 0x145) / 2, kSpeechBoxTop, 0x145, kSpeechBoxBottom - kSpeechBoxTop);
+            left = std::max(0, left - 6); top = std::max(0, top - 6); right = std::min(int(kScreenWidth), right + 6); bottom = std::min(int(kScreenHeight), bottom + 6);
+            if (right > left && bottom > top) {
+                const float scale = std::min({ 2.f, 320.f / float(right - left), 240.f / float(bottom - top) });
+                const int out_w = std::min(320, int(float(right - left) * scale)), out_h = std::min(240, int(float(bottom - top) * scale));
+                const int out_x = (320 - out_w) / 2, out_y = (240 - out_h) / 2;
+                static std::vector<std::uint8_t> zoomed;
+                zoomed.assign(std::size_t(320) * 240 * 4, 0);
+                for (std::size_t at = 0; at < zoomed.size(); at += 4) { zoomed[at] = 18; zoomed[at + 1] = 16; zoomed[at + 2] = 14; zoomed[at + 3] = 0xFF; }
+                struct Tap { int first, second, weight; };          // a column's two source pixels and the second's share of 256
+                const auto tap = [scale](int at, int size) {
+                    const float from = std::clamp((float(at) + .5f) / scale - .5f, 0.f, float(size - 1));
+                    const int first = int(from);
+                    return Tap{ first, std::min(size - 1, first + 1), int((from - float(first)) * 256.f) };
+                };
+                std::array<Tap, 320> columns{};
+                for (int x = 0; x < out_w; ++x) columns[std::size_t(x)] = tap(x, right - left);
+                for (int y = 0; y < out_h; ++y) {
+                    const Tap rows = tap(y, bottom - top);
+                    const auto* row0 = ui_buffer.data() + (std::size_t(top + rows.first) * kScreenWidth + std::size_t(left)) * 4;
+                    const auto* row1 = ui_buffer.data() + (std::size_t(top + rows.second) * kScreenWidth + std::size_t(left)) * 4;
+                    auto* out = zoomed.data() + (std::size_t(out_y + y) * 320 + std::size_t(out_x)) * 4;
+                    for (int x = 0; x < out_w; ++x, out += 4) {
+                        const Tap& column = columns[std::size_t(x)];
+                        for (int channel = 0; channel < 3; ++channel) {
+                            const int upper = row0[column.first * 4 + channel] * (256 - column.weight) + row0[column.second * 4 + channel] * column.weight;
+                            const int lower = row1[column.first * 4 + channel] * (256 - column.weight) + row1[column.second * 4 + channel] * column.weight;
+                            out[channel] = std::uint8_t((upper * (256 - rows.weight) + lower * rows.weight) >> 16);
+                        }
+                    }
+                }
+                for (int y = 0; y < 240; ++y)
+                    std::copy_n(zoomed.begin() + std::ptrdiff_t(std::size_t(y) * 320 * 4), 320 * 4, ui_buffer.begin() + std::ptrdiff_t(std::size_t(y) * kScreenWidth * 4));
+                g_bottom_zoom = { true, left, top, out_x, out_y, scale };
+                g_bottom_whole = false;                    // the screen takes the frame's top-left 320x240 as it is
+            }
+        }
+        if (!g_bottom_panels || g_bottom_whole || g_bottom_zoom.on) g_top_panel.clear();
+        if (g_bottom_zoom.on) {
+            g_bottom_origin_x = g_bottom_origin_y = 0;
+            panel_was_open = false;
+        } else if (g_bottom_whole) {
             g_bottom_origin_x = g_bottom_origin_y = 0;
             panel_was_open = false;
         } else if (g_bottom_panels) {
@@ -389,7 +437,7 @@ auto Town::draw_view(std::vector<std::uint8_t>& framebuffer, std::vector<std::ui
                       cube_open ? (transmute_down ? 2 : 1) : 0, &npc_menu, &speech, &automap, &store, stat_pressed,
                       nullptr, nullptr, nullptr, extra, rate, light.pal ? &light : nullptr, &rain,
                       !(pmode == kModeDD && !view.corpses.empty()),    // dead, the corpse lies there instead
-                      &player_look, alt_held || pad_show_items || function_held(keys::kShowItems),   // Alt, or a slot bound to Show Items
+                      &player_look, alt_held || pad_show_items || function_held(keys::kShowItems) || g_world_only,   // a handheld has no Alt to hold: the names always show   // Alt, or a slot bound to Show Items
                       Hud{ view.poisoned, view.running, run_down, character.header.weapon_set != 0, coop_hud_hidden(),
                           left_panel_open(), inv_open || tree_open, view.stamina_blue, view.stamina_shrine, std::move(belt_names), &character.header, frame_ms / 40, pad_bar, &hud_hovers, view.life_preview, view.mana_preview, life_text, mana_text, holy_shield }, wide, { hero_x - cam_x, hero_y - cam_y }, view.ghost, alert_clocks);
         for (const auto& body : view.bodies)                       // local co-op: a body being raised

@@ -73,6 +73,11 @@ inline bool g_bottom_panels = false;
 // the menus, and a touch is the mouse on it.
 inline bool g_bottom_whole = false;
 inline int g_bottom_origin_x = 0, g_bottom_origin_y = 0;
+// An NPC's menu or speech is up: the second screen shows just that box, scaled to fill it (up to
+// twice its size) and laid in the UI frame's top-left 320x240; a touch at (x, y) is the mouse at
+// (source_x + (x - left) / scale, source_y + (y - top) / scale).
+struct BottomZoom { bool on = false; int source_x = 0, source_y = 0, left = 0, top = 0; float scale = 1.f; };
+inline BottomZoom g_bottom_zoom;
 
 // A touch on the second screen with no panel open (the HUD's own buttons): the last one, for the HUD to take.
 // How much of the world the top screen shows: 0 = 400x240 pixel for pixel, 1 = 600x360, 2 = 800x480
