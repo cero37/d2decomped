@@ -1649,6 +1649,7 @@ int run_windowed(std::vector<std::uint8_t>& framebuffer,
                         const auto why = town.save();
                         if (town.character.header.active_act() == act) {
                             d2d::log::info("handheld: act {} reached; the game is entered again there{}", act + 1, why.empty() ? "" : " (not saved: " + why + ")");
+                            SDL_setenv_unsafe("D2D_HANDHELD_ACT", std::to_string(act).c_str(), 1);   // set_map_seed: no camp neighbours for a later act
                             set_map_seed(*scene, game_seed(town.character.header), town.character.header.active_difficulty());
                             town.enter();
                         } else {

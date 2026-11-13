@@ -1882,7 +1882,9 @@ void set_map_seed(GameData& game_data, std::uint32_t seed, int difficulty) {
     place_act1(game_data, game_data.mpqs, *game_data.builder->act1, seed);
     game_data.shrines.clear();                          // load_npcs reads Shrines.txt again
     load_npcs(game_data, game_data.mpqs);
-    want_nearby(game_data, game_data.town);
+    // The camp's neighbours build ahead for a game that starts in the camp. A handheld entering
+    // a later act (D2D_HANDHELD_ACT, set by its client) has no memory to spend on the Blood Moor.
+    if (const char* act = std::getenv("D2D_HANDHELD_ACT"); !handheld || !act || act[0] == '0') want_nearby(game_data, game_data.town);
     d2d::log::info("map seed {:#x}: {}", seed, game_data.town.ds1.width() ? "act 1 laid out" : "no town");
 }
 
