@@ -585,8 +585,8 @@ public:
             click_prev_ = false;
             // A list: up and down, a row each. A grid of g_strip_columns (a handheld's): a row is that many, left and right one.
             out.strip_step = (int(dpad_on[1]) - int(dpad_on[0])) * g_strip_columns + (g_strip_columns > 1 ? int(dpad_on[3]) - int(dpad_on[2]) : 0);
-            out.confirm = pressed(Button::South);
-            out.cancel = pressed(Button::East) || pressed(Button::Start);
+            out.confirm = pressed(confirm);
+            out.cancel = pressed(cancel) || pressed(Button::Start);
         }
         if (skills) {
             const bool field = context == Context::Game && skill_ui == SkillUi::None;

@@ -160,6 +160,7 @@ void handheld_present(const std::vector<std::uint8_t>& frame, int frame_w, int f
         d2d::log::info("3ds: {} | application memory {} MiB | heap {} MiB | linear heap {} MiB | system {}.{}.{}", new_model ? "New 3DS" : "old 3DS (not supported)",
                        osGetMemRegionSize(MEMREGION_APPLICATION) >> 20, envGetHeapSize() >> 20, envGetLinearHeapSize() >> 20,
                        unsigned(GET_VERSION_MAJOR(osGetFirmVersion())), unsigned(GET_VERSION_MINOR(osGetFirmVersion())), unsigned(GET_VERSION_REVISION(osGetFirmVersion())));
+        d2d::log::info("3ds: this build was compiled " __DATE__ " " __TIME__ " UTC");   // build.sh touches this file, so the stamp is each build's
         {   // A save replaces its file by a rename onto it, which this file system refuses (files_3ds.cpp makes it work): say so if it doesn't.
             const char *first = "sdmc:/3ds/d2d/rename-a.tmp", *second = "sdmc:/3ds/d2d/rename-b.tmp";
             for (const char* name : { first, second }) if (std::FILE* file = std::fopen(name, "wb")) { std::fputc('x', file); std::fclose(file); }

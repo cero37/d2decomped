@@ -1809,7 +1809,24 @@ int run_windowed(std::vector<std::uint8_t>& framebuffer,
             // D2 plays the grab frames in between.
             const int cursor_dx = (fb_width(framebuffer) - int(kScreenWidth)) / 2;
             bool os_cursor = false;   // the OS shows the gauntlet this frame (hw_cursor.hpp)
-            if (screen == Screen::InGame && town.held && !town.use_item.placed()) {   // placed in an item panel: the hand (FUN_00468070(0))
+            if (g_world_only) {
+                // A handheld in game: the world's frame is the top screen, which no pointer reaches. The hand (or the
+                // item held) goes on the second screen's frame while a panel or a menu is there, where the touch was.
+                auto* second = g_bottom_panels && g_bottom_frame ? const_cast<std::vector<std::uint8_t>*>(g_bottom_frame) : nullptr;
+                int at_x = mouse.x, at_y = mouse.y;
+                if (g_bottom_zoom.on) {               // an NPC's box, scaled into the frame's corner
+                    at_x = g_bottom_zoom.left + int(float(mouse.x - g_bottom_zoom.source_x) * g_bottom_zoom.scale);
+                    at_y = g_bottom_zoom.top + int(float(mouse.y - g_bottom_zoom.source_y) * g_bottom_zoom.scale);
+                    if (at_x < 0 || at_y < 0 || at_x >= 320 || at_y >= 240) second = nullptr;
+                }
+                const auto& pal = scene->act_pal.entries().empty() ? scene->pal : scene->act_pal;
+                if (!second) {}
+                else if (town.held && !town.use_item.placed()) draw_held(*second, *scene, *town.held, at_x, at_y);
+                else if (!pad_cursor_hidden && scene->cursor.frames_per_direction() >= 8) {
+                    const auto& frame = scene->cursor.frame(0, mouse.down ? 7 : 0);
+                    blit_sprite(*second, frame, pal, at_x + frame.offset_x, at_y + frame.offset_y - int(frame.height) + 1);
+                }
+            } else if (screen == Screen::InGame && town.held && !town.use_item.placed()) {   // placed in an item panel: the hand (FUN_00468070(0))
                 draw_held(framebuffer, *scene, *town.held, mouse.x + cursor_dx, mouse.y);
             } else if (screen == Screen::InGame && town.identify_with >= 0 && scene->cursor_buysell.frames_per_direction() > 0) {
                 // An identify pick: cursor state 6, buysell's frame = Books.txt
@@ -2242,7 +2259,10 @@ int main(int argc, char** argv) {
         // A handheld plays with its buttons: the skill-button layout, confirm on Nintendo's A. (Here, not
         // later: the input mapper is made from this.)
         if (std::getenv("D2D_HANDHELD")) pad::g_strip_columns = 3;   // its Start list is a 3x3 grid (handheld_hud.cpp)
-        if (std::getenv("D2D_HANDHELD") && !g_pad_config.skill_buttons) { g_pad_config = pad::skill_buttons_config(g_pad_config); g_pad_config.swap_confirm = true; }
+        if (std::getenv("D2D_HANDHELD")) {
+            if (!g_pad_config.skill_buttons) g_pad_config = pad::skill_buttons_config(g_pad_config);
+            g_pad_config.swap_confirm = true;     // Nintendo's way round: A (east) confirms, B (south) backs out, whatever the settings file kept
+        }
         g_click_bindings = keys::click_load(cfg["click_attack"], cfg["click_skill"]);
         for (const auto& problem : problems) d2d::log::warn("d2d.cfg: {}", problem);
     }

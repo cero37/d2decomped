@@ -193,8 +193,8 @@ auto Town::present_skill_pad() -> void {
     skillbar.strip_on = skill_strip >= 0;
     skillbar.strip_at = skill_strip;
     skillbar.strip_rows.assign(skillpad::kPanels.begin(), skillpad::kPanels.end());
-    skillbar.strip_prompt = std::string(pad::label(pad_family, pad::Button::South)) + ": open  "
-                          + std::string(pad::label(pad_family, pad::Button::East)) + ": back";
+    skillbar.strip_prompt = std::string(pad::label(pad_family, pad_config.swap_confirm ? pad::Button::East : pad::Button::South)) + ": open  "
+                          + std::string(pad::label(pad_family, pad_config.swap_confirm ? pad::Button::South : pad::Button::East)) + ": back";
     skillbar.legend_on = pad_playing && (pad_field() || skillbar.picking == 3);
     if (!scene || !pad_field()) return;
     contextual_pick = pad_pick(pad, focused().player, true);
