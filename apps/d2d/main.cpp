@@ -855,6 +855,10 @@ int run_windowed(std::vector<std::uint8_t>& framebuffer,
         while (SDL_PollEvent(&event)) {
             // SDL3 doesn't rescale event coords under logical presentation;
             // convert so the mouse lands in 800x600 game pixels.
+            // A real touch comes as 0..1 of its screen; the conversion below turns it into the 800x600 frame's
+            // coordinates, which a handheld's second screen (320x240) is not. Kept as it came.
+            const bool finger_event = event.type == SDL_EVENT_FINGER_DOWN || event.type == SDL_EVENT_FINGER_UP || event.type == SDL_EVENT_FINGER_MOTION || event.type == SDL_EVENT_FINGER_CANCELED;
+            const float finger_x = finger_event ? event.tfinger.x : -1.f, finger_y = finger_event ? event.tfinger.y : -1.f;
             SDL_ConvertEventToRenderCoordinates(win.renderer, &event);
             // Widescreen: mouse x counts from the centre 800x600, where the UI is.
             const float view_off = float(win.view_w - int(kScreenWidth)) / 2;
@@ -873,10 +877,16 @@ int run_windowed(std::vector<std::uint8_t>& framebuffer,
             if (event.type == SDL_EVENT_GAMEPAD_AXIS_MOTION && (event.gaxis.axis == SDL_GAMEPAD_AXIS_LEFT_TRIGGER || event.gaxis.axis == SDL_GAMEPAD_AXIS_RIGHT_TRIGGER))
                 d2d::log::info("pad: {} {} (screen {})", SDL_GetGamepadStringForAxis(SDL_GamepadAxis(event.gaxis.axis)), int(event.gaxis.value), int(screen));
 #endif
+            // The mouse events SDL makes of a touch place it on the 800x600 frame: not where a handheld's second screen has it.
+            if (handheld_touch && ((event.type == SDL_EVENT_MOUSE_MOTION && event.motion.which == SDL_TOUCH_MOUSEID) ||
+                                   ((event.type == SDL_EVENT_MOUSE_BUTTON_DOWN || event.type == SDL_EVENT_MOUSE_BUTTON_UP) && event.button.which == SDL_TOUCH_MOUSEID))) continue;
             if (handheld_touch && (event.type == SDL_EVENT_FINGER_DOWN || event.type == SDL_EVENT_FINGER_UP ||
                                    event.type == SDL_EVENT_FINGER_MOTION || event.type == SDL_EVENT_FINGER_CANCELED)) {
-                const bool unit = event.tfinger.x <= 1.f && event.tfinger.y <= 1.f;     // SDL's 0..1 when the touch has no window
-                const int touch_x = unit ? int(event.tfinger.x * 319.f + .5f) : int(event.tfinger.x), touch_y = unit ? int(event.tfinger.y * 239.f + .5f) : int(event.tfinger.y);
+                const bool unit = finger_x <= 1.f && finger_y <= 1.f;     // the screen's own 0..1 (a test's touch comes in its pixels)
+                const int touch_x = unit ? int(finger_x * 319.f + .5f) : int(event.tfinger.x), touch_y = unit ? int(finger_y * 239.f + .5f) : int(event.tfinger.y);
+#ifdef __3DS__
+                if (event.type == SDL_EVENT_FINGER_DOWN) d2d::log::info("touch: down at {}, {} of 320x240 (as sent {:.3f}, {:.3f}; converted {:.1f}, {:.1f}; screen {})", touch_x, touch_y, finger_x, finger_y, event.tfinger.x, event.tfinger.y, int(screen));
+#endif
                 const bool down = event.type == SDL_EVENT_FINGER_DOWN, up = event.type == SDL_EVENT_FINGER_UP || event.type == SDL_EVENT_FINGER_CANCELED;
                 if (g_world_only && !g_bottom_panels) {
                     g_bottom_touch.x = touch_x; g_bottom_touch.y = touch_y;
