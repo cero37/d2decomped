@@ -23,6 +23,7 @@ int main(int, char**) {
     setenv("D2D_USER_DIR", "sdmc:/3ds/d2d", 1);
     setenv("D2_MPQ_DIR", "sdmc:/3ds/d2d/data", 1);
     setenv("HOME", "sdmc:/3ds/d2d", 1);
+    setenv("D2_PATCH_INSTALLER", "sdmc:/3ds/d2d/data/LODPatch_114d.exe", 0);
     static char arg0[] = "d2d";
     static char arg1[] = "--no-video";
     static char* args[] = { arg0, arg1, nullptr };

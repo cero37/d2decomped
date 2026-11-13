@@ -5,8 +5,8 @@
 set -e
 root=$(cd "$(dirname "$0")/../.." && pwd)
 deps=${DEPS:-$root/../d2d-3ds-deps}
-jobs=${JOBS:-2}
-mem=${MEM:-5g}
+jobs=${JOBS:-3}
+mem=${MEM:-6g}
 exec nice -n 15 docker run --rm --memory "$mem" --memory-swap "$mem" --cpus "$jobs" -u "$(id -u):$(id -g)" -e HOME=/tmp -v "$root:$root" -v "$deps:$deps" -w "$root" devkitpro/devkitarm sh -c "
   export PATH=\$PATH:/opt/devkitpro/devkitARM/bin:/opt/devkitpro/tools/bin
   [ -f build-3ds/build.ninja ] || cmake -S platform/3ds -B build-3ds -G Ninja -DCMAKE_TOOLCHAIN_FILE=/opt/devkitpro/cmake/3DS.cmake -DD2D_3DS_DEPS=$deps
