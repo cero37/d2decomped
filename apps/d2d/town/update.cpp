@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Town (town.hpp): the frame's update. The rest is in this directory.
+#include "handheld_prof.hpp"
 #include "town.hpp"
 
 #include "audio.hpp"
@@ -72,6 +73,7 @@ namespace d2d::client {
  */
 auto Town::update(std::vector<std::uint8_t>& framebuffer, const Mouse& frame_mouse, const std::vector<SDL_Keycode>& frame_keys,
                 Screen& screen, Audio& audio, std::uint32_t frame_ms, std::uint32_t last_ms) -> void {
+    const prof::Mark timed_update("town.update (with draw)");
         now_ms = frame_ms;
         pad_show_items = false;
         skillbar.coop = world.players.size() > 1;           // Resurrect on the right-hand picker
@@ -1056,7 +1058,7 @@ auto Town::update(std::vector<std::uint8_t>& framebuffer, const Mouse& frame_mou
         });
         audio.pause_world(false);                  // a cinematic's hold ends
         audio.menu_paused = !net_game && !lan_host && (game_menu.open || controls.open);   // the world's sounds fade out (Audio::step_ducks); a hosted game plays on
-        draw(framebuffer, mouse, frame_ms);
+        { const prof::Mark timed("town.draw"); draw(framebuffer, mouse, frame_ms); }
         // Screen Shot (FUN_004fa7a0): at most one a second, Screenshot%03d,
         // the first number free. d2d writes PNG in its screenshots folder
         // (deviations.md), game.exe JPEG in the game's.

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Definitions for world_view.hpp: drawing the world: tiles, walls, units, lights.
+#include "handheld_prof.hpp"
 #include "world_view.hpp"
 
 #include "tile_blit.hpp"
@@ -335,6 +336,7 @@ void render_world(std::vector<std::uint8_t>& framebuffer,
 #else
     static const int floor_bands = std::clamp(int(std::thread::hardware_concurrency()), 1, 4);
 #endif
+    prof::Mark timed_floors("floors");
     draw_in_bands(floor_bands, [&](Rows rows) {
         for (const auto& queued : floors) {
             if (queued.screen_y >= rows.end || queued.screen_y + std::abs(queued.tile->height) <= rows.begin) continue;
@@ -403,6 +405,8 @@ void render_world(std::vector<std::uint8_t>& framebuffer,
         }
     }
     set_phase(MainPhase::IngameWalls);
+    timed_floors.stop();
+    const prof::Mark timed_walls("walls, units, roofs");
     // Walls / trees / roofs — same row-major sweep, per-cell one-pass
     // draw. All non-floor orientation types share the same iso
     // positioning; the DT1 tile's own y_shift + per-block y encode the

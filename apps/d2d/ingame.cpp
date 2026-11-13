@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Definitions for ingame.hpp: the in-game frame and the rain.
+#include "handheld_prof.hpp"
 #include "handheld_hud.hpp"
 #include "ingame.hpp"
 
@@ -237,7 +238,7 @@ void render_ingame(std::vector<std::uint8_t>& framebuffer,
             for (auto& unit : units) if (unit.npc == *hovered_npc && unit.name) unit.highlight = true;
         std::pair<const Unit*, std::array<int, 4>> hovered{ nullptr, {} };
         std::vector<std::pair<const Unit*, std::array<int, 2>>> items;   // each drawn ground item and where it stands on screen
-        render_world(world, scene, level, cam_x, cam_y, elapsed_ms, units, world_mouse_x, mouse_y, &hovered, light, rain, show_items ? &items : nullptr);
+        { const prof::Mark timed("render_world"); render_world(world, scene, level, cam_x, cam_y, elapsed_ms, units, world_mouse_x, mouse_y, &hovered, light, rain, show_items ? &items : nullptr); }
         if (rain) draw_rain(world, *rain, scene.act_pal.entries().empty() ? scene.pal : scene.act_pal,
                             hud.right_open == hud.left_open ? 0 : hud.right_open ? 1 : 2);
         if (hovered_npc) *hovered_npc = hovered.first ? hovered.first->npc : -1;
@@ -325,6 +326,7 @@ void render_ingame(std::vector<std::uint8_t>& framebuffer,
                                top, hovered_name, colour[0], colour[1], colour[2]);
         }
         if (g_world_only) {   // a handheld's HUD is its own, on the other screen (the frame's top-left 320x240)
+            const prof::Mark timed("bottom hud");
             draw_bottom_hud(framebuffer, scene, { hud_stats, belt, &hud, level.name, automap, cam_x + float(level.world_x), cam_y + float(level.world_y) });
             return;
         }

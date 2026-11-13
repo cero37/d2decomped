@@ -81,6 +81,10 @@ struct Rgba {
     constexpr bool operator==(const Rgba&) const = default;
 };
 
+// Counts the ramp's rebuilds: a palette keeps its colours through the ramp
+// and makes them again when this has moved on (Palette::ramped).
+inline std::uint32_t g_ramp_generation = 1;
+
 class Palette {
 public:
     Palette() = default;
@@ -124,12 +128,19 @@ public:
     // File colour through the DirectDraw ramp (FUN_006be190). Index 0 stays
     // transparent: alpha is the file's. entries() is the file palette.
     [[nodiscard]] Rgba operator[](std::uint8_t idx) const noexcept {
-        Rgba colour = entries_[idx];
-        const auto& level = video_ramp().level;
-        colour.r = level[colour.r];
-        colour.g = level[colour.g];
-        colour.b = level[colour.b];
-        return colour;
+        return ramped()[idx];
+    }
+    // All 256 through the ramp, kept: a blitter's inner loop reads these
+    // (three table lookups a pixel otherwise). Made again after set_ramp;
+    // two threads making it at once write the same values.
+    [[nodiscard]] const Rgba* ramped() const noexcept {
+        if (ramped_generation_ != g_ramp_generation) {
+            const auto& level = video_ramp().level;
+            for (std::size_t i = 0; i < entries_.size(); ++i)
+                ramped_[i] = Rgba{ level[entries_[i].r], level[entries_[i].g], level[entries_[i].b], entries_[i].a };
+            ramped_generation_ = g_ramp_generation;
+        }
+        return ramped_.data();
     }
     [[nodiscard]] std::span<const Rgba> entries() const noexcept { return entries_; }
     // Rebuild FUN_006be190. Every palette lookup sees it.
@@ -140,6 +151,7 @@ public:
         ramp.level = make_ramp(gamma, contrast);
         ramp.gamma = gamma;
         ramp.contrast = contrast;
+        ++g_ramp_generation;
     }
     [[nodiscard]] static int gamma() noexcept { return video_ramp().gamma; }
     [[nodiscard]] static int contrast() noexcept { return video_ramp().contrast; }
@@ -160,10 +172,13 @@ public:
     // treats a non-zero index as chroma-key.
     void set_alpha(std::uint8_t idx, std::uint8_t alpha) noexcept {
         entries_[idx].a = alpha;
+        ramped_generation_ = 0;
     }
 
 private:
     std::array<Rgba, 256> entries_{};
+    mutable std::array<Rgba, 256> ramped_{};
+    mutable std::uint32_t ramped_generation_ = 0;
 };
 
 // PL2 colormap file. We currently parse:

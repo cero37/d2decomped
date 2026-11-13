@@ -80,19 +80,12 @@ void blit_dt1_tile(std::vector<std::uint8_t>& framebuffer,
         if (x_begin >= x_end) return;
         const auto* tile_pixels = tile.pixels();
         if (!tile_pixels) return;
-        std::array<std::uint32_t, 256> lut{};
-        for (std::size_t i = 0; i < 256; ++i) {
-            const auto colour = pal[std::uint8_t(i)];
-            std::memcpy(&lut[i], &colour, 4);
-            lut[i] |= 0xFF000000u;
-        }
+        const auto* colours = pal.ramped();
         for (int y = y_begin; y < y_end; ++y) {
             const auto* row = tile_pixels + std::size_t(y) * std::size_t(tile.width);
             auto* line = framebuffer.data() + (std::size_t(screen_y + y) * std::size_t(screen_w) + std::size_t(screen_x)) * 4;
-            for (int x = x_begin; x < x_end; ++x) {
-                const std::uint8_t idx = row[x];
-                if (idx) std::memcpy(line + std::size_t(x) * 4, &lut[idx], 4);
-            }
+            for (int x = x_begin; x < x_end; ++x)
+                if (const std::uint8_t idx = row[x]) { auto* pixel = line + std::size_t(x) * 4; std::memcpy(pixel, &colours[idx], 4); pixel[3] = 0xFF; }
         }
         return;
     }
@@ -171,6 +164,46 @@ void blit_dt1_tile_lit(std::vector<std::uint8_t>& framebuffer, const d2d::dt1::T
         const int left = (block.v0 * 16 + (block.v3 - block.v0) * row_in) >> 7, right = (block.v1 * 16 + (block.v2 - block.v1) * row_in) >> 7;
         return std::size_t(std::clamp(left + (((right - left) * along) >> 5), 0, 31));
     };
+    if (!hole && alpha_all >= 255) {
+        // Opaque (nearly every floor): along a row the block under the pixel
+        // changes only where (x + 2y) or (2y - x) crosses a multiple of 32,
+        // so the row goes in runs: a flat block's run through one palette,
+        // a ramp's with its row's two ends worked out once. The same levels
+        // as level() below, pixel for pixel.
+        const int screen_w = fb_width(framebuffer);
+        const int x_begin = std::max(0, -screen_x), x_end = std::min<int>(tile.width, screen_w - screen_x);
+        const int y_begin = std::max(0, rows.begin - screen_y), y_end = std::min<int>(std::abs(tile.height), std::min(int(kScreenHeight), rows.end) - screen_y);
+        if (x_begin >= x_end) return;
+        const auto* tile_pixels = tile.pixels();
+        if (!tile_pixels) return;
+        for (int y = y_begin; y < y_end; ++y) {
+            const auto* row = tile_pixels + std::size_t(y) * std::size_t(tile.width);
+            auto* line = framebuffer.data() + (std::size_t(screen_y + y) * std::size_t(screen_w) + std::size_t(screen_x)) * 4;
+            const int offset_y = y - tile.y_shift;
+            for (int x = x_begin; x < x_end;) {
+                const int offset_x = x - kIsoW / 2;
+                const int sum = offset_x + 2 * offset_y, difference = 2 * offset_y - offset_x;
+                const int run_end = std::min(x_end, x + std::min(32 - (sum & 31), (difference & 31) + 1));
+                const int block_x = std::clamp(sum >> 5, 0, 4), block_y = std::clamp(difference >> 5, 0, 4);
+                const auto& block = blocks[std::size_t(block_y * 5 + block_x)];
+                if (block.flat) {
+                    const auto* colours = pals[std::size_t(block.level)].ramped();
+                    for (; x < run_end; ++x)
+                        if (const std::uint8_t idx = row[x]) { auto* pixel = line + std::size_t(x) * 4; std::memcpy(pixel, &colours[idx], 4); pixel[3] = 0xFF; }
+                    continue;
+                }
+                const int row_in = std::clamp(offset_y - (block_x + block_y) * 8, 0, 15), base = (block_x - block_y) * 16 - 16 + kIsoW / 2;
+                const int left = (block.v0 * 16 + (block.v3 - block.v0) * row_in) >> 7, right = (block.v1 * 16 + (block.v2 - block.v1) * row_in) >> 7;
+                for (; x < run_end; ++x)
+                    if (const std::uint8_t idx = row[x]) {
+                        const int along = std::clamp(x - base, 0, 31);
+                        const auto* colours = pals[std::size_t(std::clamp(left + (((right - left) * along) >> 5), 0, 31))].ramped();
+                        auto* pixel = line + std::size_t(x) * 4; std::memcpy(pixel, &colours[idx], 4); pixel[3] = 0xFF;
+                    }
+            }
+        }
+        return;
+    }
     blit_tile_pixels(framebuffer, tile, screen_x, screen_y, alpha_all, hole, rows, [&](int x, int y, std::uint8_t idx) {
         return pals[level(x - kIsoW / 2, y - tile.y_shift)][idx];   // from the diamond's top: block (0, 0) at x 64, y 0
     });

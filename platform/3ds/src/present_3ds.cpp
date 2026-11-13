@@ -7,6 +7,8 @@
 // bottom first; RGBA8 words are R in the top byte.
 #include <3ds.h>
 
+#include "handheld_prof.hpp"
+
 #include <cstdint>
 #include <cstdio>
 #include <malloc.h>
@@ -63,6 +65,11 @@ void handheld_present(const std::vector<std::uint8_t>& frame, int frame_w, int f
     if (const u64 now = osGetTime(); now - last >= 10000) {
         const struct mallinfo heap = mallinfo();
         if (std::FILE* out = std::fopen("sdmc:/3ds/d2d/mem.log", "a")) {
+            for (auto& entry : prof::g_spans) {
+                if (!entry.name) break;
+                std::fprintf(out, "  %-26s %7.1f ms a frame (%u calls)\n", entry.name, double(entry.ns) / 1e6 / double(frames ? frames : 1), unsigned(entry.calls));
+                entry.ns = 0; entry.calls = 0;
+            }
             std::fprintf(out, "frames %u in %llu ms | heap used %u KiB of %lu KiB (arena %u KiB) | linear free %lu KiB\n", frames, static_cast<unsigned long long>(last ? now - last : 0),
                          unsigned(heap.uordblks / 1024), static_cast<unsigned long>(envGetHeapSize() / 1024), unsigned(heap.arena / 1024), static_cast<unsigned long>(linearSpaceFree() / 1024));
             std::fclose(out);

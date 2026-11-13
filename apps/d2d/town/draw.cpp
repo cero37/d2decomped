@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Town (town.hpp): drawing: menus, the view, chat, hints and portraits. The rest is in this
 // directory.
+#include "handheld_prof.hpp"
 #include "handheld_hud.hpp"
 #include "town.hpp"
 
@@ -279,6 +280,7 @@ auto Town::draw_view(std::vector<std::uint8_t>& framebuffer, std::vector<std::ui
             if (const auto& walk_anim = scene->composite(cls, mode, view.gfx); walk_anim.speed || walk_anim.cof_speed)
                 rate = float(d2d::rules::moving_anim_rate(mode == kModeRN, view.walk_percent)) / float(walk_anim.speed ? walk_anim.speed : walk_anim.cof_speed);
         if (!view.seq.empty() && attack_mode(pmode)) { std::tie(mode, mode_ms) = view_seq(*scene, int(cls), view, frame_ms); rate = 1.f; }   // an SQ skill's frame
+        prof::Mark timed_light("light");
         const auto light = frame_light(*scene, view, cam_x, cam_y, den_beams, event_ambient(), extra, &player_look, frame_ms, &hero_at);
         // A pad in the field shows no cursor. The highlight is the same PadPick the
         // press uses, by id. A screen point would let a sprite in front take it.
@@ -300,6 +302,8 @@ auto Town::draw_view(std::vector<std::uint8_t>& framebuffer, std::vector<std::ui
         int holy_shield = 0;
         if (const auto skill = scene->skills.by_name.find("Holy Shield"); skill != scene->skills.by_name.end() && std::ranges::contains(view.buffs, skill->second))
             holy_shield = d2d::game::skill_level(*scene, character, skill->second, {});
+        timed_light.stop();
+        const prof::Mark timed_ingame("render_ingame");
         render_ingame(framebuffer, *scene, *view.level, ui_cls,
                       view.gfx,
                       character.name, character.hardcore,

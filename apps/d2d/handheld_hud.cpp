@@ -43,10 +43,10 @@ void draw_bottom_hud(std::vector<std::uint8_t>& framebuffer, const Scene& scene,
     using namespace d2d::d2s;
     const auto& pal = scene.act_pal.entries().empty() ? scene.pal : scene.act_pal;
     const Canvas canvas{ framebuffer };
-    // Ten times a second is as fast as anything here changes; the frame keeps the last one between.
+    // Five times a second is as fast as anything here needs to change; the frame keeps the last one between.
     static std::uint64_t drawn_ms = 0;
     const std::uint64_t now_ms = SDL_GetTicks();
-    if (drawn_ms != 0 && now_ms - drawn_ms < 100) return;
+    if (drawn_ms != 0 && now_ms - drawn_ms < 200) return;
     drawn_ms = now_ms;
     const int width = kBottomWidth, height = kBottomHeight;
     // The stone the panel is cut from.
