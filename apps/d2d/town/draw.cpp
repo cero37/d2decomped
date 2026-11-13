@@ -90,11 +90,7 @@ auto Town::open_menu(int npc) -> void {
  * Draw the current Town view and enabled UI overlays, including the optional touch controls.
  */
 auto Town::draw(std::vector<std::uint8_t>& framebuffer, const Mouse& mouse, std::uint32_t frame_ms) -> void {
-    if (g_world_only && !pad_config.skill_buttons) {      // a handheld plays with its buttons: the skill-button layout, Nintendo's names
-        pad_config = pad::skill_buttons_config(pad_config);
-        pad_config.swap_confirm = true;
-        pad_family = pad::Family::Nintendo;
-    }
+    if (g_world_only) pad_family = pad::Family::Nintendo;   // a handheld's buttons carry Nintendo's names (its layout: main.cpp, where d2d.cfg is read)
     present_skill_pad();
     if (g_world_only) {
         g_bottom_whole = game_menu.open || controls.open || npc_menu.npc >= 0 || speech.npc >= 0 || (view.pmode == kModeDD && !view.corpses.empty());
@@ -104,9 +100,12 @@ auto Town::draw(std::vector<std::uint8_t>& framebuffer, const Mouse& mouse, std:
         shown.main = skillbar.mode_main; shown.main_label = "ZR";
         shown.slots = skillbar.mode_slots; shown.labels = { "B", "A", "Y", "X", "L", "R" };
         shown.alternate = skillbar.mode_modifier;
+        // A tap on the second screen's map: the next zoom.
+        if (std::exchange(g_bottom_touch.pressed, false) && !g_bottom_panels && g_bottom_touch.y >= 22 && g_bottom_touch.y < 166) g_handheld_zoom = (g_handheld_zoom + 1) % 3;
+        g_bottom_touch.released = false;
     }
     const int screen_w = fb_width(framebuffer);
-    if (screen_w == int(kScreenWidth)) {
+    if (screen_w == int(kScreenWidth) && !g_world_only) {
         draw_view(framebuffer, nullptr, mouse, frame_ms);
         draw_touch(framebuffer);
         draw_coop_portraits(framebuffer, left_panel_open());
@@ -138,6 +137,7 @@ auto Town::draw(std::vector<std::uint8_t>& framebuffer, const Mouse& mouse, std:
         // Off the 3DS (a preview): the second screen goes in the frame's spare rows,
         // its first rows above the world's and the rest below (the frame is 600 rows:
         // the world's 240 and 360 spare).
+#ifndef __3DS__
         const int left = (screen_w - 320) / 2;
         if (left >= 0)
             for (int y = 0; y < 240; ++y) {
@@ -152,6 +152,7 @@ auto Town::draw(std::vector<std::uint8_t>& framebuffer, const Mouse& mouse, std:
                 std::copy_n(ui_buffer.begin() + std::ptrdiff_t((std::size_t(y + g_bottom_origin_y) * kScreenWidth + std::size_t(g_bottom_origin_x)) * 4), 320 * 4,
                             framebuffer.begin() + std::ptrdiff_t((std::size_t(to) * std::size_t(screen_w) + std::size_t(left)) * 4));
             }
+#endif
         return;
     }
     draw_touch(ui_buffer);

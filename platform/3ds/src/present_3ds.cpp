@@ -35,6 +35,31 @@ void handheld_present(const std::vector<std::uint8_t>& frame, int frame_w, int f
             const std::uint8_t* source = frame.data() + (std::size_t(clip_top + 239) * 400 + std::size_t(x)) * 4;
             for (int y = 0; y < 240; ++y, source -= 400 * 4) column[y] = word(source);   // column[0] is the bottom row
         }
+    } else if (top && world_only && frame_w == 600) {
+        // Zoomed out by a half: 600x360 of the world, three pixels into two each way (weights 2:1, 1:2).
+        const std::size_t pitch = 600 * 4;
+        for (int y = 0; y < 240; ++y) {
+            const std::uint8_t* upper = frame.data() + std::size_t(clip_top + (y / 2) * 3 + (y & 1)) * pitch;
+            const std::uint8_t* lower = upper + pitch;
+            const unsigned wu = (y & 1) ? 1 : 2, wl = 3 - wu;
+            std::uint32_t* out = top + (239 - y);
+            for (int x = 0; x < 200; ++x, upper += 12, lower += 12, out += 480) {
+                unsigned red = wu * (2 * upper[0] + upper[4]) + wl * (2 * lower[0] + lower[4]), green = wu * (2 * upper[1] + upper[5]) + wl * (2 * lower[1] + lower[5]), blue = wu * (2 * upper[2] + upper[6]) + wl * (2 * lower[2] + lower[6]);
+                out[0] = (red * 7282u >> 16) << 24 | (green * 7282u >> 16) << 16 | (blue * 7282u >> 16) << 8 | 0xFFu;
+                red = wu * (upper[4] + 2 * upper[8]) + wl * (lower[4] + 2 * lower[8]); green = wu * (upper[5] + 2 * upper[9]) + wl * (lower[5] + 2 * lower[9]); blue = wu * (upper[6] + 2 * upper[10]) + wl * (lower[6] + 2 * lower[10]);
+                out[240] = (red * 7282u >> 16) << 24 | (green * 7282u >> 16) << 16 | (blue * 7282u >> 16) << 8 | 0xFFu;
+            }
+        }
+    } else if (top && world_only && frame_w == 800) {
+        // Zoomed out to the PC's scale: 800x480 of the world, four pixels into one.
+        const std::size_t pitch = 800 * 4;
+        for (int y = 0; y < 240; ++y) {
+            const std::uint8_t* upper = frame.data() + std::size_t(clip_top + y * 2) * pitch;
+            const std::uint8_t* lower = upper + pitch;
+            std::uint32_t* out = top + (239 - y);
+            for (int x = 0; x < 400; ++x, upper += 8, lower += 8, out += 240)
+                *out = ((upper[0] + upper[4] + lower[0] + lower[4]) >> 2) << 24 | ((upper[1] + upper[5] + lower[1] + lower[5]) >> 2) << 16 | ((upper[2] + upper[6] + lower[2] + lower[6]) >> 2) << 8 | 0xFFu;
+        }
     } else if (top && frame_w >= 800 && frame_h >= 600) {
         // 800x600 -> 400x240: two columns and three rows a pixel (rows step 2.5, so they
         // overlap by one now and then, which keeps thin lines). Six samples: no division by a variable.

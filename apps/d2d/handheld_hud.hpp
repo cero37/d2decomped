@@ -58,6 +58,9 @@ inline bool g_bottom_whole = false;
 inline int g_bottom_origin_x = 0, g_bottom_origin_y = 0;
 
 // A touch on the second screen with no panel open (the HUD's own buttons): the last one, for the HUD to take.
+// How much of the world the top screen shows: 0 = 400x240 pixel for pixel, 1 = 600x360, 2 = 800x480
+// (the PC's scale), scaled down to the screen. A tap on the second screen's map steps it.
+inline int g_handheld_zoom = 1;
 struct BottomTouch { int x = 0, y = 0; bool down = false, pressed = false, released = false; };
 inline BottomTouch g_bottom_touch;
 

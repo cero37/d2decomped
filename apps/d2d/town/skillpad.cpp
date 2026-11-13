@@ -33,6 +33,15 @@ std::filesystem::path sheet_path(const std::filesystem::path& directory, const s
 
 }  // namespace
 
+// A handheld has no right stick to click for Interact: its A (the east slot) is Attack, which
+// also uses, opens, talks and picks up (as the left mouse button does), unless something was put there.
+namespace {
+void handheld_sheet(skillpad::Sheet& sheet) {
+    if (sheet.slot(false, 1) == skillpad::kEmpty) sheet.set_slot(false, 1, 0);
+    if (sheet.main == skillpad::kUnset || sheet.main == skillpad::kEmpty) sheet.main = 0;
+}
+}  // namespace
+
 auto Town::sheet_key(const std::string& name) const -> std::string {
     // The folder is part of the key, so two saves with one name do not share
     // a sheet. --no-save has no folder and never touches a file.
@@ -47,6 +56,7 @@ auto Town::load_skill_sheet(const std::string& name) -> void {
     if (!file) { skill_sheets.erase(key); return; }   // a removed file does not keep the old sheet
     const std::string text{ std::istreambuf_iterator<char>(file), {} };
     skill_sheets[key] = skillpad::read(text);
+    if (std::getenv("D2D_HANDHELD")) handheld_sheet(skill_sheets[key]);
 }
 
 /**
@@ -83,7 +93,9 @@ auto Town::ensure_skill_sheet(std::string_view name) -> void {
         const auto& binding = pad_config.bindings[actions[index]];
         enabled[index] = binding[0] != pad::Bindings::kNone || binding[1] != pad::Bindings::kNone;
     }
-    skill_sheets.emplace(sheet_key(std::string(name)), skillpad::initial_sheet(left, right, hotkeys, enabled));
+    auto made = skillpad::initial_sheet(left, right, hotkeys, enabled);
+    if (std::getenv("D2D_HANDHELD")) handheld_sheet(made);
+    skill_sheets.emplace(sheet_key(std::string(name)), made);
     save_skill_sheet(std::string(name));
 }
 

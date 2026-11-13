@@ -867,6 +867,11 @@ int run_windowed(std::vector<std::uint8_t>& framebuffer,
             // open its window of the UI frame, the touch the mouse there. Elsewhere (the menus):
             // the whole 800x600 frame at two fifths, the touch the mouse on it.
             static const bool handheld_touch = std::getenv("D2D_HANDHELD") != nullptr;
+#ifdef __3DS__
+            if (event.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN) d2d::log::info("pad: {} down (screen {})", SDL_GetGamepadStringForButton(SDL_GamepadButton(event.gbutton.button)), int(screen));
+            if (event.type == SDL_EVENT_GAMEPAD_AXIS_MOTION && (event.gaxis.axis == SDL_GAMEPAD_AXIS_LEFT_TRIGGER || event.gaxis.axis == SDL_GAMEPAD_AXIS_RIGHT_TRIGGER))
+                d2d::log::info("pad: {} {} (screen {})", SDL_GetGamepadStringForAxis(SDL_GamepadAxis(event.gaxis.axis)), int(event.gaxis.value), int(screen));
+#endif
             if (handheld_touch && (event.type == SDL_EVENT_FINGER_DOWN || event.type == SDL_EVENT_FINGER_UP ||
                                    event.type == SDL_EVENT_FINGER_MOTION || event.type == SDL_EVENT_FINGER_CANCELED)) {
                 const bool unit = event.tfinger.x <= 1.f && event.tfinger.y <= 1.f;     // SDL's 0..1 when the touch has no window
@@ -1200,9 +1205,11 @@ int run_windowed(std::vector<std::uint8_t>& framebuffer,
             // A handheld: the game view is 400 wide and draws 240 of its rows.
             static const bool handheld = std::getenv("D2D_HANDHELD") != nullptr;
             g_world_only = handheld && screen == Screen::InGame;
-            if (g_world_only) want = kHandheldWidth;
-            g_clip_top = g_world_only ? kHandheldTop : 0;
-            g_clip_bottom = g_world_only ? kHandheldTop + kHandheldHeight : int(kScreenHeight);
+            // (More with the view zoomed out: 600x360 or 800x480, the player's feet at the same share of the height.)
+            const int zoom_rows = kHandheldHeight * (2 + std::clamp(g_handheld_zoom, 0, 2)) / 2;
+            if (g_world_only) want = kHandheldWidth * (2 + std::clamp(g_handheld_zoom, 0, 2)) / 2;
+            g_clip_top = g_world_only ? int(kScreenHeight) / 2 - 8 - 136 * zoom_rows / kHandheldHeight : 0;
+            g_clip_bottom = g_world_only ? g_clip_top + zoom_rows : int(kScreenHeight);
             if (want != win.view_w && win.set_view(want)) {
                 framebuffer.assign(std::size_t(want) * kScreenHeight * 4, 0);
                 for (std::size_t i = 3; i < framebuffer.size(); i += 4) framebuffer[i] = 0xFF;
@@ -2219,6 +2226,9 @@ int main(int argc, char** argv) {
     {
         std::vector<std::string> problems;
         g_pad_config = pad::load_config([&](const char* key) { const auto found = cfg.find(key); return found == cfg.end() ? nullptr : &found->second; }, problems);
+        // A handheld plays with its buttons: the skill-button layout, confirm on Nintendo's A. (Here, not
+        // later: the input mapper is made from this.)
+        if (std::getenv("D2D_HANDHELD") && !g_pad_config.skill_buttons) { g_pad_config = pad::skill_buttons_config(g_pad_config); g_pad_config.swap_confirm = true; }
         g_click_bindings = keys::click_load(cfg["click_attack"], cfg["click_skill"]);
         for (const auto& problem : problems) d2d::log::warn("d2d.cfg: {}", problem);
     }
