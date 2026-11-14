@@ -44,6 +44,14 @@ struct BottomSkills {
     int strip_at = 0, wheel_at = 0, wheel_page = 0;
     std::vector<int> wheel_ids;
     std::string wheel_prompt, feedback;
+    // The row's seven slots (the trigger's, then the six buttons'), as Town tells them each frame:
+    // `fired`: when the slot's button last worked it (pressed or held), `belt_fired` the same for the belt's
+    // four columns: the slot shows lit for a moment after. `status`: Fight::skill_status of the slot's skill
+    // (0 usable, 1 too little mana, 8 its delay still runs, else not usable now); `wait_ms`: what is left of the delay.
+    std::array<std::uint32_t, 7> fired{};
+    std::array<std::uint32_t, 4> belt_fired{};
+    std::array<int, 7> status{}, wait_ms{};
+    std::uint32_t now = 0;
 };
 inline BottomSkills g_bottom_skills;
 // Which of the list's nine buttons, or of the ring's `shown` icons, a touch at (x, y) is on; -1 for none.
@@ -92,8 +100,9 @@ struct BottomMap {
     // shows); a touch on it again is the click. A finger has no other way to read before it acts.
     struct Piece { int src_x = 0, src_y = 0, src_w = 0, src_h = 0, dst_x = 0, dst_y = 0; float scale = 1.f; bool look_first = false; };
     // move: the touch only puts the cursor at the point (to bring the other side's page), no click.
-    struct Spot { int left = 0, top = 0, right = 0, bottom = 0, x = 0, y = 0; bool move = false; };
-    enum Touch { kClick, kLookFirst, kMove };
+    // use: the touch is a right click where the cursor is (the thing under it is used), not a click at the point.
+    struct Spot { int left = 0, top = 0, right = 0, bottom = 0, x = 0, y = 0; bool move = false, use = false; };
+    enum Touch { kClick, kLookFirst, kMove, kUse };
     bool on = false;
     std::vector<Piece> pieces;
     std::vector<Spot> spots;
@@ -104,6 +113,7 @@ struct BottomMap {
             if (page_x >= spot.left && page_x < spot.right && page_y >= spot.top && page_y < spot.bottom) {
                 frame_x = spot.x; frame_y = spot.y;
                 if (how && spot.move) *how = kMove;
+                if (how && spot.use) *how = kUse;
                 return true;
             }
         for (const auto& piece : pieces) {
@@ -114,6 +124,11 @@ struct BottomMap {
             if (how && piece.look_first) *how = kLookFirst;
             return true;
         }
+        return false;
+    }
+    [[nodiscard]] bool on_piece(int frame_x, int frame_y) const {
+        for (const auto& piece : pieces)
+            if (frame_x >= piece.src_x && frame_y >= piece.src_y && frame_x < piece.src_x + piece.src_w && frame_y < piece.src_y + piece.src_h) return true;
         return false;
     }
     [[nodiscard]] bool to_page(int frame_x, int frame_y, int& page_x, int& page_y) const {

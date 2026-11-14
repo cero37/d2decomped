@@ -260,6 +260,8 @@ struct MenuHandoff {
     }
 };
 
+// A handheld's Start list has the inventory first, then the character (its grid: handheld_hud.cpp): the panel at a place of it.
+[[nodiscard]] constexpr int handheld_panel(int place) { return place == 0 ? 1 : place == 1 ? 0 : place; }
 inline constexpr std::array<std::string_view, 9> kPanels = {
     "Character", "Inventory", "Skill Tree", "Automap", "Quests", "Party", "Hireling", "Help", "Menu" };
 

@@ -45,7 +45,13 @@ struct Menu {
 constexpr Row kMain[] = {                          // 0x713044
     { 0, false, "Options", 0, 0, false, {} },
     { 0, false, "Exit", 0, 0, false, {} },
+    { 0, false, "QuitNoSave", 0, 0, false, {} },   // d2d's, on a handheld's page only (handheld_only): out of the game with nothing saved
     { 0, false, "ReturnToGame", 0, 0, false, {} },
+};
+constexpr Row kQuit[] = {                          // d2d's: Quit without saving asks first
+    { -1, false, "QuitConfirm", 0, 0, false, {} },
+    { 0, false, "QuitYes", 0, 0, false, {} },
+    { 0, false, "QuitNo", 0, 0, false, {} },
 };
 constexpr Row kOptions[] = {                       // 0x714210
     { 0, false, "SoundOptions", 0, 0, false, {} },
@@ -85,8 +91,10 @@ constexpr Row kAutomap[] = {                       // LoD 0x71d734 (classic 0x71
 };
 constexpr Menu kMenus[] = {
     { 50, 39, 51, 0, kMain }, { 50, 39, 51, 0, kOptions }, { 45, 34, 49, 36, kSound },
-    { 45, 34, 49, 36, kVideo }, { 45, 34, 49, 36, kAutomap },
+    { 45, 34, 49, 36, kVideo }, { 45, 34, 49, 36, kAutomap }, { 50, 39, 51, 0, kQuit },
 };
+// Rows that are a handheld's page's alone: the frame has no text image for them.
+constexpr bool handheld_only(std::string_view name) { return name == "QuitNoSave" || name == "QuitConfirm" || name == "QuitYes" || name == "QuitNo"; }
 
 const d2d::palette::Palette& palette(const Scene& scene) { return scene.act_pal.entries().empty() ? scene.pal : scene.act_pal; }
 
@@ -154,7 +162,8 @@ std::string_view page_words(std::string_view name) {
     static constexpr std::pair<std::string_view, std::string_view> kWords[] = {
         { "Options", "Options" }, { "Exit", "Save and Exit Game" }, { "ReturnToGame", "Return to Game" },
         { "SoundOptions", "Sound Options" }, { "VideoOptions", "Video Options" }, { "AutoMapOptions", "Automap Options" },
-        { "CfgOptions", "Controls" }, { "Previous", "Back" }, { "SPrevious", "Back" },
+        { "CfgOptions", "Controls" }, { "QuitNoSave", "Quit Without Saving" }, { "QuitConfirm", "Quit without saving?" },
+        { "QuitYes", "Yes, Quit and Lose It" }, { "QuitNo", "No, Keep Playing" }, { "Previous", "Back" }, { "SPrevious", "Back" },
         { "Sound", "Sound" }, { "Music", "Music" }, { "3DSound", "3D Sound" }, { "EAX", "Environmental Effects" }, { "3DBias", "3D Bias" },
         { "NPCSpeech", "NPC Speech" }, { "AudioOnly", "Audio Only" }, { "TextOnly", "Text Only" }, { "AudioText", "Audio and Text" },
         { "Resolution", "Resolution" }, { "LightQuality", "Lighting Quality" }, { "BlendShadow", "Blended Shadows" }, { "Perspective", "Perspective" },
@@ -174,6 +183,7 @@ std::vector<std::string_view> game_menu_images() {
     std::vector<std::string_view> out;
     for (const auto& menu : kMenus)
         for (const auto& row : menu.rows) {
+            if (handheld_only(row.name)) continue;
             out.push_back(row.name);
             for (const auto choice : row.choices) if (!choice.empty()) out.push_back(choice);
         }
@@ -194,7 +204,8 @@ void GameMenu::show(int which) {
 std::vector<int> GameMenu::rows() const {
     std::vector<int> out;
     for (std::size_t row_index = 0; row_index < kMenus[menu].rows.size(); ++row_index)
-        if ((expansion || !kMenus[menu].rows[row_index].xp) && !(g_world_only && handheld_hides(kMenus[menu].rows[row_index].name))) out.push_back(int(row_index));
+        if ((expansion || !kMenus[menu].rows[row_index].xp) && !(g_world_only && handheld_hides(kMenus[menu].rows[row_index].name))
+            && (g_world_only || !handheld_only(kMenus[menu].rows[row_index].name))) out.push_back(int(row_index));
     return out;
 }
 
@@ -261,6 +272,9 @@ GameMenu::Action GameMenu::activate(const Scene& scene, Audio& audio) {
     if (row.name == "Options") show(1);                       // 0x47f2a0
     else if (row.name == "Exit") action = kExit;              // 0x47f2d0
     else if (row.name == "ReturnToGame") action = kClose;     // 0x47f300
+    else if (row.name == "QuitNoSave") show(5);
+    else if (row.name == "QuitYes") action = kQuit;
+    else if (row.name == "QuitNo") show(0);
     else if (row.name == "SoundOptions") {                    // 0x47f310; the sliders' init 47cdc0 / 47ce10
         value[2][1] = (audio.master_volume + 1) * 20 / 100;
         value[2][2] = (audio.music_volume + 1) * 20 / 100;
@@ -352,6 +366,7 @@ GameMenu::Action GameMenu::input(const Scene& scene, Audio& audio, const Mouse& 
 void GameMenu::fill_page(MenuPage& page) const {
     const auto shown = rows();
     page.heading = menu == 0 ? "Game Menu" : menu == 1 ? "Options" : "";
+    if (menu == 5) { page.notes.push_back("Everything since the game was last saved will be lost."); page.note_ink = { 255, 150, 130 }; }
     for (std::size_t k = 0; k < shown.size(); ++k) {
         const int row_index = shown[k];
         const auto& row = kMenus[menu].rows[std::size_t(row_index)];
