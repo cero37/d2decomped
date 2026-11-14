@@ -4,6 +4,7 @@
 #pragma once
 
 #include "audio.hpp"
+#include "handheld_menu.hpp"
 #include "scene.hpp"
 #include "ui.hpp"
 
@@ -43,6 +44,12 @@ struct GameMenu {
     // One frame's keys (not Esc) and mouse; what the menu asks for.
     Action input(const Scene& scene, Audio& audio, const Mouse& mouse, const std::vector<SDL_Keycode>& keys, std::uint32_t now_ms);
     void draw(std::vector<std::uint8_t>& framebuffer, const Scene& scene) const;
+    // A handheld (g_world_only): the menu as a page of its second screen (handheld_menu.hpp), in words
+    // (the frame's text images at two fifths can't be read). A row's id is its place in rows(); the
+    // rows a handheld has no use for are left out of rows() there. input_page is input for that page:
+    // the keys as ever, `confirm` (the pad's button) the lit row, the mouse a touch on the page as laid out.
+    void fill_page(MenuPage& page) const;
+    Action input_page(const Scene& scene, Audio& audio, const Mouse& mouse, const std::vector<SDL_Keycode>& keys, const MenuPage& page, bool confirm, std::uint32_t now_ms);
 
     // The rows on screen (classic skips the LoD ones) and their tops.
     [[nodiscard]] std::vector<int> rows() const;

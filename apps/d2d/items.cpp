@@ -17,6 +17,7 @@ namespace d2d::client {
 void draw_hover_text(std::vector<std::uint8_t>& framebuffer, const Scene& scene, const std::vector<TextLine>& lines,
                      int left, int right, int top, int bottom) {
     if (lines.empty()) return;
+    if (g_hover_capture) { g_hover_capture->push_back(lines); return; }
     const auto& pal = scene.act_pal.entries().empty() ? scene.pal : scene.act_pal;
     const int line_height = 16;                                   // font16 cell height
     int width = 0;
@@ -44,6 +45,7 @@ void draw_hover_text(std::vector<std::uint8_t>& framebuffer, const Scene& scene,
 }
 
 void draw_hover_lines(std::vector<std::uint8_t>& framebuffer, const Scene& scene, const std::vector<TextLine>& lines, const std::array<int, 4>& box) {
+    if (g_hover_capture) { if (!lines.empty()) g_hover_capture->push_back(lines); return; }
     const auto& pal = scene.act_pal.entries().empty() ? scene.pal : scene.act_pal;
     const auto [left, top, right, bottom] = box;
     for (int y = std::max(0, top); y < std::min(int(kScreenHeight), bottom); ++y)
