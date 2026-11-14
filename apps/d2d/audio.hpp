@@ -23,7 +23,13 @@
 #include <cstdint>
 #include <exception>
 #include <filesystem>
+#include <atomic>
+#include <condition_variable>
+#include <deque>
+#include <functional>
 #include <future>
+#include <mutex>
+#include <thread>
 #include <optional>
 #include <span>
 #include <string>
@@ -66,6 +72,7 @@ struct Audio {
         ALuint right_src = 0, right_buf = 0;     // a split world sound: src the left speaker, this the right
         int sound = 0;                           // Sounds.txt index, 0 = silent, -1 = a fixed file
         int owner = 0;                           // a missile's sound id (Cues::Cue::owner): stops with it
+        int pending = 0;                         // a Sounds.txt index whose file is on its way (async_reads): plays when it's here
         float gain = 1.f, fade_from = 0.f, fade_to = 0.f;
         std::uint64_t fade_t0 = 0, fade_t1 = 0;  // SDL ms; t1 = 0: not fading
         // A world sound (play_world): where it is (cells), its Sounds.txt
@@ -243,7 +250,13 @@ struct Audio {
         if (!may_start(game_data, index, unit, false)) return;
         const int group = game_data.sounds[std::size_t(index)].group;
         auto& channel = free_channel();
+        in_retry = true;                                  // the whole call is made again, not the channel's part
         play(channel, game_data, group > 1 ? index + variant % group : index);
+        in_retry = false;
+        if (!channel.src && read_pending) {
+            retry_when_read([this, game = &game_data, index, gain, variant, pan, owner, unit] { play_sfx(*game, index, gain, variant, pan, owner, unit); });
+            return;
+        }
         channel.owner = owner;
         started(channel, game_data, index, unit);
         if (channel.src) set_gain(channel, channel.gain * gain);
@@ -266,6 +279,7 @@ struct Audio {
             channel->x = x;
             channel->y = y;
         }
+        else retry_when_read([this, game = &game_data, index, variant, x, y, listener_x, listener_y, owner, unit] { play_world(*game, index, variant, x, y, listener_x, listener_y, owner, unit); });
     }
     // One placed by client pixels from the listener instead (dx, and 2 dy as
     // FUN_004b97d0 doubles it), kept there: the level's ambient events.
@@ -275,6 +289,7 @@ struct Audio {
         if (!may_start(game_data, index, 0, true)) return;
         if (Channel* channel = play_mixed(game_data, *snd, int(snd - game_data.sounds.data()), screen_x, screen_y2))
             started(*channel, game_data, index, 0);
+        else retry_when_read([this, game = &game_data, index, variant, screen_x, screen_y2] { play_placed(*game, index, variant, screen_x, screen_y2); });
     }
     // A free world channel, else the oldest reused.
     Channel& free_channel() {
@@ -424,11 +439,29 @@ struct Audio {
     std::array<KeptBig, 2> kept_big;
     static constexpr std::size_t kKeptBigMost = 1024 * 1024;
     std::shared_ptr<const std::vector<std::byte>> read_wav(const GameData& game_data, const GameData::Sound& snd, int index) {
+        read_pending = 0;
         if (const auto kept = kept_wavs.find(index); kept != kept_wavs.end()) { kept->second.used = ++kept_wav_clock; return kept->second.bytes; }
         for (auto& big : kept_big) if (big.index == index && big.bytes) { big.used = ++kept_wav_clock; return big.bytes; }
+        if (const auto got = fresh.find(index); got != fresh.end()) return got->second;
+        if (async_reads && !unplayable.contains(index)) {
+            read_pending = index;
+            if (!reads_out.contains(index)) {
+                auto job = std::make_shared<FileRead>();
+                job->index = index;
+                job->file = snd.file;
+                job->paths = sound_reads(snd.file, snd.music);
+                job->mpqs = game_data.mpqs;
+                if (std::ranges::any_of(job->paths, [](const auto& attempt) { return attempt.from_music; })) job->music = music_stack(game_data);
+                reads_out.emplace(index, job);
+                read_on_worker(std::move(job));
+            }
+            return nullptr;
+        }
         auto read = read_wav_file(game_data, snd, index);
         if (!read) return nullptr;
-        auto bytes = std::make_shared<const std::vector<std::byte>>(std::move(*read));
+        return keep_wav(index, std::make_shared<const std::vector<std::byte>>(std::move(*read)));
+    }
+    std::shared_ptr<const std::vector<std::byte>> keep_wav(int index, std::shared_ptr<const std::vector<std::byte>> bytes) {
         // A long one played again and again (a camp fire's loop, read from the card each time its
         // turn came: 80 ms of a frame): the last two of those are kept too.
         if (bytes->size() > kKeptWavMost && bytes->size() <= kKeptBigMost) {
@@ -446,6 +479,96 @@ struct Audio {
         }
         return bytes;
     }
+    // A handheld reads a sound's file on a worker: wilderness ambience took 200 ms of the frame that
+    // started it, a speech line 150. The sound starts a few frames late instead (the call made again
+    // when its file is here: `retries`); one whose file took over a second is let go.
+    bool async_reads = false;
+    struct FileRead {
+        int index = 0;
+        std::string file;
+        std::vector<d2d::client::SoundRead> paths;   // in order: the game's archives, or the music ones
+        d2d::mpq::Stack mpqs, music;
+        std::optional<std::vector<std::byte>> bytes;
+        bool failed = false;                     // there but unreadable (logged by the read)
+        std::uint64_t ms = 0;
+        std::atomic<bool> done{ false };
+    };
+    std::unordered_map<int, std::shared_ptr<FileRead>> reads_out;
+    std::unordered_map<int, std::shared_ptr<const std::vector<std::byte>>> fresh;   // read this frame: for the retries
+    struct Retry { int index = 0; std::uint64_t asked_ms = 0; std::function<void()> again; };
+    std::vector<Retry> retries;
+    int read_pending = 0;                        // the last read_wav's index went to the worker
+    bool in_retry = false;                       // play() called by play_sfx: no channel retry of its own
+    void retry_when_read(std::function<void()> again) { if (read_pending) retries.push_back({ read_pending, SDL_GetTicks(), std::move(again) }); }
+    static void read_on_worker(std::shared_ptr<FileRead> job) {
+        struct Worker {
+            std::mutex mutex;
+            std::condition_variable wake;
+            std::deque<std::shared_ptr<FileRead>> queue;
+            std::thread thread{ [this] {
+                for (;;) {
+                    std::shared_ptr<FileRead> job;
+                    {
+                        std::unique_lock lock(mutex);
+                        wake.wait(lock, [this] { return !queue.empty(); });
+                        job = std::move(queue.front());
+                        queue.pop_front();
+                    }
+                    const auto from = SDL_GetTicks();
+                    for (const auto& attempt : job->paths) {
+                        auto& stack = attempt.from_music ? job->music : job->mpqs;
+                        try { job->bytes = stack.try_read(attempt.path); } catch (const std::exception&) {}
+                        if (job->bytes) break;
+                        if (stack.failed(attempt.path)) job->failed = true;
+                    }
+                    job->ms = SDL_GetTicks() - from;
+                    job->mpqs = {}; job->music = {};
+                    job->done.store(true, std::memory_order_release);
+                }
+            } };
+        };
+        static Worker* worker = new Worker;      // never joined: it runs to the end of the program
+        { const std::scoped_lock lock(worker->mutex); worker->queue.push_back(std::move(job)); }
+        worker->wake.notify_one();
+    }
+    // Each frame: the files back from the worker kept, and the sounds that waited for them started.
+    void poll_reads() {
+        if (reads_out.empty() && retries.empty()) return;
+        for (auto out = reads_out.begin(); out != reads_out.end();) {
+            auto& job = *out->second;
+            if (!job.done.load(std::memory_order_acquire)) { ++out; continue; }
+            if (!job.bytes) {
+                if (!job.failed) d2d::log::warn("sound {}: {} not found", job.index, job.file);
+                unplayable.insert(job.index);
+            } else {
+                if (job.ms >= 40) d2d::log::info("sound: {} read on the worker in {} ms ({} KiB)", job.file, job.ms, job.bytes->size() / 1024);
+                fresh[job.index] = keep_wav(job.index, std::make_shared<const std::vector<std::byte>>(std::move(*job.bytes)));
+            }
+            out = reads_out.erase(out);
+        }
+        const auto now = SDL_GetTicks();
+        std::vector<Retry> due;
+        std::erase_if(retries, [&](Retry& retry) {
+            if (reads_out.contains(retry.index)) return false;
+            if (now - retry.asked_ms <= 1000) due.push_back(std::move(retry));
+            return true;
+        });
+        for (auto& retry : due) retry.again();
+        fresh.clear();
+    }
+    // The music archives (Music Vol rows, and names the sfx folders lack), opened when first wanted.
+    const d2d::mpq::Stack& music_stack(const GameData& game_data) {
+        if (music_mpqs_dir != game_data.data_dir) {
+            music_mpqs = {};
+            music_mpqs_dir = game_data.data_dir;
+            for (const char* name : { "d2xmusic.mpq", "d2music.mpq" })
+                if (const auto mpq = d2d::install::find_file(music_mpqs_dir, name)) {
+                    try { music_mpqs.push(*mpq); }
+                    catch (const std::exception& error) { d2d::log::warn("music {}: {}", name, error.what()); }
+                }
+        }
+        return music_mpqs;
+    }
     std::optional<std::vector<std::byte>> read_wav_file(const GameData& game_data, const GameData::Sound& snd, int index) {
         std::optional<std::vector<std::byte>> wav;
         if (unplayable.contains(index)) return wav;
@@ -453,18 +576,8 @@ struct Audio {
         try {
             for (const auto& attempt : sound_reads(snd.file, snd.music)) {
                 if (wav) break;
-                if (attempt.from_music) {
-                    if (music_mpqs_dir != game_data.data_dir) {
-                        music_mpqs = {};
-                        music_mpqs_dir = game_data.data_dir;
-                        for (const char* name : { "d2xmusic.mpq", "d2music.mpq" })
-                            if (const auto mpq = d2d::install::find_file(music_mpqs_dir, name)) {
-                                try { music_mpqs.push(*mpq); }
-                                catch (const std::exception& error) { d2d::log::warn("music {}: {}", name, error.what()); }
-                            }
-                    }
-                    wav = music_mpqs.try_read(attempt.path);
-                } else wav = game_data.mpqs.try_read(attempt.path);
+                if (attempt.from_music) wav = music_stack(game_data).try_read(attempt.path);
+                else wav = game_data.mpqs.try_read(attempt.path);
             }
         } catch (const std::exception& error) {
             d2d::log::warn("sound {}: {}", index, error.what());
@@ -479,10 +592,17 @@ struct Audio {
         return wav;
     }
     void play(Channel& channel, const GameData& game_data, int index) {
+        read_pending = 0;
         stop(channel);
         if (!ok || index <= 0 || std::size_t(index) >= game_data.sounds.size()) return;
         const auto& snd = game_data.sounds[std::size_t(index)];
-        if (const auto wav = read_wav(game_data, snd, index); wav && start(channel, *wav, float(std::clamp(snd.volume, 0, 255)) / 255.f, snd.loop, index)) {
+        const auto wav = read_wav(game_data, snd, index);
+        if (!wav && read_pending && !in_retry) {          // on its way: this channel plays it then, unless it's been given another
+            channel.pending = index;
+            retry_when_read([this, &channel, game = &game_data, index] { if (channel.pending == index && !channel.src) play(channel, *game, index); });
+            return;
+        }
+        if (wav && start(channel, *wav, float(std::clamp(snd.volume, 0, 255)) / 255.f, snd.loop, index)) {
             channel.solo = snd.solo;
             set_gain(channel, channel.gain);
         }
@@ -496,6 +616,7 @@ struct Audio {
     }
     // A free world channel (else the oldest), the sound started in it `screen_x`, `screen_y2` from the listener.
     Channel* play_mixed(const GameData& game_data, const GameData::Sound& snd, int index, float screen_x, float screen_y2) {
+        read_pending = 0;
         const auto mix = d2d::rules::sound_mix_pixels(std::clamp(snd.volume, 0, 255), snd.falloff, screen_x, screen_y2);
         if (!ok || !mix.audible || mix.volume <= 0 || unplayable.contains(index)) return nullptr;
         auto& channel = free_channel();
@@ -761,6 +882,7 @@ struct Audio {
     // Land a finished music job; free one-shots that have played out.
     void update() {
         step_ducks();
+        poll_reads();
         std::erase_if(music_dropped, [](const auto& dropped) { return dropped.wait_for(std::chrono::seconds(0)) == std::future_status::ready; });
         if (music_job.valid() && music_job.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
             auto decoded = music_job.get();

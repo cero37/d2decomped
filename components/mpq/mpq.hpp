@@ -18,6 +18,8 @@
 #include <StormPort.h>
 
 #include <algorithm>
+#include <atomic>
+#include <thread>
 #include <cctype>
 #include <chrono>
 #include <cstddef>
@@ -37,29 +39,38 @@
 
 namespace d2d::mpq {
 
-// What the archives were asked for since the last take(): how many files, how long the reads took
-// (waiting for another thread's read included) and the first few names. For a slow frame's report.
+// What the archives were asked for since the last take(), the main thread's apart from the
+// workers': how many files, how long the reads took, how much of that the main thread spent
+// waiting for a worker's read to let go of the archives, and the first few names. For a slow
+// frame's report.
 struct ReadStats {
     std::mutex mutex;
-    std::uint32_t files = 0;
-    std::uint64_t ns = 0;
-    std::string names;
-    struct Taken { std::uint32_t files; std::uint64_t ns; std::string names; };
-    Taken take() { const std::scoped_lock lock(mutex); Taken taken{ files, ns, std::move(names) }; files = 0; ns = 0; names.clear(); return taken; }
-};
-inline ReadStats g_read_stats;
-struct ReadTimed {
-    std::string_view name;
-    std::chrono::steady_clock::time_point from = std::chrono::steady_clock::now();
-    explicit ReadTimed(std::string_view file) : name(file) {}
-    ~ReadTimed() {
-        const auto took = std::uint64_t(std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - from).count());
-        const std::scoped_lock lock(g_read_stats.mutex);
-        ++g_read_stats.files; g_read_stats.ns += took;
-        if (g_read_stats.names.size() < 200) { g_read_stats.names += g_read_stats.names.empty() ? "" : ", "; g_read_stats.names += name.substr(name.find_last_of("\\/") + 1); }
+    struct Side { std::uint32_t files = 0; std::uint64_t ns = 0, wait_ns = 0; std::string names; };
+    Side main, other;
+    struct Taken { Side main, other; std::uint32_t files; std::uint64_t ns; };
+    Taken take() {
+        const std::scoped_lock lock(mutex);
+        Taken taken{ std::move(main), std::move(other), main.files + other.files, main.ns + other.ns };
+        main = {}; other = {};
+        return taken;
+    }
+    void add(bool on_main, std::string_view name, std::uint64_t ns, std::uint64_t wait_ns) {
+        const std::scoped_lock lock(mutex);
+        auto& side = on_main ? main : other;
+        ++side.files; side.ns += ns; side.wait_ns += wait_ns;
+        if (side.names.size() < 160) { side.names += side.names.empty() ? "" : ", "; side.names += name.substr(name.find_last_of("\\/") + 1); }
     }
 };
+inline ReadStats g_read_stats;
 
+// The thread that draws: its reads go first. A worker's read (a level being built, an animation)
+// goes in pieces and steps aside between them while the main thread waits for the archives:
+// the main thread once waited 300 ms for a level's tile file to finish reading.
+inline std::thread::id g_main_thread = std::this_thread::get_id();
+inline void mark_main_thread() { g_main_thread = std::this_thread::get_id(); }
+inline std::atomic<int> g_main_waiting{ 0 };
+// Set by Stack::try_read on a worker for the read under way: called between pieces of a file.
+inline thread_local const std::function<void()>* t_between_pieces = nullptr;
 
 // A file opened for streaming reads (videos: the D2 intro is 94 MB).
 // Only for plain archive files, not installer entries.
@@ -226,9 +237,16 @@ private:
         }
         const DWORD size = SFileGetFileSize(file, nullptr);
         std::vector<std::byte> buf(size);
-        DWORD got = 0;
-        const bool ok = SFileReadFile(file, buf.data(), size, &got, nullptr)
-                     && got == size;
+        bool ok = true;
+        // A worker's read in pieces, the main thread let in between them (t_between_pieces).
+        constexpr DWORD kPiece = 32 * 1024;
+        for (DWORD at = 0; ok && at < size;) {
+            const DWORD want = t_between_pieces ? std::min(kPiece, size - at) : size - at;
+            DWORD got = 0;
+            ok = SFileReadFile(file, buf.data() + at, want, &got, nullptr) && got == want;
+            at += got;
+            if (ok && at < size && t_between_pieces) (*t_between_pieces)();
+        }
         SFileCloseFile(file);
         if (!ok) throw std::runtime_error("MPQ read failed: " + namez);
         return buf;
@@ -312,8 +330,35 @@ public:
     // from then on is missing: no retry each time a sound or frame wants it.
     [[nodiscard]] std::optional<std::vector<std::byte>>
     try_read(std::string_view name, bool strict_installer = false) const {
-        const ReadTimed timed(name);
-        const std::scoped_lock lock(shared_->mutex);
+        using Clock = std::chrono::steady_clock;
+        const auto asked = Clock::now();
+        const bool on_main = std::this_thread::get_id() == g_main_thread;
+        // A worker lets a waiting main thread in first (bounded: a quarter second, never stuck behind it).
+        const auto let_main_in = [] {
+            for (int waited = 0; waited < 250 && g_main_waiting.load(std::memory_order_acquire) > 0; ++waited)
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        };
+        if (on_main) g_main_waiting.fetch_add(1, std::memory_order_acq_rel);
+        else let_main_in();
+        std::unique_lock lock(shared_->mutex);
+        if (on_main) g_main_waiting.fetch_sub(1, std::memory_order_acq_rel);
+        const auto locked = Clock::now();
+        struct Done {
+            std::string_view name; bool on_main; Clock::time_point asked, locked;
+            ~Done() {
+                const auto ns = [](auto span) { return std::uint64_t(std::chrono::duration_cast<std::chrono::nanoseconds>(span).count()); };
+                g_read_stats.add(on_main, name, ns(Clock::now() - asked), ns(locked - asked));
+            }
+        } done{ name, on_main, asked, locked };
+        const std::function<void()> step_aside = [&] {
+            if (g_main_waiting.load(std::memory_order_acquire) == 0) return;
+            lock.unlock();
+            let_main_in();
+            lock.lock();
+        };
+        // Only the outermost read of this thread steps aside (the lock is recursive).
+        static thread_local int depth = 0;
+        struct Depth { const std::function<void()>* before; Depth(bool aside, const std::function<void()>* step) : before(t_between_pieces) { ++depth; if (aside && depth == 1) t_between_pieces = step; else t_between_pieces = nullptr; } ~Depth() { --depth; t_between_pieces = before; } } piece_guard(!on_main, &step_aside);
         if (shared_->failed.contains(Archive::key(name))) return std::nullopt;
         try {
             return find(name, strict_installer);

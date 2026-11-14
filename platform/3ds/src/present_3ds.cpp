@@ -5,6 +5,7 @@
 //   bottom (320x240): the second screen's HUD (the top-left of the UI frame), or black.
 // A 3DS framebuffer is the screen on its side: 240 wide, a column a row,
 // bottom first; RGBA8 words are R in the top byte.
+#include <algorithm>
 #include <3ds.h>
 
 #include "handheld_hud.hpp"
@@ -177,10 +178,23 @@ void handheld_present(const std::vector<std::uint8_t>& frame, int frame_w, int f
         last = osGetTime();
     }
     ++frames;
+    // Hitches: frames that took long from the last one's present (what is seen as a stutter).
+    static u64 frame_from = 0;
+    static unsigned over50 = 0, over100 = 0, over250 = 0;
+    static u64 worst = 0, heap_peak = 0;
+    if (const u64 at = osGetTime(); frame_from) {
+        const u64 took = at - frame_from;
+        over50 += took > 50; over100 += took > 100; over250 += took > 250;
+        worst = std::max(worst, took);
+        frame_from = at;
+    } else frame_from = at;
     if (const u64 now = osGetTime(); now - last >= 10000) {
         const struct mallinfo heap = mallinfo();
-        d2d::log::info("perf: {} frames in {} ms ({:.1f} fps) | heap used {} of {} KiB | linear free {} KiB", frames, now - last, double(frames) * 1000.0 / double(now - last),
-                       heap.uordblks / 1024, envGetHeapSize() / 1024, linearSpaceFree() / 1024);
+        heap_peak = std::max<u64>(heap_peak, heap.uordblks);
+        d2d::log::info("perf: {} frames in {} ms ({:.1f} fps) | heap used {} of {} KiB (most yet {}) | linear free {} KiB", frames, now - last, double(frames) * 1000.0 / double(now - last),
+                       heap.uordblks / 1024, envGetHeapSize() / 1024, heap_peak / 1024, linearSpaceFree() / 1024);
+        d2d::log::info("perf: hitches: {} frames over 50 ms, {} over 100, {} over 250, the worst {} ms", over50, over100, over250, worst);
+        over50 = over100 = over250 = 0; worst = 0;
         for (auto& entry : prof::g_spans) {
             if (!entry.name) break;
             d2d::log::info("perf:   {:<26} {:6.1f} ms a frame ({} calls)", entry.name, double(entry.ns) / 1e6 / double(frames), entry.calls);

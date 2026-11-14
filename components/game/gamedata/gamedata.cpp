@@ -1007,6 +1007,7 @@ void relevel(Level& level, const std::vector<std::size_t>& came_up, const GameDa
     std::vector<std::string> notes;
     auto client_outside = client.empty() ? std::vector<d2d::drlg::BuiltRoom>{} : outside;   // the next door's rooms don't hang on this level's lay
     const auto built = lay_tiles(level, level.rooms, order, notes, std::move(outside), up_count);
+    const auto laid_ms = d2d::log::ms();
     for (const auto& room : built)
         if (room.seed) {
             level.room1_seeds[std::size_t(room.seed - level.rooms.data())] = room.room1_seed;
@@ -1023,6 +1024,7 @@ void relevel(Level& level, const std::vector<std::size_t>& came_up, const GameDa
             level.unit_rooms.push_back(room.seed ? int(room.seed - level.rooms.data()) : -1);
         }
     finish_level(level);
+    const auto finished_ms = d2d::log::ms();
     level.drawn.clear();
     if (!client.empty()) {                               // the client's picks, collision's untouched
         auto server_picks = std::move(level.picks);
@@ -1035,8 +1037,10 @@ void relevel(Level& level, const std::vector<std::size_t>& came_up, const GameDa
     level.drawn_laid = std::move(client);
     level.laid = std::move(order);
     level.laid_up = up_count;
+    const auto client_ms = d2d::log::ms();
     stamp_footprints(level);
-    d2d::log::info("  {}: rooms laid again ({} ms)", level.name, d2d::log::ms() - start_ms);
+    d2d::log::info("  {}: rooms laid again ({} ms: {} rooms, {} came up; tiles {}, walk grid {}, client's tiles {}, footprints {})", level.name, d2d::log::ms() - start_ms,
+                   count, up_count, laid_ms - start_ms, finished_ms - laid_ms, client_ms - finished_ms, d2d::log::ms() - client_ms);
 }
 
 // The camp's split (room_rects, made order) laid as camp_rooms lays it for
@@ -1439,7 +1443,10 @@ const Level* GameData::level(int id) const {
     want_level(id);
     const auto job = builder ? builder->jobs.find(id) : decltype(builder->jobs.end()){};
     if (!builder || job == builder->jobs.end()) return nullptr;
+    const auto wait_from = d2d::log::ms();
+    const bool was_ready = job->second.wait_for(std::chrono::seconds(0)) == std::future_status::ready;
     auto level = finish_job(job->second, id);                    // built now, or waited for
+    if (!was_ready) d2d::log::warn("level {}: the game waited {} ms for its build", id, d2d::log::ms() - wait_from);
     builder->jobs.erase(job);
     install_level(*this, id, std::move(level));
     return levels[id].get();

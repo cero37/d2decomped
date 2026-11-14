@@ -550,6 +550,7 @@ int run_windowed(std::vector<std::uint8_t>& framebuffer,
     if (loading.valid()) loading.get();
     Audio audio;
     audio.init();
+    audio.async_reads = std::getenv("D2D_HANDHELD") != nullptr;   // a sound's file read on a worker, not in the frame
     audio.master_volume = g_master_volume;
     audio.music_volume = g_music_volume;
     audio.apply_volume();
@@ -2012,9 +2013,11 @@ int run_windowed(std::vector<std::uint8_t>& framebuffer,
             static const std::uint32_t slow_ms = [] { const char* text = std::getenv("D2D_SLOW_MS"); return text && *text ? std::uint32_t(std::atoi(text)) : 100u; }();   // a fast machine standing in for a slow one
             if (dt_input > slow_ms || dt_render > slow_ms || dt_present > slow_ms) {
                 d2d::log::warn(
-                    "slow frame: input={} ms render={} ms present={} ms screen={} cam=({},{}) | {} | {} tiles decoded in {} ms | {} files read in {} ms: {}",
+                    "slow frame: input={} ms render={} ms present={} ms screen={} cam=({},{}) | {} | {} tiles decoded in {} ms | main thread read {} files in {} ms (waiting for workers {} ms): {} | workers read {} in {} ms: {}",
                     dt_input, dt_render, dt_present, int(screen), int(town.player.x), int(town.player.y),
-                    d2d::client::prof::frame_spans(), tiles.decodes, tiles.ns / 1000000, reads.files, reads.ns / 1000000, reads.names);
+                    d2d::client::prof::frame_spans(), tiles.decodes, tiles.ns / 1000000,
+                    reads.main.files, reads.main.ns / 1000000, reads.main.wait_ns / 1000000, reads.main.names,
+                    reads.other.files, reads.other.ns / 1000000, reads.other.names);
             }
             if (now_ms - stat_last_report_ms >= 5000) {
                 d2d::log::info("loads/5s: {} tiles decoded in {} ms, {} dropped, tile cache {} of {} KiB | {} files read in {} ms",
@@ -2078,6 +2081,7 @@ extern "C" void d2d_sigint_handler(int) {
  * Touch controls remain opt-in through the flag or saved configuration.
  */
 int main(int argc, char** argv) {
+    d2d::mpq::mark_main_thread();   // its archive reads go before the workers'
     // Ctrl-C and SIGTERM set the loop-quit flag instead of terminating
     // mid-frame. SIGPIPE gets ignored so a closed devctl client doesn't
     // kill the game.
