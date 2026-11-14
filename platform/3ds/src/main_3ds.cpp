@@ -18,6 +18,8 @@ int d2d_main(int argc, char** argv);
 void logs_3ds_start();
 void logs_3ds_exit();
 extern "C" void __appExit(void);   // libctru (system/appExit.c): the services' exits
+extern "C" void (*__system_retAddr)(void);   // libctru: what its exit calls last (set by aptExit)
+[[noreturn]] void d2d_3ds_leave();
 
 // The game is far bigger than libctru's defaults allow for.
 extern "C" {
@@ -142,9 +144,18 @@ int main(int, char**) {
     // reading, and libctru's exit frees the heap under them (a data abort on closing from HOME while
     // loading). The services are closed as libctru's exit would (__appExit: APT tells HOME we are done),
     // then the kernel takes the threads and the memory down together; files are flushed first.
+    // aptExit leaves its last step for libctru's exit to take (__system_retAddr = APT_CloseApplication,
+    // which tells HOME we're gone and ends the process): without it HOME waits on a half-closed program
+    // and the console asks to be restarted (seen leaving by Save and Exit).
     (void)result;
+    d2d_3ds_leave();
+}
+
+// The way out, from main() above and from the loading screen (closed from HOME with the loader still going).
+[[noreturn]] void d2d_3ds_leave() {
     std::fflush(nullptr);
     __appExit();
+    if (__system_retAddr) __system_retAddr();
     svcExitProcess();
 }
 

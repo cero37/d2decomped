@@ -107,6 +107,10 @@
 
 using namespace d2d::client;
 
+#ifdef __3DS__
+[[noreturn]] void d2d_3ds_leave();   // platform/3ds/src/main_3ds.cpp: tell HOME we're gone and end, the heap left in place
+#endif
+
 namespace {
 
 std::string cpu_model() {
@@ -535,7 +539,7 @@ int run_windowed(std::vector<std::uint8_t>& framebuffer,
         if (boot_title && std::getenv("D2D_HANDHELD")) draw_loading_note(framebuffer, *scene, std::uint32_t(SDL_GetTicks()));
 #ifdef __3DS__
         // Closed from the HOME menu: it waits for us to be gone, and the loader has minutes to go.
-        if (quit) { d2d::log::info("3ds: closed while loading"); SDL_Quit(); std::_Exit(0); }
+        if (quit) { d2d::log::info("3ds: closed while loading"); SDL_Quit(); d2d::log::finish(); d2d_3ds_leave(); }   // the loader still reads: no heap freed under it
         handheld_present(framebuffer, int(kScreenWidth), int(kScreenHeight), 0, false, nullptr, int(kScreenWidth), 0, 0);
 #else
         SDL_UpdateTexture(win.texture, nullptr, framebuffer.data(), int(kScreenWidth * 4));
@@ -2422,7 +2426,7 @@ int main(int argc, char** argv) {
         });
     if (scene)
         Scene::g_anim_async = std::getenv("D2D_HANDHELD") != nullptr;
-        if (Scene::g_anim_async) d2d::game::g_build_nearby = false;   // a level builds when it's gone to (gamedata.hpp)
+    if (Scene::g_anim_async) d2d::game::g_build_nearby = false;   // a level builds when it's gone to (gamedata.hpp)
     if (scene)
         Scene::g_anim_loader = [mpqs = &scene->mpqs](const std::string& path) -> std::optional<std::vector<std::byte>> {
             try { return mpqs->try_read(path); } catch (const std::exception&) { return std::nullopt; }
