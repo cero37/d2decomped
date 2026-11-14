@@ -43,6 +43,7 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <new>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -1431,8 +1432,12 @@ void install_level(const GameData& game_data, int id, std::unique_ptr<Level> lev
     game_data.levels[id] = std::move(level);
 }
 
+bool g_build_out_of_memory = false;   // the last finish_job's build ran out of memory
+
 std::unique_ptr<Level> finish_job(std::future<std::unique_ptr<Level>>& job, int id) {
+    g_build_out_of_memory = false;
     try { return job.get(); }
+    catch (const std::bad_alloc&) { d2d::log::warn("level {}: out of memory", id); g_build_out_of_memory = true; return nullptr; }
     catch (const std::exception& error) { d2d::log::warn("level {}: {}", id, error.what()); return nullptr; }
 }
 
@@ -1478,6 +1483,11 @@ const Level* GameData::level(int id) const {
     if (g_level_wait)
         while (job->second.wait_for(std::chrono::milliseconds(100)) != std::future_status::ready) g_level_wait(id);
     auto level = finish_job(job->second, id);                    // built now, or waited for
+    if (!level && g_build_out_of_memory && g_free_memory) {     // what can be had again let go, and once more
+        g_free_memory();
+        try { level = build_level(*this, *builder, id); d2d::log::info("level {}: built after giving memory back", id); }
+        catch (const std::exception& error) { d2d::log::warn("level {}: again: {}", id, error.what()); }
+    }
     if (!was_ready) d2d::log::warn("level {}: the game waited {} ms for its build", id, d2d::log::ms() - wait_from);
     builder->jobs.erase(job);
     install_level(*this, id, std::move(level));

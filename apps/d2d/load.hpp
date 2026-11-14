@@ -12,6 +12,7 @@
 #include <array>
 #include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <optional>
 #include <string>
 #include <vector>
@@ -60,7 +61,8 @@ std::optional<Scene> load_scene(const fs::path& data_dir, const fs::path& patch_
 // saves, Act 1 on the first save's map (save_seed) else map_seed, the game's
 // sprites and palettes. Nothing may read those until it returns.
 // A handheld, a game starting: the save's act's camp and its people ready before the first frame (load.cpp).
-void preload_camp(const Scene& scene, int act);
+// `waiting` is called every tenth of a second or so while it waits (the Loading screen).
+void preload_camp(const Scene& scene, int act, int save_class, const std::vector<d2d::d2s::Item>& items, std::uint32_t now_ms, const std::function<void()>& waiting);
 void finish_scene(Scene& scene, const fs::path& save_dir, std::uint32_t map_seed,
                   std::uint32_t (*save_seed)(const d2d::d2s::Header&));
 

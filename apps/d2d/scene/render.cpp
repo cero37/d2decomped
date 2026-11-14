@@ -12,6 +12,8 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <algorithm>
+#include <chrono>
 #include <cstdlib>
 #include <exception>
 #include <format>
@@ -81,10 +83,17 @@ void Scene::anim_load(std::shared_ptr<AnimLoad> load) {
                 {
                     std::unique_lock lock(mutex);
                     wake.wait(lock, [this] { return !queue.empty() || !ahead.empty(); });
-                    auto& from = ahead.empty() ? queue : ahead;
-                    job = std::move(from.front());
-                    from.pop_front();
+                    if (!ahead.empty()) { job = std::move(ahead.front()); ahead.pop_front(); }
+                    else {   // a read-ahead now wanted on screen (a death happening) before the others
+                        auto pick = std::ranges::find_if(queue, [](const auto& queued) { return queued->urgent.load(std::memory_order_relaxed); });
+                        if (pick == queue.end()) pick = queue.begin();
+                        job = std::move(*pick);
+                        queue.erase(pick);
+                    }
                 }
+                // A fast machine standing in for a handheld's card (testing): each layer this much slower.
+                static const int delay_ms = [] { const char* text = std::getenv("D2D_ANIM_DELAY_MS"); return text ? std::atoi(text) : 0; }();
+                if (delay_ms > 0) std::this_thread::sleep_for(std::chrono::milliseconds(delay_ms));
                 try {
                     if (!job->path.empty() && g_anim_loader)
                         if (auto bytes = g_anim_loader(job->path)) job->bytes = std::move(*bytes);
@@ -106,7 +115,7 @@ void Scene::anim_load(std::shared_ptr<AnimLoad> load) {
 void Scene::trim_anims(std::uint32_t now_ms, std::uint32_t idle_ms) const {
     g_anim_now_ms = now_ms;
     static std::uint32_t checked_ms = 0;
-    if (now_ms - checked_ms < 1000) return;                 // a look a second is plenty
+    if (idle_ms >= 15000 && now_ms - checked_ms < 1000) return;   // a look a second is plenty (a shorter idle: asked for now)
     checked_ms = now_ms;
     const auto trim = [&](const PlayerAnim& anim) {
         if (now_ms - anim.used_ms < idle_ms) return;

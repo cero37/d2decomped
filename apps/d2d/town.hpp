@@ -278,10 +278,11 @@ struct Town {
     // toggle says; `attack` / `attack_down` / `alt` are its buttons, which
     // hit what is in reach. The first player's is set each frame by main,
     // the other co-op players' by coop_pad.
-    struct PadMove { float x = 0, y = 0; bool active = false, attack = false, attack_down = false, alt = false; bool aim = false; float aim_x = 0, aim_y = 0; };
+    struct PadMove { float x = 0, y = 0; bool active = false, attack = false, attack_down = false, alt = false; bool aim = false; float aim_x = 0, aim_y = 0; float tilt = 0; };
     struct PadPlayer {
         PadMove move;
         bool walking = false;                     // last frame's stick walk, to send a fresh walk once
+        int run_sent = -1;                        // a handheld: the run the stick's tilt last asked for (-1 none yet)
         float face_x = 0.707f, face_y = 0.707f;   // the facing the pad last pointed (world, south at first)
         int target = -1;                          // the monster the held button stays on
         skillpad::HoldSet slot_hold;              // the set a held skill button started on
@@ -466,6 +467,10 @@ struct Town {
     [[nodiscard]] StashMove stash_move_at(int mouse_x, int mouse_y) const;
     // Moves it (g_auto_clicks); false when there's nothing to move or no room.
     bool handheld_stash_move(int mouse_x, int mouse_y);
+    // A handheld: a thing left on the cursor with the bag shut (no way there to drop or walk) goes back
+    // into the bag, which opens for it and shuts again (main.cpp, each frame).
+    void handheld_return_held();
+    bool close_after_return = false;
     int handheld_hover_w = 320;                   // how far right a page's hover text may reach (the stash's: its grid, clear of its buttons)
     int handheld_line_y = 0;                      // the bag's page: the line of buttons between the slots and the grid
     bool handheld_left = true;                    // ... and which of the two pages is up

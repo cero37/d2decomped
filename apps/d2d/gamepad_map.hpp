@@ -310,6 +310,7 @@ struct Actions {
     float aim_x = 0, aim_y = 0;                    // ...to this screen direction (unit length)
     bool  move_active = false;                     // the left stick walks the hero...
     float move_x = 0, move_y = 0;                  // ...towards this screen direction (unit length); walk or run is the run toggle's
+    float move_tilt = 0;                           // ...how far the stick is pushed, 0..1 past the dead zone (a handheld: part way walks, all the way runs)
     int   snap_x = 0, snap_y = 0;                  // a panel's d-pad press: hop the cursor this way (-1..1 each)
     bool  trade_press = false;                     // a store's X: buy the stock under the cursor
     bool  drop_press = false;                      // skill buttons: X drops the inventory item under the cursor
@@ -513,7 +514,7 @@ public:
             // The walking stick walks; in the field, where no cursor shows, the aiming one turns the facing.
             const auto [dir_x, dir_y, tilt_move] = dead(walk_x, walk_y);
             out.move_active = tilt_move > 0;
-            out.move_x = dir_x; out.move_y = dir_y;
+            out.move_x = dir_x; out.move_y = dir_y; out.move_tilt = tilt_move;
             const auto [face_x, face_y, tilt_aim] = dead(aim_x, aim_y);
             out.aim_active = context == Context::Game && tilt_aim > 0;
             out.aim_x = face_x; out.aim_y = face_y;

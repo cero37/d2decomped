@@ -26,6 +26,7 @@
 #include <array>
 #include <atomic>
 #include <cctype>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
@@ -43,6 +44,7 @@
 #include <string>
 #include <system_error>
 #include <thread>
+#include <chrono>
 #include <tuple>
 #include <unordered_map>
 #include <utility>
@@ -607,15 +609,33 @@ void finish_scene(Scene& scene, const fs::path& save_dir, std::uint32_t map_seed
 // and CPU: left for later, it came as a seconds-long stall on arriving). Its people's animations (their
 // COFs; the frames stream in) and the panels' art. That act's camp is built first if it isn't yet.
 // The areas round it go on building in the background (want_nearby).
-void preload_camp(const Scene& scene, int act) {
+void preload_camp(const Scene& scene, int act, int save_class, const std::vector<d2d::d2s::Item>& items, std::uint32_t now_ms, const std::function<void()>& waiting) {
     const auto start_ms = d2d::log::ms();
+    Scene::g_anim_now_ms = now_ms;                      // their frames count as just used (not trimmed before they show)
+    std::vector<const Scene::PlayerAnim*> wanted;
     const auto& towns = d2d::rules::level_ids::kActTowns;
     const game::Level* camp = act <= 0 || std::size_t(act) >= towns.size() ? &scene.town : scene.level(towns[std::size_t(act)]);
+    // Those round where a game starts in it (a screen and a half: memory is short; the rest stream in as met).
     if (camp)
         for (const auto& npc : camp->npcs) {
-            (void)scene.npc_anim(npc, npc.mode);
-            if (npc.root != "objects") (void)scene.npc_anim(npc, "WL");
+            if (camp->start.first >= 0 && std::hypot(npc.x - camp->start.first, npc.y - camp->start.second) > 20.f) continue;
+            wanted.push_back(&scene.npc_anim(npc, npc.mode));
+            if (npc.root != "objects") wanted.push_back(&scene.npc_anim(npc, "WL"));
         }
+    // The hero as they stand, walk and run in camp (wearing what the save wears).
+    if (save_class >= 0 && save_class < 7) {
+        const auto gfx = scene.look_of(items);
+        for (const int mode : { game::kModeTN, game::kModeNU, game::kModeWL, game::kModeRN }) wanted.push_back(&scene.composite(save_class, mode, gfx));
+    }
+    // Their frames read and decoded (the animation worker), a few seconds at most: a camp whose people and
+    // hero aren't there to draw yet showed them standing still or sliding.
+    for (const auto wait_from = d2d::log::ms(); d2d::log::ms() - wait_from < 8000;) {
+        bool all = true;
+        for (const auto* anim : wanted) all = anim->ready() && all;
+        if (all) break;
+        if (waiting) waiting();
+        std::this_thread::sleep_for(std::chrono::milliseconds(60));
+    }
     for (const auto* art : { &scene.inv_panel, &scene.inv_tab, &scene.border_frame, &scene.inv_belt, &scene.inv_boots, &scene.inv_ring_amulet,
                              &scene.inv_armor, &scene.inv_helm_glove, &scene.inv_weapons, &scene.store_panel })
         (void)art->total_frames();

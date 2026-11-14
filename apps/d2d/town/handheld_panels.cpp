@@ -191,6 +191,23 @@ auto Town::handheld_stash_move(int mouse_x, int mouse_y) -> bool {
     return true;
 }
 
+auto Town::handheld_return_held() -> void {
+    namespace d2s = d2d::d2s;
+    if (!scene || !held || !g_auto_clicks.empty()) return;
+    const auto& bag = scene->inv_layout[std::size_t(std::max(character.character_class, 0))];
+    std::vector<const d2s::Item*> placed;
+    for (const auto& carried : character.items)
+        if (carried.location == d2s::item_location::kStored && carried.panel == d2s::item_panel::kInventory) placed.push_back(&carried);
+    const auto [width, height] = d2d::rules::item_size(scene->rules, held->code);
+    const auto [column, row] = d2d::rules::free_spot(scene->rules, placed, bag.cols, bag.rows, width, height, true);
+    inv_open = true;
+    sync_panel_cam();
+    if (column < 0) { d2d::log::info("the bag has no room for what's on the cursor: left open"); return; }
+    g_auto_clicks = { { bag.grid_x + column * bag.box_w + width * bag.box_w / 2, bag.grid_y + row * bag.box_h + height * bag.box_h / 2 } };
+    close_after_return = true;
+    d2d::log::info("what was on the cursor goes back into the bag");
+}
+
 // The open panel as a page of the second screen, laid in the frame's top-left 320x240, with g_bottom_map
 // for its touches and its cursor. False (and nothing drawn) when what is open has no page of its own:
 // a trade with another player, the party, the hireling.
@@ -220,7 +237,8 @@ auto Town::handheld_fit_panel(const Mouse& mouse) -> bool {
                 for (const auto& box : bag.slots) in_bag = in_bag || (box[2] > 0 && in(box[0], box[1], box[2], box[3]));
                 bool in_other = beside == 1 ? in(96, 123, 290, 290) : beside == 2 ? in(stash.grid_x, stash.grid_y, stash.cols * stash.box_w, stash.rows * stash.box_h) : false;
                 if (beside == 3) for (const auto& box : scene->merc_layout.slots) in_other = in_other || (box[2] > 0 && in(box[0], box[1], box[2], box[3]));
-                if (in_bag) handheld_left = false; else if (in_other) handheld_left = true;
+                // The game's own clicks (Put in stash, Take out) cross over and back: the page stays where it is.
+                if (g_auto_clicks.empty()) { if (in_bag) handheld_left = false; else if (in_other) handheld_left = true; }
                 on_left = handheld_left;
             }
         }

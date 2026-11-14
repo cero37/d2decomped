@@ -93,6 +93,7 @@ struct Scene : GameData {
         const std::uint8_t* tint = nullptr;
         d2d::dcc::Sprite result;
         std::atomic<bool> done{ false };
+        std::atomic<bool> urgent{ false };   // read ahead, then wanted on screen: the worker takes it before the other read-aheads
     };
     static inline bool g_anim_async = false;
     static inline bool g_anim_read_ahead = false;   // set around a read-ahead (a death before it's needed): queued behind what's drawn
@@ -117,7 +118,10 @@ struct Scene : GameData {
         [[nodiscard]] const d2d::dcc::Sprite& layer(std::size_t layer_index) const {
             used_ms = g_anim_now_ms;
             if (auto& load = loading[layer_index]) {
-                if (!load->done.load(std::memory_order_acquire)) return decoded[layer_index];
+                if (!load->done.load(std::memory_order_acquire)) {
+                    if (!g_anim_read_ahead) load->urgent.store(true, std::memory_order_relaxed);
+                    return decoded[layer_index];
+                }
                 decoded[layer_index] = std::move(load->result);
                 load.reset();
                 return decoded[layer_index];

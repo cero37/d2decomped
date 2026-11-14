@@ -550,12 +550,17 @@ int run_windowed(std::vector<std::uint8_t>& framebuffer,
     if (loading.valid()) loading.get();
     // A handheld builds a level when it's gone to (no building ahead): the wait shows Loading, on this thread only.
     if (std::getenv("D2D_HANDHELD") && scene) {
-        d2d::game::g_level_wait = [&scene, main_thread = std::this_thread::get_id()](int) {
+        d2d::game::g_free_memory = [&scene] {
+            d2d::dt1::File::trim(0);                                       // decoded tiles: decoded again as drawn
+            scene->trim_anims(std::uint32_t(SDL_GetTicks()), 1000);         // animations not drawn this last second
+            d2d::log::info("memory given back for a level's build");
+        };
+        d2d::game::g_level_wait = [&scene, main_thread = std::this_thread::get_id()](int id) {
             if (std::this_thread::get_id() != main_thread) return;
             static std::vector<std::uint8_t> loading_frame;
             loading_frame.assign(std::size_t(kScreenWidth) * kScreenHeight * 4, 0);
             for (std::size_t at = 3; at < loading_frame.size(); at += 4) loading_frame[at] = 0xFF;
-            g_loading_step.store("Building the area", std::memory_order_relaxed);
+            g_loading_step.store(id < 0 ? "Getting the camp ready" : "Building the area", std::memory_order_relaxed);
             draw_loading_note(loading_frame, *scene, std::uint32_t(SDL_GetTicks()));
             g_loading_step.store("", std::memory_order_relaxed);
 #ifdef __3DS__
@@ -870,7 +875,18 @@ int run_windowed(std::vector<std::uint8_t>& framebuffer,
         town.touch_input.frame();
         SDL_Event event;
         while (SDL_PollEvent(&event)) {
-            g_last_event_ms = SDL_GetTicks();
+            {   // Input someone gave (the kept panel page, handheld_hud.hpp): not a resting stick's small drift, which
+                // a 3DS's circle pad sends every frame (the page then never kept), nor the window's own events.
+                const auto type = event.type;
+                const bool axis = type == SDL_EVENT_GAMEPAD_AXIS_MOTION || type == SDL_EVENT_JOYSTICK_AXIS_MOTION;
+                const int value = type == SDL_EVENT_GAMEPAD_AXIS_MOTION ? event.gaxis.value : type == SDL_EVENT_JOYSTICK_AXIS_MOTION ? event.jaxis.value : 0;
+                const bool given = (axis && std::abs(value) > 8000)
+                    || type == SDL_EVENT_KEY_DOWN || type == SDL_EVENT_KEY_UP || type == SDL_EVENT_MOUSE_MOTION || type == SDL_EVENT_MOUSE_BUTTON_DOWN
+                    || type == SDL_EVENT_MOUSE_BUTTON_UP || type == SDL_EVENT_MOUSE_WHEEL || type == SDL_EVENT_FINGER_DOWN || type == SDL_EVENT_FINGER_UP
+                    || type == SDL_EVENT_FINGER_MOTION || type == SDL_EVENT_GAMEPAD_BUTTON_DOWN || type == SDL_EVENT_GAMEPAD_BUTTON_UP
+                    || type == SDL_EVENT_JOYSTICK_BUTTON_DOWN || type == SDL_EVENT_JOYSTICK_BUTTON_UP || type == SDL_EVENT_JOYSTICK_HAT_MOTION;
+                if (given) g_last_event_ms = SDL_GetTicks();
+            }
             // SDL3 doesn't rescale event coords under logical presentation;
             // convert so the mouse lands in 800x600 game pixels.
             // A real touch comes as 0..1 of its screen; the conversion below turns it into the 800x600 frame's
@@ -1031,7 +1047,8 @@ int run_windowed(std::vector<std::uint8_t>& framebuffer,
             }
             const bool in_game = screen == Screen::InGame;
             if (in_game && !was_in_game) {                       // a game begins: co-op or not, for its length
-                if (scene && std::getenv("D2D_HANDHELD")) preload_camp(*scene, character.header.active_act());   // the save's camp, not the title's guess
+                if (scene && std::getenv("D2D_HANDHELD")) preload_camp(*scene, character.header.active_act(), character.header.cls, character.items, std::uint32_t(SDL_GetTicks()),
+                                                                           [] { if (d2d::game::g_level_wait) d2d::game::g_level_wait(-1); });   // the save's camp, not the title's guess
                 coop_game = gamepads.external() && !town.net_game;
                 seats.clear();
                 if (coop_game) {
@@ -1282,6 +1299,11 @@ int run_windowed(std::vector<std::uint8_t>& framebuffer,
                 pad_actions.keys.push_back(pad::Key::Escape);
             }
             if (pad_actions.rclick_press && !pad_field)  mouse.rpress_this_frame = true;
+            if (g_world_only && screen == Screen::InGame && g_auto_clicks.empty()) {
+                if (town.held && !town.inv_open && !town.stash_open && !town.cube_open && town.store.npc < 0 && !town.hireling.open && !town.game_menu.open)
+                    town.handheld_return_held();
+                else if (town.close_after_return && !town.held) { town.inv_open = false; town.close_after_return = false; town.sync_panel_cam(); }
+            }
             // The game's own clicks (g_auto_clicks), one a frame: press, then let go the next.
             if (!g_auto_clicks.empty() && screen == Screen::InGame) {
                 static bool pressed = false;
@@ -1315,6 +1337,7 @@ int run_windowed(std::vector<std::uint8_t>& framebuffer,
                                 pad_field && pad_actions.click_press, pad_field && pad_actions.click_down, pad_field && pad_actions.rclick_press,
                                 pad_actions.aim_active, pad_actions.aim_x, pad_actions.aim_y }
                 : Town::PadMove{};
+            town.pad.move.tilt = screen == Screen::InGame ? pad_actions.move_tilt : 0.f;
         }
         current_phase.store(std::uint32_t(MainPhase::Devctl),
                             std::memory_order_relaxed);

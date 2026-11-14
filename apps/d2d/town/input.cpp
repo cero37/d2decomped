@@ -225,7 +225,12 @@ auto Town::pad_walk(PadPlayer& player_pad, const UnitState& unit, bool dead, boo
         const bool walk = field && player_pad.move.active && !dead;
         if (walk) {
             const auto step = pad::world_step(player_pad.move.x, player_pad.move.y, kIsoW, kIsoH, 6.f);
-            // Walk or run is the run toggle's (R, the left stick's click), as with the mouse.
+            // Walk or run is the run toggle's (R, the left stick's click), as with the mouse. A handheld has no
+            // stick to click: its circle pad pushed most of the way runs, less walks.
+            if (g_world_only && player_pad.move.tilt > 0) {
+                const int run = player_pad.move.tilt >= 0.7f ? 1 : 0;
+                if (run != player_pad.run_sent) { out(cmd::Run{ run == 1 }); player_pad.run_sent = run; }
+            }
             out(cmd::Move{ unit.x + step.x, unit.y + step.y, !player_pad.walking });
         } else if (player_pad.walking) {
             out(cmd::Move{ unit.x, unit.y, true });   // stick centred: stop here, not at the old destination
@@ -838,9 +843,12 @@ auto Town::pad_tab(int step) -> void {
             const int current = pad_panel();
             if (current < 0 || held || identify_with >= 0 || use_item.open() || gold_box) return;
             // A handheld's round has the inventory before the character, as its Start list does.
+            // The party's panel only in a game with others (alone it is an empty page).
             static constexpr std::array<int, 6> kHandheldRound = { 0, 1, 3, 2, 4, 5 };
-            const int place = int(std::ranges::find(kHandheldRound, current) - kHandheldRound.begin());
-            const int next = g_world_only ? kHandheldRound[std::size_t((place + (step > 0 ? 1 : 5)) % 6)] : (current + (step > 0 ? 1 : 5)) % 6;
+            const std::span<const int> round = net_game || lan_client ? std::span<const int>(kHandheldRound) : std::span<const int>(kHandheldRound).subspan(1);
+            const auto found = std::ranges::find(round, current);
+            const int place = found == round.end() ? 0 : int(found - round.begin()), count = int(round.size());
+            const int next = g_world_only ? round[std::size_t((place + (step > 0 ? 1 : count - 1)) % count)] : (current + (step > 0 ? 1 : 5)) % 6;
             if (game_menu.open) close_game_menu();
             inv_open = char_open = tree_open = quest_log.open = party.open = false;
             inv_close_down = char_close_down = tree_close_down = false;

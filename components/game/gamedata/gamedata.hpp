@@ -1319,5 +1319,7 @@ void want_nearby(const GameData& game_data, const Level& level);
 inline bool g_build_nearby = true;
 // Called every tenth of a second while GameData::level waits for a build (the level's id): a handheld shows Loading.
 inline std::function<void(int)> g_level_wait;
+// Gives back what can be had again (decoded tiles, animations off screen): a build that ran out of memory then tries once more.
+inline std::function<void()> g_free_memory;
 
 }  // namespace d2d::game
