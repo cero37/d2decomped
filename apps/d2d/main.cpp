@@ -1595,6 +1595,7 @@ int run_windowed(std::vector<std::uint8_t>& framebuffer,
                 for (Button* button : {&csu.create_btn, &csu.convert_btn, &csu.delete_btn,
                                   &csu.cancel_btn, &csu.ok_btn})
                     update_button(*button, mouse, screen, quit);
+                if (screen == Screen::CharCreate) character.name.clear();   // New: an empty name, not the last hero's to type onto
                 if (play && csu.selected >= 0 && csu.selected < count) screen = Screen::InGame;
                 if (chosen_difficulty >= 0) screen = Screen::InGame;
                 // A dead hardcore character (FUN_00439840: status 4 and 8 at 00439a36, single player or
