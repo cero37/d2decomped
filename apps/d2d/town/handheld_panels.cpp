@@ -155,6 +155,7 @@ void draw_handheld_hover(std::vector<std::uint8_t>& framebuffer, const Scene& sc
 // a trade with another player, the party, the hireling.
 auto Town::handheld_fit_panel(const Mouse& mouse) -> bool {
         g_bottom_map.clear();
+        handheld_line_y = 0;
         if (!scene) return false;
         enum Kind { kNoPage, kWaypoints, kTree, kInventory, kCharacter, kGoldBox, kStore, kStash, kCube, kQuests, kSpeech, kNpcMenu, kHireling };
         bool on_left = mouse.x < int(kScreenWidth) / 2;              // two panels up: the page of the side the cursor is on
@@ -335,6 +336,7 @@ auto Town::handheld_fit_panel(const Mouse& mouse) -> bool {
             for (const auto& piece : map.pieces) page.piece(ui_buffer, piece);
             // Between them: the gold carried, and how to leave.
             const int line_y = kH - grid_h - 1 - 6;
+            handheld_line_y = line_y;                      // hover text keeps off this line's buttons where it can
             // Its words are the coin too: a touch there opens the box to drop gold (or to put it in the stash).
             const std::string gold_words = std::format("Gold {}", stats.get(d2d::d2s::kGold));
             page.text(small, gold_words, (kW - grid_w) / 2, line_y, kGold);

@@ -274,7 +274,12 @@ auto Town::draw(std::vector<std::uint8_t>& framebuffer, const Mouse& mouse, std:
                 if (!g_bottom_map.to_page(mouse.x, mouse.y, at_x, at_y)) at_x = at_y = -100;
                 // A thing of the panel's; not the frame's own button under one of the page's (but Repair All's, which says what it would cost).
                 if (g_bottom_map.on_piece(mouse.x, mouse.y) || (store.npc >= 0 && mouse.y >= 432 && mouse.y <= 474 && mouse.x >= kCharPanelX - 1 + 273 && mouse.x < kCharPanelX + 320))
-                    draw_handheld_hover(ui_buffer, *scene, handheld_hovers.back(), 0, 0, 320, 240, at_x, at_y);
+                {
+                    // The bag's page: text for a thing in the grid goes over the slots, clear of the line of buttons (Use, Sell...) when it fits there.
+                    const int lines = int(handheld_hovers.back().size());
+                    const bool above = handheld_line_y > 0 && at_y > handheld_line_y + 8 && lines * 12 + 8 <= handheld_line_y - 9;
+                    draw_handheld_hover(ui_buffer, *scene, handheld_hovers.back(), 0, 0, 320, above ? handheld_line_y - 9 : 240, at_x, above ? -100 : at_y);
+                }
             } else if (!g_bottom_zoom.on)
                 draw_handheld_hover(ui_buffer, *scene, handheld_hovers.back(), g_bottom_origin_x, g_bottom_origin_y, 320, kPanelHalf, mouse.x, mouse.y);
         }

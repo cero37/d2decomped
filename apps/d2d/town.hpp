@@ -460,6 +460,7 @@ struct Town {
     void fill_handheld_page(MenuPage& page) const;
     // The open panel as a page that fits the second screen (town/handheld_panels.cpp); false when it has none.
     bool handheld_fit_panel(const Mouse& mouse);
+    int handheld_line_y = 0;                      // the bag's page: the line of buttons between the slots and the grid
     bool handheld_left = true;                    // ... and which of the two pages is up
     int handheld_beside = 0;                      // what is open beside the bag (1 a store, 2 the stash, 3 the hireling): its page shows first
     std::vector<std::vector<TextLine>> handheld_hovers;   // this frame's hover text, kept off the frame for the page to show

@@ -1189,7 +1189,26 @@ int run_windowed(std::vector<std::uint8_t>& framebuffer,
                 // Char select's d-pad steps its roster by key instead.
                 // Char select's d-pad steps its roster by key instead, as Configure Controls' steps its rows.
                 const bool by_key = (screen == Screen::CharSelect && !csu.confirm_delete && !csu.pick_difficulty) || (screen == Screen::InGame && town.controls.open);
-                const auto points = by_key ? std::vector<pad::Point>{} : screen == Screen::InGame ? town.pad_snap_points() : menu_buttons();
+                // A handheld's front page: the d-pad goes by the page's own rows (as they lie on the second screen), not by where
+                // the frame has their buttons, so every row can be reached and the next one down is the next one down.
+                if (g_menu_page.active && !g_world_only && !by_key && screen != Screen::InGame) {
+                    std::vector<pad::Point> centres;
+                    std::vector<const MenuPage::Row*> rows;
+                    const MenuPage::Row* at = nullptr;
+                    for (const auto& candidate : g_menu_page.rows) {
+                        if (candidate.dim) continue;
+                        centres.push_back({ (candidate.left + candidate.right) / 2, (candidate.top + candidate.bottom) / 2 });
+                        rows.push_back(&candidate);
+                        if (candidate.on || (!at && candidate.x == mouse.x && candidate.y == mouse.y)) at = &candidate;
+                    }
+                    if (!at && !rows.empty()) at = rows.front();
+                    if (at)
+                        if (const int pick = pad::snap_pick((at->left + at->right) / 2, (at->top + at->bottom) / 2, pad_actions.snap_x, pad_actions.snap_y, centres); pick >= 0) {
+                            mouse.x = rows[std::size_t(pick)]->x; mouse.y = rows[std::size_t(pick)]->y;
+                        }
+                    pad_actions.snap_x = pad_actions.snap_y = 0;
+                }
+                const auto points = by_key || (pad_actions.snap_x == 0 && pad_actions.snap_y == 0) ? std::vector<pad::Point>{} : screen == Screen::InGame ? town.pad_snap_points() : menu_buttons();
                 if (const int pick = (town.tree_open && screen == Screen::InGame ? pad::tree_pick : pad::snap_pick)(mouse.x, mouse.y, pad_actions.snap_x, pad_actions.snap_y, points); pick >= 0) {
                     mouse.x = points[std::size_t(pick)].x; mouse.y = points[std::size_t(pick)].y;
                 }
@@ -1560,6 +1579,8 @@ int run_windowed(std::vector<std::uint8_t>& framebuffer,
                     if (sel < 0) sel = 0;
                     else if (key == SDLK_HOME)                       sel = 0;
                     else if (key == SDLK_END)                        sel = count - 1;
+                    // A handheld's page lists five heroes or fewer one under the other: up and down step one.
+                    else if (std::getenv("D2D_HANDHELD") && count <= 5 && (key == SDLK_UP || key == SDLK_DOWN)) sel = std::clamp(sel + (key == SDLK_DOWN ? 1 : -1), 0, count - 1);
                     else if (key == SDLK_LEFT  && sel % 2 == 1)      sel -= 1;
                     else if (key == SDLK_RIGHT && sel % 2 == 0 && sel + 1 < count) sel += 1;
                     else if (key == SDLK_UP    && sel >= 2)          sel -= 2;
@@ -1975,7 +1996,7 @@ int run_windowed(std::vector<std::uint8_t>& framebuffer,
                     page.active = true;
                     page.heading = character.selected >= 0 ? std::string(kClassKey[character.selected]) + (character.name.empty() ? std::string(": name your hero") : ": " + character.name) : std::string("Choose a class");
                     for (int index = 0; index < 7; ++index) {       // lit: the class the cursor is on; the one chosen keeps gold words
-                        page.add(kClassKey[index], kClassPos[index].x, kClassPos[index].y - 50, index == character.hovered || (mouse.x == kClassPos[index].x && mouse.y == kClassPos[index].y - 50), false);
+                        page.add(kClassKey[index], kClassPos[index].x, kClassPos[index].y - 50, (index == character.hovered && !pad_in_use) || (mouse.x == kClassPos[index].x && mouse.y == kClassPos[index].y - 50), false);
                         page.rows.back().picked = index == character.selected;
                     }
                     // What the class is, in the game's own words (render_charcreate's, which the frame shows for the one under the mouse).
@@ -1985,20 +2006,25 @@ int run_windowed(std::vector<std::uint8_t>& framebuffer,
                     }
                     page.add("Back", character.cancel_btn.x + character.cancel_btn.width / 2, character.cancel_btn.y + character.cancel_btn.height / 2, over(character.cancel_btn), true);
                     // The two checkboxes (the frame's 15x16 boxes): lit while ticked. Expansion shows with a class picked, and stays on for the two expansion classes.
-                    page.add("Hardcore", kHardcoreX + kHardcoreW / 2, kHardcoreY + kHardcoreH / 2, character.hardcore, true, false, character.hardcore ? "On" : "Off");
-                    if (character.selected >= 0)
-                        page.add("Expansion", kHardcoreX + kHardcoreW / 2, kExpansionY + kHardcoreH / 2, character.expansion, true,
+                    const auto on_box = [&](int top) { return mouse.x >= kHardcoreX && mouse.x < kHardcoreX + kHardcoreW && mouse.y >= top && mouse.y < top + kHardcoreH; };
+                    page.add("Hardcore", kHardcoreX + kHardcoreW / 2, kHardcoreY + kHardcoreH / 2, on_box(kHardcoreY), true, false, character.hardcore ? "On" : "Off");
+                    page.rows.back().picked = character.hardcore;
+                    if (character.selected >= 0) {
+                        page.add("Expansion", kHardcoreX + kHardcoreW / 2, kExpansionY + kHardcoreH / 2, on_box(kExpansionY), true,
                                  kUiToSaveClass[std::size_t(character.selected)] >= 5, character.expansion ? "On" : "Off");
+                        page.rows.back().picked = character.expansion;
+                    }
                     page.add("Start", character.ok_btn.x + character.ok_btn.width / 2, character.ok_btn.y + character.ok_btn.height / 2, over(character.ok_btn), true, character.selected < 0);
                 }
                 if (page.active && page.rows.empty()) page.active = false;
                 // A pad's cursor is always on a row of the page: off them all (on a button the page leaves out, or between
                 // two), it goes to the nearest one, which is lit.
-                if (page.active && pad_in_use && std::ranges::none_of(page.rows, &MenuPage::Row::on)) {
+                if (page.active && std::ranges::none_of(page.rows, &MenuPage::Row::on)) {
                     MenuPage::Row* nearest = nullptr;
                     long best = 0;
+                    const bool rows_first = std::ranges::any_of(page.rows, [](const MenuPage::Row& row) { return !row.small && !row.dim; });   // the screen's choices before its foot's buttons
                     for (auto& candidate : page.rows) {
-                        if (candidate.dim) continue;
+                        if (candidate.dim || (rows_first && candidate.small)) continue;
                         const long dx = candidate.x - mouse.x, dy = candidate.y - mouse.y, apart = dx * dx + dy * dy;
                         if (!nearest || apart < best) { nearest = &candidate; best = apart; }
                     }
