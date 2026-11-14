@@ -504,16 +504,17 @@ void render_world(std::vector<std::uint8_t>& framebuffer,
                 // Its animation still being read (a handheld's worker): the one this unit last drew whole, in its
                 // place, rather than nothing for those frames. By Unit::npc, and only one of the same token.
                 bool stood_in = false, whole = true;
-                struct Whole { const Scene::PlayerAnim* anim; std::uint32_t at; };
+                struct Whole { const Scene::PlayerAnim* anim; std::uint32_t at; bool held; };
                 static std::unordered_map<int, Whole> last_whole;
                 if (Scene::g_anim_async) {
-                    // Held on the frame it last showed: played on, a walk went on in place and a corpse
-                    // waiting for its frames replayed the whole fall.
                     if ((whole = unit.anim->ready())) {}   // its frame is kept as it's drawn, below
                     else if (const auto kept = last_whole.find(unit.npc); kept != last_whole.end() && kept->second.anim != unit.anim
                              && kept->second.anim->name.compare(0, 2, unit.anim->name, 0, 2) == 0 && kept->second.anim->ready()) {
-                        draw_composite(framebuffer, *kept->second.anim, upal, unit.dir, kept->second.at, anchor_x, anchor_y, unit.spirit ? 4 : -1);
-                        if (hovered && unit.name && !unit.name->empty()) bounds = composite_bounds(*kept->second.anim, unit.dir, kept->second.at, anchor_x, anchor_y);
+                        // A death waiting on its corpse stays on its last frame; anything else plays on (a walk
+                        // held still read as the hero frozen while the field's frames came in).
+                        const std::uint32_t at = kept->second.held ? kept->second.at : elapsed_ms - unit.mode_ms;
+                        draw_composite(framebuffer, *kept->second.anim, upal, unit.dir, at, anchor_x, anchor_y, unit.spirit ? 4 : -1);
+                        if (hovered && unit.name && !unit.name->empty()) bounds = composite_bounds(*kept->second.anim, unit.dir, at, anchor_x, anchor_y);
                         stood_in = true;
                     }
                 }
@@ -525,7 +526,7 @@ void render_world(std::vector<std::uint8_t>& framebuffer,
                     elapsed = object_elapsed(unit, elapsed);
                     elapsed = get_hit_elapsed(unit, elapsed);
                     const bool blank = past_cof(unit, elapsed);
-                    if (Scene::g_anim_async && whole && !blank) last_whole[unit.npc] = { unit.anim, elapsed };
+                    if (Scene::g_anim_async && whole && !blank) last_whole[unit.npc] = { unit.anim, elapsed, unit.hold };
                     if (!blank && unit.spirit) draw_composite(framebuffer, *unit.anim, tinted(upal, 205, 230, 255), unit.dir, elapsed, anchor_x, anchor_y, 4);   // half, pale
                     else if (!blank) draw_composite(framebuffer, *unit.anim, upal, unit.dir, elapsed, anchor_x, anchor_y);
                     if (!blank && hovered && unit.name && !unit.name->empty()) bounds = composite_bounds(*unit.anim, unit.dir, elapsed, anchor_x, anchor_y);

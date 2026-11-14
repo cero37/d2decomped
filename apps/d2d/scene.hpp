@@ -95,6 +95,7 @@ struct Scene : GameData {
         std::atomic<bool> done{ false };
     };
     static inline bool g_anim_async = false;
+    static inline bool g_anim_read_ahead = false;   // set around a read-ahead (a death before it's needed): queued behind what's drawn
     static void anim_load(std::shared_ptr<AnimLoad> load);   // scene/render.cpp
     struct PlayerAnim : AnimTiming {
         d2d::cof::Cof                     cof;

@@ -233,8 +233,10 @@ void view_units(const Scene& scene, const View& view, float camera_x, float came
         // while it's still on its feet, so it falls at once, not a few frames late in its old pose
         // (which then had the corpse replay the fall from the top while that was read).
         if (Scene::g_anim_async && !down && !row) {
+            Scene::g_anim_read_ahead = true;
             if (monster.alive()) (void)scene.npc_anim(monster.npc, "DT").ready();
             if (monster.alive() || monster.mode == "DT") (void)scene.npc_anim(monster.npc, "DD").ready();
+            Scene::g_anim_read_ahead = false;
         }
         // No name, so no hover, for a converted one, and a click there walks.
         // game.exe's hit test (FUN_00466870) drops a unit FUN_00465c60 refuses: outside town a

@@ -73,15 +73,17 @@ void Scene::anim_load(std::shared_ptr<AnimLoad> load) {
     struct Worker {
         std::mutex mutex;
         std::condition_variable wake;
-        std::deque<std::shared_ptr<AnimLoad>> queue;
+        std::deque<std::shared_ptr<AnimLoad>> queue, ahead;   // ahead: a unit on screen waits on it (not read ahead)
         std::thread thread{ [this] {
+            d2d::mpq::t_urgent_reads = true;              // the area builder's reads step aside for these
             for (;;) {
                 std::shared_ptr<AnimLoad> job;
                 {
                     std::unique_lock lock(mutex);
-                    wake.wait(lock, [this] { return !queue.empty(); });
-                    job = std::move(queue.front());
-                    queue.pop_front();
+                    wake.wait(lock, [this] { return !queue.empty() || !ahead.empty(); });
+                    auto& from = ahead.empty() ? queue : ahead;
+                    job = std::move(from.front());
+                    from.pop_front();
                 }
                 try {
                     if (!job->path.empty() && g_anim_loader)
@@ -97,7 +99,7 @@ void Scene::anim_load(std::shared_ptr<AnimLoad> load) {
         } };
     };
     static Worker* worker = new Worker;      // never joined: it runs to the end of the program
-    { const std::scoped_lock lock(worker->mutex); worker->queue.push_back(std::move(load)); }
+    { const std::scoped_lock lock(worker->mutex); (g_anim_read_ahead ? worker->queue : worker->ahead).push_back(std::move(load)); }
     worker->wake.notify_one();
 }
 
