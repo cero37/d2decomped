@@ -150,12 +150,54 @@ void draw_handheld_hover(std::vector<std::uint8_t>& framebuffer, const Scene& sc
     }
 }
 
+auto Town::stash_move_at(int mouse_x, int mouse_y) const -> StashMove {
+    namespace d2s = d2d::d2s;
+    StashMove move;
+    if (!scene || !stash_open || cube_open || held) return move;
+    const auto& bag = scene->inv_layout[std::size_t(std::max(character.character_class, 0))];
+    const auto& stash = scene->stash_layout[character.expansion ? 1 : 0];
+    for (const auto& carried : character.items) {
+        if (carried.location != d2s::item_location::kStored) continue;
+        const bool in_bag = carried.panel == d2s::item_panel::kInventory && inv_open, in_stash = carried.panel == d2s::item_panel::kStash;
+        if (!in_bag && !in_stash) continue;
+        const auto rect = grid_rect(*scene, in_bag ? bag : stash, carried);
+        if (mouse_x < rect[0] || mouse_x >= rect[0] + rect[2] || mouse_y < rect[1] || mouse_y >= rect[1] + rect[3]) continue;
+        move.item = &carried;
+        move.to_stash = in_bag;
+        move.from_x = rect[0] + rect[2] / 2; move.from_y = rect[1] + rect[3] / 2;
+        break;
+    }
+    if (!move.item || (!move.to_stash && !inv_open)) { move.item = nullptr; return move; }
+    const auto& to = move.to_stash ? stash : bag;
+    const int panel = move.to_stash ? d2s::item_panel::kStash : d2s::item_panel::kInventory;
+    std::vector<const d2s::Item*> placed;
+    for (const auto& carried : character.items)
+        if (carried.location == d2s::item_location::kStored && carried.panel == panel) placed.push_back(&carried);
+    const auto [width, height] = d2d::rules::item_size(scene->rules, move.item->code);
+    const auto [column, row] = d2d::rules::free_spot(scene->rules, placed, to.cols, to.rows, width, height, !move.to_stash);   // the stash from its top left
+    if (column >= 0) {
+        move.to_x = to.grid_x + column * to.box_w + width * to.box_w / 2;
+        move.to_y = to.grid_y + row * to.box_h + height * to.box_h / 2;
+    }
+    return move;
+}
+
+auto Town::handheld_stash_move(int mouse_x, int mouse_y) -> bool {
+    if (!g_auto_clicks.empty()) return false;
+    const auto move = stash_move_at(mouse_x, mouse_y);
+    if (!move.item) return false;
+    if (move.to_x < 0) { d2d::log::info("no room in the {} for {}", move.to_stash ? "stash" : "bag", move.item->code); return false; }
+    g_auto_clicks = { { move.from_x, move.from_y }, { move.to_x, move.to_y, true, true }, { mouse_x, mouse_y, false } };
+    return true;
+}
+
 // The open panel as a page of the second screen, laid in the frame's top-left 320x240, with g_bottom_map
 // for its touches and its cursor. False (and nothing drawn) when what is open has no page of its own:
 // a trade with another player, the party, the hireling.
 auto Town::handheld_fit_panel(const Mouse& mouse) -> bool {
         g_bottom_map.clear();
         handheld_line_y = 0;
+        handheld_hover_w = 320;
         if (!scene) return false;
         enum Kind { kNoPage, kWaypoints, kTree, kInventory, kCharacter, kGoldBox, kStore, kStash, kCube, kQuests, kSpeech, kNpcMenu, kHireling };
         bool on_left = mouse.x < int(kScreenWidth) / 2;              // two panels up: the page of the side the cursor is on
@@ -197,6 +239,7 @@ auto Town::handheld_fit_panel(const Mouse& mouse) -> bool {
                         : tree_open && char_open ? (mouse.x < int(kScreenWidth) / 2 ? kCharacter : kTree)
                         : tree_open ? kTree : inv_open ? kInventory : char_open ? kCharacter : kNoPage;
         if (kind == kNoPage) return false;
+        { static int last_kind = -1; if (int(kind) != last_kind) { d2d::log::info("handheld page: {} (cursor {}, {})", int(kind), mouse.x, mouse.y); last_kind = int(kind); } }
         if (kind == kSpeech || kind == kNpcMenu) handheld_hovers.clear();   // whatever lies under an NPC's page says nothing over it
         static std::vector<std::uint8_t> pixels;
         pixels.assign(std::size_t(kW) * kH * 4, 0);
@@ -353,7 +396,7 @@ auto Town::handheld_fit_panel(const Mouse& mouse) -> bool {
                     page.text(small, selling ? "Selling: on" : "Sell: off", right - 84 - 4 - 39, line_y, selling ? kWhite : kInk, 0);
                     map.spots.push_back({ right - 84 - 4 - 78, line_y - 8, right - 84 - 4, line_y + 8, kCharPanelX - 1 + 169 + 22, 453 });
                 }
-                else if (stash_open) turn(right - 96, line_y - 8, right, line_y + 8, "To the stash", stash.grid_x + stash.box_w / 2, stash.grid_y + stash.box_h / 2);
+                else if (stash_open) turn(right - 96, line_y - 8, right, line_y + 8, "Stash page", stash.grid_x + stash.box_w / 2, stash.grid_y + stash.box_h / 2);
                 else turn(right - 96, line_y - 8, right, line_y + 8, "To the hireling", torso[0] + torso[2] / 2, torso[1] + torso[3] / 2);
             } else page.text(small, "B: close", (kW + grid_w) / 2, line_y, kDimInk, 1);
             // The thing the cursor is on, if it can be used (a scroll, a tome, a potion): a button for it, which a finger has no
@@ -361,17 +404,30 @@ auto Town::handheld_fit_panel(const Mouse& mouse) -> bool {
             if (store.npc < 0) {
                 const int left = (kW - grid_w) / 2 + small.measure(gold_words) + 12, right = (kW + grid_w) / 2 - (stash_open || merc ? 104 : 60);
                 const d2d::d2s::Item* under = held ? nullptr : bag_at(mouse.x, mouse.y);
+                // The stash open: the thing goes there with a touch (or the pad's Y), beside its Use when it has one.
+                int use_right = right;
+                if (under && identify_with < 0 && stash_open && !cube_open) {
+                    const auto move = stash_move_at(mouse.x, mouse.y);
+                    const bool room = move.item && move.to_x >= 0;
+                    const int stash_left = item_use(*under).kind != ItemUseKind::None ? (left + right) / 2 + 2 : left;
+                    page.box(stash_left, line_y - 8, right, line_y + 8, room, !room);
+                    const std::string words = room ? "Put in stash" : "Stash full";
+                    page.text(page.fit(words, right - stash_left - 6), words, (stash_left + right) / 2, line_y, room ? kWhite : kDimInk, 0);
+                    if (room) { BottomMap::Spot spot{ stash_left, line_y - 8, right, line_y + 8, mouse.x, mouse.y }; spot.stash = true; map.spots.push_back(spot); }
+                    use_right = stash_left == left ? left : stash_left - 4;
+                }
                 if (identify_with >= 0) page.text(small, "Touch what to identify", (left + right) / 2, line_y, kGold, 0);
-                else if (under) {
+                else if (under && use_right > left) {
+                    const int right = use_right;
                     const auto use = item_use(*under);
-                    if (use.kind != ItemUseKind::None && right - left >= 60) {
+                    if (use.kind != ItemUseKind::None && right - left >= 50) {
                         const std::string label = "Use: " + std::string(use.label);
                         page.box(left, line_y - 8, right, line_y + 8, true);
                         page.text(small, small.measure(label) <= right - left - 6 ? label : std::string("Use"), (left + right) / 2, line_y, kWhite, 0);
                         BottomMap::Spot spot{ left, line_y - 8, right, line_y + 8, mouse.x, mouse.y };
                         spot.use = true;
                         map.spots.push_back(spot);
-                    } else if (!use.label.empty()) page.text(small, std::string(use.label), (left + right) / 2, line_y, kDimInk, 0);
+                    } else if (!use.label.empty()) page.text(page.fit(std::string(use.label), right - left), std::string(use.label), (left + right) / 2, line_y, kDimInk, 0);
                 }
             }
         } else if (kind == kTree) {
@@ -550,14 +606,23 @@ auto Town::handheld_fit_panel(const Mouse& mouse) -> bool {
             map.pieces.push_back(part(stash.grid_x, stash.grid_y, grid_w, grid_h, 2, 2, scale, true));
             page.piece(ui_buffer, map.pieces.back());
             const int side = 2 + int(float(grid_w) * scale) + 6, middle = (side + kW - 2) / 2;
+            handheld_hover_w = side - 2;
             page.text(font, "Stash", middle, 14, kGold, 0);
             page.text(small, std::format("Gold in the stash: {}", stats.get(d2d::d2s::kGoldBank)), middle, 40, kInk, 0);
             page.text(small, std::format("Gold carried: {}", stats.get(d2d::d2s::kGold)), middle, 56, kInk, 0);
             button(side, 70, kW - 2, 100, "Take gold out", 163, 93, stash_coin_at(mouse.x, mouse.y));
             if (inv_open) button(side, 104, kW - 2, 134, "Put gold in", 493, 462, inventory_coin_at(mouse.x, mouse.y));
-            if (inv_open) turn(side, 150, kW - 2, 186, "To my items", to_inventory_x, to_inventory_y);
-            page.text(small, "Touch: read it", middle, 204, kDimInk, 0);
-            page.text(small, "Again: pick it up", middle, 218, kDimInk, 0);
+            if (inv_open) turn(side, 140, kW - 2, 170, "My items page", to_inventory_x, to_inventory_y);
+            // The thing under the cursor back to the bag with a touch (or the pad's Y).
+            if (const auto move = stash_move_at(mouse.x, mouse.y); move.item && !move.to_stash && identify_with < 0) {
+                const bool room = move.to_x >= 0;
+                page.box(side, 174, kW - 2, 204, room, !room);
+                const std::string words = room ? "Take out" : "Bag is full";
+                page.text(page.fit(words, kW - 2 - side - 6), words, (side + kW - 2) / 2, 189, room ? kWhite : kDimInk, 0);
+                if (room) { BottomMap::Spot spot{ side, 174, kW - 2, 204, mouse.x, mouse.y }; spot.stash = true; map.spots.push_back(spot); }
+            }
+            page.text(small, "Touch twice: pick up", middle, 214, kDimInk, 0);
+            page.text(small, "Y: move it across", middle, 228, kDimInk, 0);
         } else if (kind == kCube) {
             // The cube's cells and its button, over the inventory's grid: both on the one page.
             const auto& cube = scene->cube_layout;

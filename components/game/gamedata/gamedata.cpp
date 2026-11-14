@@ -37,6 +37,7 @@
 #include <exception>
 #include <format>
 #include <functional>
+#include <condition_variable>
 #include <future>
 #include <iterator>
 #include <map>
@@ -793,7 +794,13 @@ void keep_laid_tiles(Level& level) {
 
 LevelDt1s load_level_dt1s(Level& level, d2d::mpq::Stack& mpqs, d2d::drlg::OutdoorAssets& assets, int type, d2d::dt1::Pixels pixels) {
     LevelDt1s dt1s;
-    dt1s.heads = d2d::drlg::load_room_dt1s(assets, [&](const std::string& path) { return mpqs.try_read(path); }, type);
+    // Each file read once: its bytes kept from the heads' pass for the pixels' (they were read twice).
+    std::unordered_map<std::string, std::vector<std::byte>> read_once;
+    dt1s.heads = d2d::drlg::load_room_dt1s(assets, [&](const std::string& path) {
+        auto bytes = mpqs.try_read(path);
+        if (bytes) read_once.insert_or_assign(d2d::mpq::Archive::key(path), *bytes);
+        return bytes;
+    }, type);
     std::vector<std::pair<const d2d::drlg::Dt1File*, std::string>> files;
     for (std::size_t row = 0; row < assets.lvl_types.size(); ++row)
         if (d2d::drlg::to_int(assets.lvl_types.get(row, "Id"), -1) == type)
@@ -804,7 +811,9 @@ LevelDt1s load_level_dt1s(Level& level, d2d::mpq::Stack& mpqs, d2d::drlg::Outdoo
     level.dt1s.reserve(files.size());                      // archive points into it
     for (const auto& [file_key, file] : files) {
         const auto mpq_path = R"(data\global\tiles\)" + ds1_path_to_mpq(file);
-        auto bytes = mpqs.try_read(mpq_path);
+        std::optional<std::vector<std::byte>> bytes;
+        if (auto kept = read_once.extract(d2d::mpq::Archive::key(mpq_path))) bytes = std::move(kept.mapped());
+        else bytes = mpqs.try_read(mpq_path);
         if (!bytes) continue;
         try { dt1s.archive[file_key] = &level.dt1s.emplace_back(*bytes, pixels, mpq_path); } catch (const std::exception& error) { d2d::log::warn("level {}: {}: {}", level.id, file, error.what()); }
     }
@@ -1432,9 +1441,19 @@ void GameData::want_level(int id) const {
         || !std::ranges::contains(kBuiltLevels, id)) return;
     // One at a time: a level's tile files are whole in memory while it is
     // laid (5 to 17 MB each), and several at once is the load's peak.
-    builder->jobs.emplace(id, std::async(std::launch::async, [this, id] {
-        static std::mutex one_at_a_time;
-        const std::scoped_lock lock(one_at_a_time);
+    // In the order asked for (want_nearby asks for a warp's level, a cave, before the big outdoor
+    // neighbours): a lock alone let whichever thread woke first go, a 12 s Cold Plains ahead of the
+    // 1.5 s Den of Evil the player was walking into.
+    static std::mutex turn_mutex;
+    static std::condition_variable turn_changed;
+    static std::uint64_t next_ticket = 0, serving = 0;
+    const std::uint64_t ticket = [] { const std::scoped_lock lock(turn_mutex); return next_ticket++; }();
+    builder->jobs.emplace(id, std::async(std::launch::async, [this, id, ticket] {
+        {
+            std::unique_lock lock(turn_mutex);
+            turn_changed.wait(lock, [&] { return serving == ticket; });
+        }
+        struct Next { ~Next() { { const std::scoped_lock lock(turn_mutex); ++serving; } turn_changed.notify_all(); } } next;
         return build_level(*this, *builder, id);
     }));
 }
@@ -1456,6 +1475,8 @@ const Level* GameData::level(int id) const {
     if (!builder || job == builder->jobs.end()) return nullptr;
     const auto wait_from = d2d::log::ms();
     const bool was_ready = job->second.wait_for(std::chrono::seconds(0)) == std::future_status::ready;
+    if (g_level_wait)
+        while (job->second.wait_for(std::chrono::milliseconds(100)) != std::future_status::ready) g_level_wait(id);
     auto level = finish_job(job->second, id);                    // built now, or waited for
     if (!was_ready) d2d::log::warn("level {}: the game waited {} ms for its build", id, d2d::log::ms() - wait_from);
     builder->jobs.erase(job);
@@ -1466,14 +1487,16 @@ const Level* GameData::level(int id) const {
 // The levels a player on `l` may reach next: the act's levels touching
 // it, and where its warps lead.
 void want_nearby(const GameData& game_data, const Level& level) {
+    if (!g_build_nearby) return;
     const auto& layout = game_data.layout_of(level.id);
+    // The warps' levels first (a cave, small and close by), then those walked into, then the act's neighbours.
+    for (const auto& warp : level.warps) game_data.want_level(warp.destination);
+    for (const int walk : walk_links(game_data, level.id)) game_data.want_level(walk);
     const auto placement = std::ranges::find(layout, level.id, &d2d::drlg::Placed::level);
     if (placement != layout.end())
         for (const auto& other_placement : layout)
             if (other_placement.level != level.id && other_placement.x <= placement->x + placement->width && placement->x <= other_placement.x + other_placement.width && other_placement.y <= placement->y + placement->height && placement->y <= other_placement.y + other_placement.height)
                 game_data.want_level(other_placement.level);
-    for (const auto& warp : level.warps) game_data.want_level(warp.destination);
-    for (const int walk : walk_links(game_data, level.id)) game_data.want_level(walk);
 }
 
 }  // namespace d2d::game

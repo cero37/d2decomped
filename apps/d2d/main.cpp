@@ -548,6 +548,21 @@ int run_windowed(std::vector<std::uint8_t>& framebuffer,
         SDL_Delay(10);
     }
     if (loading.valid()) loading.get();
+    // A handheld builds a level when it's gone to (no building ahead): the wait shows Loading, on this thread only.
+    if (std::getenv("D2D_HANDHELD") && scene) {
+        d2d::game::g_level_wait = [&scene, main_thread = std::this_thread::get_id()](int) {
+            if (std::this_thread::get_id() != main_thread) return;
+            static std::vector<std::uint8_t> loading_frame;
+            loading_frame.assign(std::size_t(kScreenWidth) * kScreenHeight * 4, 0);
+            for (std::size_t at = 3; at < loading_frame.size(); at += 4) loading_frame[at] = 0xFF;
+            g_loading_step.store("Building the area", std::memory_order_relaxed);
+            draw_loading_note(loading_frame, *scene, std::uint32_t(SDL_GetTicks()));
+            g_loading_step.store("", std::memory_order_relaxed);
+#ifdef __3DS__
+            handheld_present(loading_frame, int(kScreenWidth), int(kScreenHeight), 0, false, nullptr, int(kScreenWidth), 0, 0);
+#endif
+        };
+    }
     Audio audio;
     audio.init();
     audio.async_reads = std::getenv("D2D_HANDHELD") != nullptr;   // a sound's file read on a worker, not in the frame
@@ -855,6 +870,7 @@ int run_windowed(std::vector<std::uint8_t>& framebuffer,
         town.touch_input.frame();
         SDL_Event event;
         while (SDL_PollEvent(&event)) {
+            g_last_event_ms = SDL_GetTicks();
             // SDL3 doesn't rescale event coords under logical presentation;
             // convert so the mouse lands in 800x600 game pixels.
             // A real touch comes as 0..1 of its screen; the conversion below turns it into the 800x600 frame's
@@ -901,6 +917,10 @@ int run_windowed(std::vector<std::uint8_t>& framebuffer,
                         int frame_x = 0, frame_y = 0;
                         BottomMap::Touch how = BottomMap::kClick;
                         if (g_bottom_map.to_frame(touch_x, touch_y, frame_x, frame_y, &how)) {
+                            if (how == BottomMap::kStash) {            // Put in stash / Take out: the thing under the cursor across
+                                if (down) { (void)town.handheld_stash_move(mouse.x, mouse.y); pad_in_use = false; mouse_took_over = true; }
+                                continue;
+                            }
                             if (how == BottomMap::kUse) {              // the page's Use button: a right click where the cursor is
                                 if (down) { mouse.rpress_this_frame = true; pad_in_use = false; mouse_took_over = true; }
                                 continue;
@@ -909,6 +929,7 @@ int run_windowed(std::vector<std::uint8_t>& framebuffer,
                             const bool elsewhere = std::abs(frame_x - mouse.x) > 14 || std::abs(frame_y - mouse.y) > 14;
                             if (down && (how == BottomMap::kMove || (how == BottomMap::kLookFirst && elsewhere && !town.held))) {
                                 mouse.x = frame_x; mouse.y = frame_y; pad_in_use = false; mouse_took_over = true;
+                                d2d::log::info("page touch: the cursor to {}, {} ({})", frame_x, frame_y, how == BottomMap::kMove ? "turn" : "look");
                                 continue;
                             }
                             if (how == BottomMap::kMove) continue;
@@ -1010,6 +1031,7 @@ int run_windowed(std::vector<std::uint8_t>& framebuffer,
             }
             const bool in_game = screen == Screen::InGame;
             if (in_game && !was_in_game) {                       // a game begins: co-op or not, for its length
+                if (scene && std::getenv("D2D_HANDHELD")) preload_camp(*scene, character.header.active_act());   // the save's camp, not the title's guess
                 coop_game = gamepads.external() && !town.net_game;
                 seats.clear();
                 if (coop_game) {
@@ -1234,6 +1256,14 @@ int run_windowed(std::vector<std::uint8_t>& framebuffer,
                 town.pad_rt_down = pad_actions.right_trigger_down;
                 town.pad_rt_edge = pad_actions.right_trigger_press;
             }
+            // A handheld with the stash open: Y (the west button) moves the thing under the cursor across, bag <-> stash.
+            {
+                static bool west_was = false;
+                const bool west = first.held[std::size_t(pad::Button::West)];
+                if (g_world_only && west && !west_was && !pad_field && town.stash_open && town.handheld_stash_move(mouse.x, mouse.y))
+                    pad_actions.trade_press = pad_actions.drop_press = false;
+                west_was = west;
+            }
             if (pad_actions.trade_press) town.pad_trade(mouse.x, mouse.y);
             if (pad_actions.drop_press) town.pad_drop(mouse.x, mouse.y);
             if (pad_actions.tab_step != 0) town.pad_tab(pad_actions.tab_step);
@@ -1252,6 +1282,25 @@ int run_windowed(std::vector<std::uint8_t>& framebuffer,
                 pad_actions.keys.push_back(pad::Key::Escape);
             }
             if (pad_actions.rclick_press && !pad_field)  mouse.rpress_this_frame = true;
+            // The game's own clicks (g_auto_clicks), one a frame: press, then let go the next.
+            if (!g_auto_clicks.empty() && screen == Screen::InGame) {
+                static bool pressed = false;
+                static int waited = 0;
+                const auto next = g_auto_clicks.front();
+                if (pressed) {
+                    mouse.down = false; mouse.release_this_frame = true; pressed = false;
+                    g_auto_clicks.erase(g_auto_clicks.begin());
+                } else if (next.wait_held && !town.held && ++waited < 60) {
+                    // the pick-up not back from the World yet
+                } else if (next.wait_held && !town.held) {
+                    g_auto_clicks.clear(); waited = 0;                 // it never came: leave it
+                } else {
+                    waited = 0;
+                    mouse.x = next.x; mouse.y = next.y;
+                    if (next.click) { mouse.down = true; mouse.press_this_frame = true; pressed = true; }
+                    else g_auto_clicks.erase(g_auto_clicks.begin());
+                }
+            }
             for (const pad::Key pad_key : pad_actions.keys) {
                 // Escape quits from the title screen; B must not be able to close the app there.
                 if (screen == Screen::Title && pad_key == pad::Key::Escape) continue;
@@ -2350,6 +2399,7 @@ int main(int argc, char** argv) {
         });
     if (scene)
         Scene::g_anim_async = std::getenv("D2D_HANDHELD") != nullptr;
+        if (Scene::g_anim_async) d2d::game::g_build_nearby = false;   // a level builds when it's gone to (gamedata.hpp)
     if (scene)
         Scene::g_anim_loader = [mpqs = &scene->mpqs](const std::string& path) -> std::optional<std::vector<std::byte>> {
             try { return mpqs->try_read(path); } catch (const std::exception&) { return std::nullopt; }

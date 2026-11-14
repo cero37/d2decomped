@@ -158,6 +158,17 @@ auto Town::draw(std::vector<std::uint8_t>& framebuffer, const Mouse& mouse, std:
     ui_buffer.resize(std::size_t(kScreenWidth) * kScreenHeight * 4);
     // A handheld with a panel up: hover text is kept for the panel's page, not drawn where the frame has it.
     handheld_hovers.clear();
+    // A panel's page that nothing has touched keeps last frame's pixels: no input for 150 ms, the cursor
+    // where it was, the page drawn under a quarter second ago (gold picked up, a delay counting: it catches
+    // up then). An NPC's words run on their own clock: drawn each frame.
+    static std::vector<std::uint8_t> kept_page;
+    static std::uint64_t kept_at = 0;
+    static int kept_x = -1, kept_y = -1;
+    static bool kept = false;
+    const std::uint64_t ticks = SDL_GetTicks();
+    static const bool never_keep = std::getenv("D2D_NO_KEEP") != nullptr;   // A/B: every frame drawn
+    g_keep_panels = !never_keep && g_world_only && kept && g_bottom_panels && speech.npc < 0 && !help.open && !game_menu.open && !controls.open
+                 && mouse.x == kept_x && mouse.y == kept_y && !mouse.down && ticks - g_last_event_ms > 150 && ticks - kept_at < 250;
     g_hover_capture = g_world_only && g_bottom_panels ? &handheld_hovers : nullptr;
     draw_view(ui_buffer, &framebuffer, mouse, frame_ms);
     g_hover_capture = nullptr;
@@ -232,7 +243,10 @@ auto Town::draw(std::vector<std::uint8_t>& framebuffer, const Mouse& mouse, std:
         }
         g_top_panel.clear();                               // the top screen is the world's: no half of a panel on it
         // A panel with a page of its own (the character sheet, the inventory, the skill tree, the waypoints).
-        const bool fitted = g_bottom_panels && !g_bottom_whole && !g_bottom_zoom.on && !help_page && handheld_fit_panel(mouse);
+        const bool fitted = g_keep_panels || (g_bottom_panels && !g_bottom_whole && !g_bottom_zoom.on && !help_page && handheld_fit_panel(mouse));
+        if (g_keep_panels)
+            for (int y = 0; y < 240; ++y)
+                std::copy_n(kept_page.begin() + std::ptrdiff_t(std::size_t(y) * 320 * 4), 320 * 4, ui_buffer.begin() + std::ptrdiff_t(std::size_t(y) * kScreenWidth * 4));
         if (!fitted) g_bottom_map.clear();
         if (!g_bottom_panels) handheld_beside = 0;
         if (g_bottom_zoom.on || help_page || fitted) {
@@ -268,7 +282,7 @@ auto Town::draw(std::vector<std::uint8_t>& framebuffer, const Mouse& mouse, std:
             panel_was_open = false;
         }
         // The hover text the frame would have drawn: on the page, inside the screen.
-        if (!handheld_hovers.empty() && scene && g_bottom_panels && !g_bottom_whole) {
+        if (!g_keep_panels && !handheld_hovers.empty() && scene && g_bottom_panels && !g_bottom_whole) {
             if (fitted) {
                 int at_x = -100, at_y = -100;
                 if (!g_bottom_map.to_page(mouse.x, mouse.y, at_x, at_y)) at_x = at_y = -100;
@@ -278,11 +292,19 @@ auto Town::draw(std::vector<std::uint8_t>& framebuffer, const Mouse& mouse, std:
                     // The bag's page: text for a thing in the grid goes over the slots, clear of the line of buttons (Use, Sell...) when it fits there.
                     const int lines = int(handheld_hovers.back().size());
                     const bool above = handheld_line_y > 0 && at_y > handheld_line_y + 8 && lines * 12 + 8 <= handheld_line_y - 9;
-                    draw_handheld_hover(ui_buffer, *scene, handheld_hovers.back(), 0, 0, 320, above ? handheld_line_y - 9 : 240, at_x, above ? -100 : at_y);
+                    draw_handheld_hover(ui_buffer, *scene, handheld_hovers.back(), 0, 0, handheld_hover_w, above ? handheld_line_y - 9 : 240, at_x, above ? -100 : at_y);
                 }
             } else if (!g_bottom_zoom.on)
                 draw_handheld_hover(ui_buffer, *scene, handheld_hovers.back(), g_bottom_origin_x, g_bottom_origin_y, 320, kPanelHalf, mouse.x, mouse.y);
         }
+        if (fitted && !g_keep_panels) {                    // the page as shown, for the frames that keep it
+            kept_page.resize(std::size_t(320) * 240 * 4);
+            for (int y = 0; y < 240; ++y)
+                std::copy_n(ui_buffer.begin() + std::ptrdiff_t(std::size_t(y) * kScreenWidth * 4), 320 * 4, kept_page.begin() + std::ptrdiff_t(std::size_t(y) * 320 * 4));
+            kept_at = ticks; kept_x = mouse.x; kept_y = mouse.y;
+        }
+        kept = fitted;
+        g_keep_panels = false;
         // Off the 3DS (a preview): the second screen goes in the frame's spare rows,
         // its first rows above the world's and the rest below (the frame is 600 rows:
         // the world's 240 and 360 spare).

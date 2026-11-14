@@ -1313,5 +1313,11 @@ bool every_room_populated(const Spawning& spawning, const Level& level);
 void install_level(const GameData& game_data, int id, std::unique_ptr<Level> level);
 std::unique_ptr<Level> finish_job(std::future<std::unique_ptr<Level>>& job, int id);
 void want_nearby(const GameData& game_data, const Level& level);
+// Whether the levels round the player build ahead (want_nearby). A handheld turns it off: a level builds
+// when it's gone to, GameData::level waiting for it (a stall behind a Loading screen, not hitches while
+// playing, and no memory spent on places a portal never goes).
+inline bool g_build_nearby = true;
+// Called every tenth of a second while GameData::level waits for a build (the level's id): a handheld shows Loading.
+inline std::function<void(int)> g_level_wait;
 
 }  // namespace d2d::game

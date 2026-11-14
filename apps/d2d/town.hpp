@@ -460,6 +460,13 @@ struct Town {
     void fill_handheld_page(MenuPage& page) const;
     // The open panel as a page that fits the second screen (town/handheld_panels.cpp); false when it has none.
     bool handheld_fit_panel(const Mouse& mouse);
+    // The stash open: the stored thing at (x, y) of the frame and where it would go on the other side (the bag's
+    // or the stash's first room, as the game fills a grid). to_x < 0: no room there. Null: nothing there to move.
+    struct StashMove { const d2d::d2s::Item* item = nullptr; bool to_stash = false; int from_x = 0, from_y = 0, to_x = -1, to_y = -1; };
+    [[nodiscard]] StashMove stash_move_at(int mouse_x, int mouse_y) const;
+    // Moves it (g_auto_clicks); false when there's nothing to move or no room.
+    bool handheld_stash_move(int mouse_x, int mouse_y);
+    int handheld_hover_w = 320;                   // how far right a page's hover text may reach (the stash's: its grid, clear of its buttons)
     int handheld_line_y = 0;                      // the bag's page: the line of buttons between the slots and the grid
     bool handheld_left = true;                    // ... and which of the two pages is up
     int handheld_beside = 0;                      // what is open beside the bag (1 a store, 2 the stash, 3 the hireling): its page shows first

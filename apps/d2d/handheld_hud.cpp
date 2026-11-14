@@ -322,6 +322,8 @@ void draw_loading_note(std::vector<std::uint8_t>& framebuffer, const Scene& scen
     }
     const std::string_view words = "Loading";
     scene.font42.draw_tinted_baseline(framebuffer, kScreenWidth, kScreenHeight, scene.pal, (width - scene.font42.measure(words)) / 2, 380, words, 255, 255, 255);
+    if (const std::string_view step = g_loading_step.load(std::memory_order_relaxed); !step.empty())
+        scene.font.draw_tinted(framebuffer, kScreenWidth, kScreenHeight, scene.pal, (width - scene.font.measure(step)) / 2, 452, step, 199, 179, 119);
     // The bar: a 400x20 trough and a bright piece that crosses it every two seconds.
     const int left = 200, top = 420, wide = 400, tall = 20, piece = 100;
     const int at = int(now_ms % 2000) * (wide + piece) / 2000 - piece;

@@ -340,6 +340,7 @@ void render_ingame(std::vector<std::uint8_t>& framebuffer,
             return;
         }
         if (g_world_only) {   // a panel is open: the PC's HUD and panels on black, the second screen a window of them
+            if (g_keep_panels) return;                    // the page as it was (Town::draw puts it back)
             std::fill_n(reinterpret_cast<std::uint32_t*>(framebuffer.data()), framebuffer.size() / 4, kOpaqueBlack);
         } else if (wide)
             for (std::size_t y = 0; y < kScreenHeight; ++y)

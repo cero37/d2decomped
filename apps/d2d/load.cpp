@@ -4,6 +4,7 @@
 
 #include "common.hpp"
 #include "gamemenu.hpp"
+#include "handheld_hud.hpp"
 #include "scene.hpp"
 #include "ui.hpp"
 
@@ -572,6 +573,8 @@ void finish_scene(Scene& scene, const fs::path& save_dir, std::uint32_t map_seed
     const auto start_ms = d2d::log::ms();
     try {
         auto mpqs = scene.mpqs.reopen();        // StormLib handles stay on their thread
+        const auto step = [](const char* words) { g_loading_step.store(words, std::memory_order_relaxed); };
+        step("Reading the game's tables");
         game::load_game_tables(scene, mpqs);
         load_saves(scene, save_dir);            // their items need the tables
         // The newest save is the likely pick: its map, and the act it was left in.
@@ -580,6 +583,7 @@ void finish_scene(Scene& scene, const fs::path& save_dir, std::uint32_t map_seed
             map_seed = save_seed(scene.saves.front());
             act = scene.saves.front().active_act();
         }
+        step("Building the world");
         game::load_game_world(scene, mpqs, map_seed);
         // A later act's town starts building on the builder thread while the
         // menus run (as the camp's neighbours do, deviations.md improvement 8).
@@ -587,14 +591,35 @@ void finish_scene(Scene& scene, const fs::path& save_dir, std::uint32_t map_seed
             scene.want_level(d2d::rules::level_ids::kActTowns[std::size_t(act)]);
             d2d::log::info("  Newest save is in act {}; its town builds while the menus run", act + 1);
         }
+        step("Loading the art");
         load_ui_sprites(scene, mpqs);
         load_monster_sprites(scene, mpqs);
         load_act_palettes(scene, mpqs, 0);
         want_nearby(scene, scene.town);         // the town's neighbours build while the menus run (deviations.md improvement 8)
+        step("");
         d2d::log::info("Scene loaded in {} ms.", d2d::log::ms() - start_ms);
     } catch (const std::exception& error) {
         d2d::log::error("finish_scene: {}", error.what());
     }
+}
+
+// A handheld, a game starting: the camp the save is in made ready before its first frame (a slow card
+// and CPU: left for later, it came as a seconds-long stall on arriving). Its people's animations (their
+// COFs; the frames stream in) and the panels' art. That act's camp is built first if it isn't yet.
+// The areas round it go on building in the background (want_nearby).
+void preload_camp(const Scene& scene, int act) {
+    const auto start_ms = d2d::log::ms();
+    const auto& towns = d2d::rules::level_ids::kActTowns;
+    const game::Level* camp = act <= 0 || std::size_t(act) >= towns.size() ? &scene.town : scene.level(towns[std::size_t(act)]);
+    if (camp)
+        for (const auto& npc : camp->npcs) {
+            (void)scene.npc_anim(npc, npc.mode);
+            if (npc.root != "objects") (void)scene.npc_anim(npc, "WL");
+        }
+    for (const auto* art : { &scene.inv_panel, &scene.inv_tab, &scene.border_frame, &scene.inv_belt, &scene.inv_boots, &scene.inv_ring_amulet,
+                             &scene.inv_armor, &scene.inv_helm_glove, &scene.inv_weapons, &scene.store_panel })
+        (void)art->total_frames();
+    d2d::log::info("Act {}'s camp made ready in {} ms", act + 1, d2d::log::ms() - start_ms);
 }
 
 // The act's palette (palette\ACTn\pal.dat) and its 32 light levels: PL2

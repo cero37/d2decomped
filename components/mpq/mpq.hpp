@@ -313,10 +313,28 @@ public:
     [[nodiscard]] bool empty() const noexcept { return shared_->archives.empty(); }
     [[nodiscard]] std::size_t size() const noexcept { return shared_->archives.size(); }
 
+    // Whether some archive has the file. Remembered (a composite asks after the same layers each time it
+    // loads); the stack's lock taken as try_read takes it, so the main thread asking isn't left behind a
+    // worker's whole read. An installer answers from its list: it lists a delta for a file the archives
+    // under it have, and reading it through (applying the delta) only to say yes cost the whole file.
     [[nodiscard]] bool contains(std::string_view name) const {
-        const std::scoped_lock lock(shared_->mutex);
-        for (const auto& archive : shared_->archives) if (archive.contains(name)) return true;
-        return false;
+        const std::string key = Archive::key(name);
+        {
+            const std::scoped_lock known_lock(shared_->known_mutex);
+            if (const auto found = shared_->known.find(key); found != shared_->known.end()) return found->second;
+        }
+        const bool on_main = std::this_thread::get_id() == g_main_thread;
+        if (on_main) g_main_waiting.fetch_add(1, std::memory_order_acq_rel);
+        bool there = false;
+        {
+            const std::scoped_lock lock(shared_->mutex);
+            if (on_main) g_main_waiting.fetch_sub(1, std::memory_order_acq_rel);
+            for (const auto& archive : shared_->archives)
+                if (archive.is_installer() ? archive.installer_lists(name) : archive.contains(name)) { there = true; break; }
+        }
+        const std::scoped_lock known_lock(shared_->known_mutex);
+        shared_->known.emplace(key, there);
+        return there;
     }
 
     [[nodiscard]] std::vector<std::byte> read(std::string_view name) const {
@@ -425,6 +443,8 @@ private:
         std::vector<std::pair<std::filesystem::path, bool>> sources;   // what was pushed: path, installer
         // Keys of files that failed to read.
         std::unordered_set<std::string> failed;
+        std::mutex known_mutex;                                  // contains()'s answers
+        std::unordered_map<std::string, bool> known;
     };
     std::shared_ptr<Shared> shared_ = std::make_shared<Shared>();
 };

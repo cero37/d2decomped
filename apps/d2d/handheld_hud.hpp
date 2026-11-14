@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <string>
 #include <string_view>
+#include <atomic>
 #include <vector>
 
 namespace d2d::d2s { struct Stats; struct Item; }
@@ -83,6 +84,18 @@ inline bool g_bottom_panels = false;
 // the death message): the second screen shows the whole UI frame at two fifths, as it does
 // the menus, and a touch is the mouse on it.
 inline bool g_bottom_whole = false;
+// When the last input event came (SDL ticks, ms; main.cpp's event loop), and whether this frame keeps
+// the open panel's page as it was (Town::draw: no input for a while, the cursor where it was, the page
+// drawn under a quarter second ago). The panels at 800x600 and their page cost most of a 3DS frame.
+inline std::uint64_t g_last_event_ms = 0;
+inline bool g_keep_panels = false;
+// Clicks the game makes for itself, one a frame (main.cpp): a thing moved between the bag and the stash
+// (Town::handheld_stash_move) is picked up, put down where it fits, and the cursor goes back where it was.
+// `wait_held`: not until the pick-up is back from the World (the thing on the cursor).
+struct AutoClick { int x = 0, y = 0; bool click = true, wait_held = false; };
+inline std::vector<AutoClick> g_auto_clicks;
+// What the loader is doing (finish_scene), under the title's Loading bar; empty: nothing named.
+inline std::atomic<const char*> g_loading_step{ "" };
 inline int g_bottom_origin_x = 0, g_bottom_origin_y = 0;
 // An NPC's menu or speech is up: the second screen shows just that box, scaled to fill it (up to
 // twice its size) and laid in the UI frame's top-left 320x240; a touch at (x, y) is the mouse at
@@ -101,8 +114,8 @@ struct BottomMap {
     struct Piece { int src_x = 0, src_y = 0, src_w = 0, src_h = 0, dst_x = 0, dst_y = 0; float scale = 1.f; bool look_first = false; };
     // move: the touch only puts the cursor at the point (to bring the other side's page), no click.
     // use: the touch is a right click where the cursor is (the thing under it is used), not a click at the point.
-    struct Spot { int left = 0, top = 0, right = 0, bottom = 0, x = 0, y = 0; bool move = false, use = false; };
-    enum Touch { kClick, kLookFirst, kMove, kUse };
+    struct Spot { int left = 0, top = 0, right = 0, bottom = 0, x = 0, y = 0; bool move = false, use = false, stash = false; };
+    enum Touch { kClick, kLookFirst, kMove, kUse, kStash };
     bool on = false;
     std::vector<Piece> pieces;
     std::vector<Spot> spots;
@@ -114,6 +127,7 @@ struct BottomMap {
                 frame_x = spot.x; frame_y = spot.y;
                 if (how && spot.move) *how = kMove;
                 if (how && spot.use) *how = kUse;
+                if (how && spot.stash) *how = kStash;
                 return true;
             }
         for (const auto& piece : pieces) {

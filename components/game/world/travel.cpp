@@ -46,6 +46,9 @@ auto World::cross_level() -> void {
             for (const auto& placement : game_data->layout_of(level->id))
                 if (world_x >= float(placement.x) && world_y >= float(placement.y) && world_x < float(placement.x + placement.width) && world_y < float(placement.y + placement.height)
                     && std::ranges::find(not_there, placement.level) == not_there.end()) {
+                    // Nothing built ahead (a handheld, g_build_nearby): headed into it, it builds now (GameData::level
+                    // waits, the screen saying Loading) and joins this level's neighbours.
+                    if (!g_build_nearby && game_data->level(placement.level)) { known = true; break; }
                     not_there.push_back(placement.level);
                     d2d::log::info("not implemented: level {} (the player headed there from level {})", placement.level, level->id);
                 }
