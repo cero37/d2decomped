@@ -512,7 +512,11 @@ void render_world(std::vector<std::uint8_t>& framebuffer,
                              && kept->second.anim->name.compare(0, 2, unit.anim->name, 0, 2) == 0 && kept->second.anim->ready()) {
                         // A death waiting on its corpse stays on its last frame; anything else plays on (a walk
                         // held still read as the hero frozen while the field's frames came in).
-                        const std::uint32_t at = kept->second.held ? kept->second.at : elapsed_ms - unit.mode_ms;
+                        // A death whose frames are still coming (the first of its kind killed) holds the last frame drawn too:
+                        // its walk playing on read as the monster up and alive.
+                        const std::string_view mode = std::string_view(unit.anim->name).substr(std::min<std::size_t>(2, unit.anim->name.size()), 2);
+                        const bool dying = mode == "DT" || mode == "DD";
+                        const std::uint32_t at = kept->second.held || dying ? kept->second.at : elapsed_ms - unit.mode_ms;
                         draw_composite(framebuffer, *kept->second.anim, upal, unit.dir, at, anchor_x, anchor_y, unit.spirit ? 4 : -1);
                         if (hovered && unit.name && !unit.name->empty()) bounds = composite_bounds(*kept->second.anim, unit.dir, at, anchor_x, anchor_y);
                         stood_in = true;
