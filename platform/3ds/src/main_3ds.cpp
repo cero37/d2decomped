@@ -17,6 +17,7 @@
 int d2d_main(int argc, char** argv);
 void logs_3ds_start();
 void logs_3ds_exit();
+extern "C" void __appExit(void);   // libctru (system/appExit.c): the services' exits
 
 // The game is far bigger than libctru's defaults allow for.
 extern "C" {
@@ -137,7 +138,14 @@ int main(int, char**) {
     args.push_back(nullptr);
     const int result = d2d_main(int(words.size()), args.data());
     logs_3ds_exit();
-    return result;
+    // Ended here, not by returning: the area builder, the animation and sound workers may still be
+    // reading, and libctru's exit frees the heap under them (a data abort on closing from HOME while
+    // loading). The services are closed as libctru's exit would (__appExit: APT tells HOME we are done),
+    // then the kernel takes the threads and the memory down together; files are flushed first.
+    (void)result;
+    std::fflush(nullptr);
+    __appExit();
+    svcExitProcess();
 }
 
 // newlib declares these and devkitARM has no users: the game's home-folder

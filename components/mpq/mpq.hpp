@@ -69,9 +69,10 @@ inline ReadStats g_read_stats;
 inline std::thread::id g_main_thread = std::this_thread::get_id();
 inline void mark_main_thread() { g_main_thread = std::this_thread::get_id(); }
 inline std::atomic<int> g_main_waiting{ 0 };
-// A worker whose reads the player waits on (the animation worker): it goes ahead of the others
-// as the main thread does (counted in g_main_waiting, never stepping aside).
+// A worker whose reads the player waits on (the animation worker): other workers let it in before
+// their next file (g_urgent_waiting), but only the main thread makes them stop in the middle of one.
 inline thread_local bool t_urgent_reads = false;
+inline std::atomic<int> g_urgent_waiting{ 0 };
 // Set by Stack::try_read on a worker for the read under way: called between pieces of a file.
 inline thread_local const std::function<void()>* t_between_pieces = nullptr;
 
@@ -342,10 +343,15 @@ public:
                 std::this_thread::sleep_for(std::chrono::milliseconds(1));
         };
         const bool urgent = on_main || t_urgent_reads;
-        if (urgent) g_main_waiting.fetch_add(1, std::memory_order_acq_rel);
-        else let_main_in();
+        auto& waiting = on_main ? g_main_waiting : g_urgent_waiting;
+        if (urgent) waiting.fetch_add(1, std::memory_order_acq_rel);
+        else {
+            let_main_in();
+            for (int waited = 0; waited < 100 && g_urgent_waiting.load(std::memory_order_acquire) > 0; ++waited)
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
         std::unique_lock lock(shared_->mutex);
-        if (urgent) g_main_waiting.fetch_sub(1, std::memory_order_acq_rel);
+        if (urgent) waiting.fetch_sub(1, std::memory_order_acq_rel);
         const auto locked = Clock::now();
         struct Done {
             std::string_view name; bool on_main; Clock::time_point asked, locked;
@@ -362,7 +368,7 @@ public:
         };
         // Only the outermost read of this thread steps aside (the lock is recursive).
         static thread_local int depth = 0;
-        struct Depth { const std::function<void()>* before; Depth(bool aside, const std::function<void()>* step) : before(t_between_pieces) { ++depth; if (aside && depth == 1) t_between_pieces = step; else t_between_pieces = nullptr; } ~Depth() { --depth; t_between_pieces = before; } } piece_guard(!urgent, &step_aside);
+        struct Depth { const std::function<void()>* before; Depth(bool aside, const std::function<void()>* step) : before(t_between_pieces) { ++depth; if (aside && depth == 1) t_between_pieces = step; else t_between_pieces = nullptr; } ~Depth() { --depth; t_between_pieces = before; } } piece_guard(!on_main, &step_aside);
         if (shared_->failed.contains(Archive::key(name))) return std::nullopt;
         try {
             return find(name, strict_installer);
