@@ -89,5 +89,6 @@ target_link_options(d2d PRIVATE -Wl,--wrap=threadCreate -Wl,--wrap=__syscall_thr
     -Wl,--wrap=rename)   # src/files_3ds.cpp
 target_link_options(d2d PRIVATE -Wl,--gc-sections)
 
-ctr_generate_smdh(d2d.smdh NAME "D2Decomp" DESCRIPTION "Diablo II engine (bring your own game data)" AUTHOR "psi29a and contributors; 3DS port")
+ctr_generate_smdh(d2d.smdh NAME "Sanctuary Pocket" DESCRIPTION "An unofficial Diablo II engine port — bring your own game files" AUTHOR "d2decomped contributors"
+    ICON "${CMAKE_CURRENT_SOURCE_DIR}/cia/icon.png")
 ctr_create_3dsx(d2d SMDH d2d.smdh)
