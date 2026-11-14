@@ -2,7 +2,7 @@
 # svcControlProcessMemory (and svcBackdoor, which Luma3DS asks of a process before its own kernel
 # calls that flush the instruction cache); the rest is the usual homebrew set.
 BasicInfo:
-  Title                   : d2d
+  Title                   : SanctuaryPkt
   ProductCode             : CTR-H-D2DE
   Logo                    : Homebrew
 
