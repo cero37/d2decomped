@@ -5,7 +5,9 @@
 //   - the character sheet, in words, with a button beside each attribute while there are points to spend;
 //   - the inventory: every body slot and the grid, pixel for pixel, moved together;
 //   - the skill tree, drawn smaller beside its tabs, the points left and the skill the cursor is on;
-//   - the waypoints, a row each.
+//   - the waypoints, a row each;
+//   - a store's stock at four fifths beside its tabs and buttons, the stash's cells, the cube over the
+//     inventory's grid, the quest log's tabs, quests and words, the gold box with large buttons.
 // The frame still draws the PC's panel (off any screen) and takes the input: a touch on the page is the
 // mouse at the frame's point for it, and the pad's cursor, which hops between the frame's buttons, shows
 // where it is on the page (handheld_hud.hpp, BottomMap). Hover text is kept out of the frame and laid
@@ -20,6 +22,7 @@
 #include "scene.hpp"
 #include "skill_tree_close.hpp"
 #include "skilltree.hpp"
+#include "store.hpp"
 
 #include <d2s_items.hpp>
 #include <font.hpp>
@@ -149,13 +152,18 @@ void draw_handheld_hover(std::vector<std::uint8_t>& framebuffer, const Scene& sc
 
 // The open panel as a page of the second screen, laid in the frame's top-left 320x240, with g_bottom_map
 // for its touches and its cursor. False (and nothing drawn) when what is open has no page of its own:
-// a store, the stash, the cube, a trade, the quest log, the party, the hireling.
+// a trade with another player, the party, the hireling.
 auto Town::handheld_fit_panel(const Mouse& mouse) -> bool {
         g_bottom_map.clear();
-        if (!scene || stash_open || cube_open || store.npc >= 0 || gold_box || quest_log.open || party.open || hireling.open
-            || (net_game && net_game->trade.state != 0) || identify_with >= 0 || use_item.open()) return false;
-        enum Kind { kNoPage, kWaypoints, kTree, kInventory, kCharacter };
-        const Kind kind = waypoint.open ? kWaypoints
+        if (!scene || party.open || hireling.open || (net_game && net_game->trade.state != 0)) return false;
+        enum Kind { kNoPage, kWaypoints, kTree, kInventory, kCharacter, kGoldBox, kStore, kStash, kCube, kQuests };
+        const bool on_left = mouse.x < int(kScreenWidth) / 2;        // two panels up: the page of the side the cursor is on
+        const Kind kind = gold_box ? kGoldBox
+                        : store.npc >= 0 ? (on_left || !inv_open ? kStore : kInventory)
+                        : cube_open ? kCube
+                        : stash_open ? (on_left || !inv_open ? kStash : kInventory)
+                        : waypoint.open ? kWaypoints
+                        : quest_log.open ? (on_left || !(inv_open || tree_open) ? kQuests : tree_open ? kTree : kInventory)
                         : inv_open && char_open ? (mouse.x < int(kScreenWidth) / 2 ? kCharacter : kInventory)
                         : tree_open && char_open ? (mouse.x < int(kScreenWidth) / 2 ? kCharacter : kTree)
                         : tree_open ? kTree : inv_open ? kInventory : char_open ? kCharacter : kNoPage;
@@ -177,6 +185,14 @@ auto Town::handheld_fit_panel(const Mouse& mouse) -> bool {
             if (!dim) map.spots.push_back({ left, top, right, bottom, x, y });
         };
         const auto over = [&](int left, int top, int width, int height) { return mouse.x >= left && mouse.x < left + width && mouse.y >= top && mouse.y < top + height; };
+        // A button that brings the other side's page: the cursor goes to (x, y) of the frame, nothing is clicked.
+        const auto turn = [&](int left, int top, int right, int bottom, const std::string& words, int x, int y) {
+            page.box(left, top, right, bottom, false);
+            page.text(page.fit(words, right - left - 6), words, (left + right) / 2, (top + bottom) / 2, kGold, 0);
+            map.spots.push_back({ left, top, right, bottom, x, y, true });
+        };
+        const auto& inventory = scene->inv_layout[std::size_t(cls)];
+        const int to_inventory_x = inventory.grid_x + inventory.box_w / 2, to_inventory_y = inventory.grid_y + inventory.box_h / 2;
 
         if (kind == kCharacter) {
             namespace d2s = d2d::d2s;
@@ -290,8 +306,16 @@ auto Town::handheld_fit_panel(const Mouse& mouse) -> bool {
             for (const auto& piece : map.pieces) page.piece(ui_buffer, piece);
             // Between them: the gold carried, and how to leave.
             const int line_y = kH - grid_h - 1 - 6;
-            page.text(small, std::format("Gold {}", stats.get(d2d::d2s::kGold)), (kW - grid_w) / 2, line_y, kGold);
-            page.text(small, "B: close", (kW + grid_w) / 2, line_y, kDimInk, 1);
+            // Its words are the coin too: a touch there opens the box to drop gold (or to put it in the stash).
+            const std::string gold_words = std::format("Gold {}", stats.get(d2d::d2s::kGold));
+            page.text(small, gold_words, (kW - grid_w) / 2, line_y, kGold);
+            map.spots.push_back({ (kW - grid_w) / 2 - 2, line_y - 7, (kW - grid_w) / 2 + small.measure(gold_words) + 6, line_y + 7, 493, 462 });
+            if (store.npc >= 0 || stash_open) {
+                const auto& stash = scene->stash_layout[character.expansion ? 1 : 0];
+                const int right = (kW + grid_w) / 2;
+                turn(right - 96, line_y - 8, right, line_y + 8, store.npc >= 0 ? "To the store" : "To the stash",
+                     store.npc >= 0 ? 96 + 14 : stash.grid_x + stash.box_w / 2, store.npc >= 0 ? 123 + 14 : stash.grid_y + stash.box_h / 2);
+            } else page.text(small, "B: close", (kW + grid_w) / 2, line_y, kDimInk, 1);
         } else if (kind == kTree) {
             // The tree's own art (icons, the lines between them) at a size that shows all six rows; its tabs in words beside it.
             constexpr int kSrcX = kTreeR - 0x131 - 8, kSrcY = kTreeB - 0x1a2 - 0x30 - 6, kSrcW = 0x131 - 0xa7 + 0x30 + 22, kSrcH = 0x1a2 - 0x4d + 0x30 + 18;
@@ -354,6 +378,84 @@ auto Town::handheld_fit_panel(const Mouse& mouse) -> bool {
             }
             const auto close = skill_tree_close(character.character_class, tree_tab);
             button(kW - 84, 212, kW - 4, 237, "Close", close.left + 17, close.bottom - 17, close.contains(mouse.x, mouse.y));
+        } else if (kind == kGoldBox) {
+            // The gold box as it is, and its four buttons large beside the finger: less, more (held, they run), OK, Cancel.
+            map.pieces.push_back(part(215, 140, 210, 158, (kW - 210) / 2, 2));
+            page.piece(ui_buffer, map.pieces.back());
+            const auto on = [&](GoldBoxPart which) { return gold_box_at(mouse.x, mouse.y) == which; };
+            button(4, 170, 80, 236, "Less", 231, 226, on(GoldBoxPart::kDown));
+            button(84, 170, 160, 236, "More", 231, 213, on(GoldBoxPart::kUp));
+            button(164, 170, 238, 236, "OK", 266, 271, on(GoldBoxPart::kOk));
+            button(242, 170, 316, 236, "Cancel", 371, 271, on(GoldBoxPart::kCancel));
+        } else if (kind == kStore) {
+            // The stock's grid (10x10 cells, 290 rows) at four fifths, which shows all of it; its tabs and buttons beside it.
+            constexpr float kScale = .8f;
+            map.pieces.push_back(part(96, 123, 290, 290, 2, 4, kScale, true));
+            page.piece(ui_buffer, map.pieces.back());
+            const int side = 2 + 232 + 4;
+            for (int tab = 0; tab < 4; ++tab) {
+                const bool empty = store.tabs[std::size_t(tab)].empty();
+                button(side, 4 + tab * 25, kW - 2, 4 + tab * 25 + 23, string_id(*scene, kTabString[std::size_t(tab)]), kCharPanelX + 80 * tab + 40, 75, tab == store.tab, empty);
+            }
+            // Its own buttons (buy, sell, repair...), as drawn: two to a row.
+            static constexpr int kButtonX[4] = { 116, 169, 221, 273 };
+            for (int index = 0; index < 4; ++index) {
+                map.pieces.push_back(part(kCharPanelX - 1 + kButtonX[index] - 2, 432, 38, 46, side + index % 2 * 40, 106 + index / 2 * 48));
+                page.piece(ui_buffer, map.pieces.back());
+            }
+            page.text(small, std::format("Gold {}", stats.get(d2d::d2s::kGold)), side + 2, 208, kGold);
+            if (inv_open) turn(side, 216, kW - 2, 237, "To my items", to_inventory_x, to_inventory_y);
+        } else if (kind == kStash) {
+            const auto& stash = scene->stash_layout[character.expansion ? 1 : 0];
+            const int grid_w = stash.cols * stash.box_w, grid_h = stash.rows * stash.box_h;
+            const float scale = std::min(1.f, float(kH - 4) / float(grid_h));
+            map.pieces.push_back(part(stash.grid_x, stash.grid_y, grid_w, grid_h, 2, 2, scale, true));
+            page.piece(ui_buffer, map.pieces.back());
+            const int side = 2 + int(float(grid_w) * scale) + 6, middle = (side + kW - 2) / 2;
+            page.text(font, "Stash", middle, 14, kGold, 0);
+            page.text(small, std::format("Gold in the stash: {}", stats.get(d2d::d2s::kGoldBank)), middle, 40, kInk, 0);
+            page.text(small, std::format("Gold carried: {}", stats.get(d2d::d2s::kGold)), middle, 56, kInk, 0);
+            button(side, 70, kW - 2, 100, "Take gold out", 163, 93, stash_coin_at(mouse.x, mouse.y));
+            if (inv_open) button(side, 104, kW - 2, 134, "Put gold in", 493, 462, inventory_coin_at(mouse.x, mouse.y));
+            if (inv_open) turn(side, 150, kW - 2, 186, "To my items", to_inventory_x, to_inventory_y);
+            page.text(small, "Touch: read it", middle, 204, kDimInk, 0);
+            page.text(small, "Again: pick it up", middle, 218, kDimInk, 0);
+        } else if (kind == kCube) {
+            // The cube's cells and its button, over the inventory's grid: both on the one page.
+            const auto& cube = scene->cube_layout;
+            const int cube_w = cube.cols * cube.box_w, cube_h = cube.rows * cube.box_h;
+            const int grid_w = inventory.cols * inventory.box_w, grid_h = inventory.rows * inventory.box_h;
+            const int left = (kW - grid_w) / 2;
+            map.pieces.push_back(part(cube.grid_x, cube.grid_y, cube_w, cube_h, left, 2, 1.f, true));
+            page.piece(ui_buffer, map.pieces.back());
+            if (inv_open) {
+                map.pieces.push_back(part(inventory.grid_x, inventory.grid_y, grid_w, grid_h, left, kH - grid_h - 1, 1.f, true));
+                page.piece(ui_buffer, map.pieces.back());
+            }
+            const int side = left + cube_w + 10;
+            page.text(font, "Horadric Cube", (side + kW - 4) / 2, 14, kGold, 0);
+            int press_x = kCharPanelX + 0x90 + 20, press_y = 0;
+            for (int y = kCharPanelY; y < int(kScreenHeight); ++y) if (transmute_at(*scene, press_x, y)) { press_y = y + 19; break; }   // the frame's button, by its own test
+            button(side, 30, kW - 4, 70, "Transmute", press_x, press_y, transmute_at(*scene, mouse.x, mouse.y));
+            page.text(small, "Touch a thing to read it,", (side + kW - 4) / 2, 88, kDimInk, 0);
+            page.text(small, "again to pick it up", (side + kW - 4) / 2, 102, kDimInk, 0);
+        } else if (kind == kQuests) {
+            // The acts' tabs; the six quests in one row; what the picked one says; its two buttons in words.
+            map.pieces.push_back(part(kCharPanelX, kCharPanelY, 320, 29, 0, 0));
+            constexpr float kIcon = .85f;
+            for (int index = 0; index < 6; ++index) {
+                const auto& box = kQuestSlot[std::size_t(index)];
+                map.pieces.push_back(part(kCharPanelX + box.hit_x - 2, kCharPanelY + box.hit_y - 2, 60, 56, 2 + index * 53, 30, kIcon));
+            }
+            map.pieces.push_back(part(kCharPanelX, kCharPanelY + 226, 320, 138, 0, 79));
+            for (const auto& piece : map.pieces) page.piece(ui_buffer, piece);
+            if (quest_log.slot >= 0 && quest_log.slot < 6) {              // the picked quest: a rim round it
+                const int left = 2 + quest_log.slot * 53, top = 30, right = left + 51, bottom = top + 47;
+                page.rect(left, top, right, top + 1, kLit); page.rect(left, bottom - 1, right, bottom, kLit);
+                page.rect(left, top, left + 1, bottom, kLit); page.rect(right - 1, top, right, bottom, kLit);
+            }
+            button(152, 218, 232, 238, "Speech", kCharPanelX + 0xe6 + 15, kCharPanelY + 0x187 + 16, quest_button_at(mouse.x, mouse.y) == 2);
+            button(236, 218, 316, 238, "Close", kCharPanelX + 0x116 + 18, kCharPanelY + 0x188 + 17, quest_button_at(mouse.x, mouse.y) == 1);
         } else {                                               // the waypoints: a row each, the acts along the foot
             MenuPage list;
             list.active = true;
@@ -375,6 +477,22 @@ auto Town::handheld_fit_panel(const Mouse& mouse) -> bool {
             pixels = list.pixels;
             for (const auto& row : list.rows)
                 if (!row.dim) map.spots.push_back({ row.left, row.top, row.right, row.bottom, row.x, row.y });
+        }
+        // The pad's cursor starts where the frame left it, which may be on nothing the page shows: then it goes to the
+        // page's main piece (the grid's first cell; the tree has its own start, Town::pad_focus) or its first button.
+        if (int at_x = 0, at_y = 0; pad_playing && kind != kTree && !map.to_page(mouse.x, mouse.y, at_x, at_y)) {
+            const BottomMap::Piece* start = nullptr;
+            for (const auto& piece : map.pieces) if (piece.look_first) start = &piece;
+            if (start) cursor_move = std::pair{ start->src_x + std::min(14, start->src_w / 2), start->src_y + std::min(14, start->src_h / 2) };
+            else if (!map.spots.empty()) cursor_move = std::pair{ map.spots.front().x, map.spots.front().y };
+        }
+        // The pad's cursor on the page: a small ring where its point lands (the hand itself is drawn over it).
+        if (int at_x = 0, at_y = 0; pad_playing && !held && map.to_page(mouse.x, mouse.y, at_x, at_y)) {
+            Page ring{ pixels, *scene };
+            for (const auto& [grow, c] : { std::pair{ 7, Rgb{ 20, 16, 10 } }, std::pair{ 6, kLit }, std::pair{ 5, kLit } }) {
+                ring.rect(at_x - grow, at_y - grow, at_x + grow + 1, at_y - grow + 1, c); ring.rect(at_x - grow, at_y + grow, at_x + grow + 1, at_y + grow + 1, c);
+                ring.rect(at_x - grow, at_y - grow, at_x - grow + 1, at_y + grow + 1, c); ring.rect(at_x + grow, at_y - grow, at_x + grow + 1, at_y + grow + 1, c);
+            }
         }
         for (int y = 0; y < kH; ++y)
             std::copy_n(pixels.begin() + std::ptrdiff_t(std::size_t(y) * kW * 4), kW * 4, ui_buffer.begin() + std::ptrdiff_t(std::size_t(y) * kScreenWidth * 4));

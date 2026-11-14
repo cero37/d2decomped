@@ -899,11 +899,15 @@ int run_windowed(std::vector<std::uint8_t>& framebuffer,
                 } else {
                     if (g_world_only && g_bottom_map.on) {             // a panel fitted to the screen: the frame's point for the touch
                         int frame_x = 0, frame_y = 0;
-                        bool look_first = false;
-                        if (g_bottom_map.to_frame(touch_x, touch_y, frame_x, frame_y, &look_first)) {
+                        BottomMap::Touch how = BottomMap::kClick;
+                        if (g_bottom_map.to_frame(touch_x, touch_y, frame_x, frame_y, &how)) {
                             // Something not under the cursor yet, with an empty hand: the cursor goes there, and its hover text shows.
                             const bool elsewhere = std::abs(frame_x - mouse.x) > 14 || std::abs(frame_y - mouse.y) > 14;
-                            if (down && look_first && elsewhere && !town.held) { mouse.x = frame_x; mouse.y = frame_y; pad_in_use = false; mouse_took_over = true; continue; }
+                            if (down && (how == BottomMap::kMove || (how == BottomMap::kLookFirst && elsewhere && !town.held))) {
+                                mouse.x = frame_x; mouse.y = frame_y; pad_in_use = false; mouse_took_over = true;
+                                continue;
+                            }
+                            if (how == BottomMap::kMove) continue;
                             if (mouse.down || down) { mouse.x = frame_x; mouse.y = frame_y; }
                         } else if (!up) continue;                      // beside every piece: nothing (a finger lifted there still lets go)
                         if (!down && !mouse.down) continue;            // no press went before it

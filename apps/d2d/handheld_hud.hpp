@@ -91,21 +91,27 @@ struct BottomMap {
     // look_first: a touch on something the cursor is not on yet only puts the cursor there (its hover text
     // shows); a touch on it again is the click. A finger has no other way to read before it acts.
     struct Piece { int src_x = 0, src_y = 0, src_w = 0, src_h = 0, dst_x = 0, dst_y = 0; float scale = 1.f; bool look_first = false; };
-    struct Spot { int left = 0, top = 0, right = 0, bottom = 0, x = 0, y = 0; };
+    // move: the touch only puts the cursor at the point (to bring the other side's page), no click.
+    struct Spot { int left = 0, top = 0, right = 0, bottom = 0, x = 0, y = 0; bool move = false; };
+    enum Touch { kClick, kLookFirst, kMove };
     bool on = false;
     std::vector<Piece> pieces;
     std::vector<Spot> spots;
     void clear() { on = false; pieces.clear(); spots.clear(); }
-    [[nodiscard]] bool to_frame(int page_x, int page_y, int& frame_x, int& frame_y, bool* look_first = nullptr) const {
-        if (look_first) *look_first = false;
+    [[nodiscard]] bool to_frame(int page_x, int page_y, int& frame_x, int& frame_y, Touch* how = nullptr) const {
+        if (how) *how = kClick;
         for (const auto& spot : spots)
-            if (page_x >= spot.left && page_x < spot.right && page_y >= spot.top && page_y < spot.bottom) { frame_x = spot.x; frame_y = spot.y; return true; }
+            if (page_x >= spot.left && page_x < spot.right && page_y >= spot.top && page_y < spot.bottom) {
+                frame_x = spot.x; frame_y = spot.y;
+                if (how && spot.move) *how = kMove;
+                return true;
+            }
         for (const auto& piece : pieces) {
             const int width = int(float(piece.src_w) * piece.scale), height = int(float(piece.src_h) * piece.scale);
             if (page_x < piece.dst_x || page_y < piece.dst_y || page_x >= piece.dst_x + width || page_y >= piece.dst_y + height) continue;
             frame_x = piece.src_x + std::min(piece.src_w - 1, int((float(page_x - piece.dst_x) + .5f) / piece.scale));
             frame_y = piece.src_y + std::min(piece.src_h - 1, int((float(page_y - piece.dst_y) + .5f) / piece.scale));
-            if (look_first) *look_first = piece.look_first;
+            if (how && piece.look_first) *how = kLookFirst;
             return true;
         }
         return false;
