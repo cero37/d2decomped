@@ -451,6 +451,16 @@ struct Town {
     [[nodiscard]] std::vector<PartyPanel::Row> party_rows() const;
     [[nodiscard]] PartyPanel::Own party_own() const;
     bool help_opened_mini = false;
+    // A handheld (town/handheld_page.cpp): the game menu and the death message as a page of its second
+    // screen. Its Options -> Controls is the Help page (the buttons, by name), back to Options when shut.
+    MenuPage handheld_page;
+    bool help_from_menu = false;
+    std::uint32_t death_page_ms = 0;              // when the death message came up (0: not up)
+    [[nodiscard]] bool death_page() const;
+    void fill_handheld_page(MenuPage& page) const;
+    // The open panel as a page that fits the second screen (town/handheld_panels.cpp); false when it has none.
+    bool handheld_fit_panel(const Mouse& mouse);
+    std::vector<std::vector<TextLine>> handheld_hovers;   // this frame's hover text, kept off the frame for the page to show
     void toggle_help();                     // UI 0x18: only a flag in 1.14d (FUN_00456ee0 draws nothing for it)                // Show Portraits toggled them off
     std::filesystem::path shot_dir;               // Screen Shot's folder (main sets it)
     std::uint32_t last_shot_ms = 0;

@@ -4,6 +4,7 @@
 // 800x600 frame, so every blitter and font works on it as on the PC's.
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <string>
@@ -80,6 +81,48 @@ inline int g_bottom_origin_x = 0, g_bottom_origin_y = 0;
 // (source_x + (x - left) / scale, source_y + (y - top) / scale).
 struct BottomZoom { bool on = false; int source_x = 0, source_y = 0, left = 0, top = 0; float scale = 1.f; };
 inline BottomZoom g_bottom_zoom;
+
+// A panel made to fit the second screen (town/handheld_panels.cpp): the page in the UI frame's top-left
+// 320x240 is put together from pieces of the PC's panel (a rect of the frame, drawn at `scale` at a place
+// on the page) and from the page's own buttons (a `Spot`: a rect of the page that stands for a click at
+// a point of the frame). A touch on the page is the mouse at the frame's point for it; the cursor, which
+// lives in the frame, shows where its point lands on the page.
+struct BottomMap {
+    // look_first: a touch on something the cursor is not on yet only puts the cursor there (its hover text
+    // shows); a touch on it again is the click. A finger has no other way to read before it acts.
+    struct Piece { int src_x = 0, src_y = 0, src_w = 0, src_h = 0, dst_x = 0, dst_y = 0; float scale = 1.f; bool look_first = false; };
+    struct Spot { int left = 0, top = 0, right = 0, bottom = 0, x = 0, y = 0; };
+    bool on = false;
+    std::vector<Piece> pieces;
+    std::vector<Spot> spots;
+    void clear() { on = false; pieces.clear(); spots.clear(); }
+    [[nodiscard]] bool to_frame(int page_x, int page_y, int& frame_x, int& frame_y, bool* look_first = nullptr) const {
+        if (look_first) *look_first = false;
+        for (const auto& spot : spots)
+            if (page_x >= spot.left && page_x < spot.right && page_y >= spot.top && page_y < spot.bottom) { frame_x = spot.x; frame_y = spot.y; return true; }
+        for (const auto& piece : pieces) {
+            const int width = int(float(piece.src_w) * piece.scale), height = int(float(piece.src_h) * piece.scale);
+            if (page_x < piece.dst_x || page_y < piece.dst_y || page_x >= piece.dst_x + width || page_y >= piece.dst_y + height) continue;
+            frame_x = piece.src_x + std::min(piece.src_w - 1, int((float(page_x - piece.dst_x) + .5f) / piece.scale));
+            frame_y = piece.src_y + std::min(piece.src_h - 1, int((float(page_y - piece.dst_y) + .5f) / piece.scale));
+            if (look_first) *look_first = piece.look_first;
+            return true;
+        }
+        return false;
+    }
+    [[nodiscard]] bool to_page(int frame_x, int frame_y, int& page_x, int& page_y) const {
+        for (const auto& piece : pieces) {
+            if (frame_x < piece.src_x || frame_y < piece.src_y || frame_x >= piece.src_x + piece.src_w || frame_y >= piece.src_y + piece.src_h) continue;
+            page_x = piece.dst_x + int(float(frame_x - piece.src_x) * piece.scale);
+            page_y = piece.dst_y + int(float(frame_y - piece.src_y) * piece.scale);
+            return true;
+        }
+        for (const auto& spot : spots)
+            if (spot.x == frame_x && spot.y == frame_y) { page_x = (spot.left + spot.right) / 2; page_y = (spot.top + spot.bottom) / 2; return true; }
+        return false;
+    }
+};
+inline BottomMap g_bottom_map;
 
 // A touch on the second screen with no panel open (the HUD's own buttons): the last one, for the HUD to take.
 // How much of the world the top screen shows: 0 = 400x240 pixel for pixel, 1 = 600x360, 2 = 800x480

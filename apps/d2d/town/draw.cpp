@@ -145,7 +145,11 @@ auto Town::draw(std::vector<std::uint8_t>& framebuffer, const Mouse& mouse, std:
     }
     const int off = (screen_w - int(kScreenWidth)) / 2;
     ui_buffer.resize(std::size_t(kScreenWidth) * kScreenHeight * 4);
+    // A handheld with a panel up: hover text is kept for the panel's page, not drawn where the frame has it.
+    handheld_hovers.clear();
+    g_hover_capture = g_world_only && g_bottom_panels ? &handheld_hovers : nullptr;
     draw_view(ui_buffer, &framebuffer, mouse, frame_ms);
+    g_hover_capture = nullptr;
     if (g_world_only) {
         g_bottom_frame = &ui_buffer;
         static bool panel_was_open = false;
@@ -200,8 +204,22 @@ auto Town::draw(std::vector<std::uint8_t>& framebuffer, const Mouse& mouse, std:
             g_bottom_whole = false;
             help.draw_handheld(ui_buffer, *scene);
         }
-        if (!g_bottom_panels || g_bottom_whole || g_bottom_zoom.on || help_page) g_top_panel.clear();
-        if (g_bottom_zoom.on || help_page) {
+        // The game menu, or the death message: a page of large rows in words (handheld_menu.hpp), the frame's own left out.
+        if (!help_page && !controls.open && (game_menu.open || death_page())) {
+            fill_handheld_page(handheld_page);
+            if (handheld_page.active) {
+                draw_menu_page(handheld_page, *scene);
+                for (int y = 0; y < 240; ++y)
+                    std::copy_n(handheld_page.pixels.begin() + std::ptrdiff_t(std::size_t(y) * 320 * 4), 320 * 4, ui_buffer.begin() + std::ptrdiff_t(std::size_t(y) * kScreenWidth * 4));
+                g_bottom_zoom = { true, 0, 0, 0, 0, 1.f };     // the page as it is: a touch is the mouse there
+                g_bottom_whole = false;
+            }
+        }
+        g_top_panel.clear();                               // the top screen is the world's: no half of a panel on it
+        // A panel with a page of its own (the character sheet, the inventory, the skill tree, the waypoints).
+        const bool fitted = g_bottom_panels && !g_bottom_whole && !g_bottom_zoom.on && !help_page && handheld_fit_panel(mouse);
+        if (!fitted) g_bottom_map.clear();
+        if (g_bottom_zoom.on || help_page || fitted) {
             g_bottom_origin_x = g_bottom_origin_y = 0;
             panel_was_open = false;
         } else if (g_bottom_whole) {
@@ -211,13 +229,11 @@ auto Town::draw(std::vector<std::uint8_t>& framebuffer, const Mouse& mouse, std:
             // The side the cursor is on when both are open, else the open one; the window follows the cursor down the panel.
             const bool left_side = left_panel_open(), right_side = inv_open || tree_open;
             g_bottom_origin_x = left_side && right_side ? (mouse.x < int(kScreenWidth) / 2 ? kCharPanelX : int(kScreenWidth) / 2) : left_side ? kCharPanelX : int(kScreenWidth) / 2;
-            if (!std::exchange(panel_was_open, true)) g_panel_flip = false;                            // a panel opens with its upper half on the top screen
-            // Its two halves: one to the top screen (kept in g_top_panel), the other in the window, over the bar.
+            if (!std::exchange(panel_was_open, true)) g_panel_flip = true;                             // a panel opens on its upper half
+            // A panel with no page of its own (a store, the stash, the quest log...): one half of it in the window,
+            // over the bar; the bar's button, or the pad's cursor crossing over, brings the other half.
+            if (pad_playing) g_panel_flip = mouse.y < kCharPanelY + kPanelHalf;
             g_bottom_origin_y = kCharPanelY + (g_panel_flip ? 0 : kPanelHalf);
-            const int other_y = kCharPanelY + (g_panel_flip ? kPanelHalf : 0);
-            g_top_panel.resize(std::size_t(320) * kPanelHalf * 4);
-            for (int y = 0; y < kPanelHalf; ++y)
-                std::copy_n(ui_buffer.begin() + std::ptrdiff_t((std::size_t(other_y + y) * kScreenWidth + std::size_t(g_bottom_origin_x)) * 4), 320 * 4, g_top_panel.begin() + std::ptrdiff_t(std::size_t(y) * 320 * 4));
             for (int y = kPanelHalf; y < 240; ++y)
                 for (int x = 0; x < 320; ++x) {
                     const bool edge = y == kPanelHalf || x == 0 || x == 159 || x == 160 || x == 319 || y == 239;
@@ -227,13 +243,22 @@ auto Town::draw(std::vector<std::uint8_t>& framebuffer, const Mouse& mouse, std:
             if (scene) {
                 const auto& font = scene->font;
                 const int text_y = g_bottom_origin_y + kPanelHalf + 12 - font.line_height() / 2;
-                const std::string_view flip = g_panel_flip ? "Lower half" : "Upper half", close = "Close";
+                const std::string_view flip = g_panel_flip ? "Lower half" : "Upper half", close = "Close";   // the half the button brings
                 font.draw_tinted(ui_buffer, kScreenWidth, kScreenHeight, scene->pal, g_bottom_origin_x + 80 - font.measure(flip) / 2, text_y, flip, 199, 179, 119);
                 font.draw_tinted(ui_buffer, kScreenWidth, kScreenHeight, scene->pal, g_bottom_origin_x + 240 - font.measure(close) / 2, text_y, close, 199, 179, 119);
             }
         } else {
             g_bottom_origin_x = g_bottom_origin_y = 0;
             panel_was_open = false;
+        }
+        // The hover text the frame would have drawn: on the page, inside the screen.
+        if (!handheld_hovers.empty() && scene && g_bottom_panels && !g_bottom_whole) {
+            if (fitted) {
+                int at_x = -100, at_y = -100;
+                if (!g_bottom_map.to_page(mouse.x, mouse.y, at_x, at_y)) at_x = at_y = -100;
+                draw_handheld_hover(ui_buffer, *scene, handheld_hovers.back(), 0, 0, 320, 240, at_x, at_y);
+            } else if (!g_bottom_zoom.on)
+                draw_handheld_hover(ui_buffer, *scene, handheld_hovers.back(), g_bottom_origin_x, g_bottom_origin_y, 320, kPanelHalf, mouse.x, mouse.y);
         }
         // Off the 3DS (a preview): the second screen goes in the frame's spare rows,
         // its first rows above the world's and the rest below (the frame is 600 rows:
@@ -467,7 +492,23 @@ auto Town::draw_view(std::vector<std::uint8_t>& framebuffer, std::vector<std::ui
         // bottom at H/2 - 140, in text colour 1, red (FUN_00502680's shift); the Den's / the Tower's quest art while that
         // quest's open in this game (FUN_004b92e0: neither done nor closed).
         if (level->id != entry_level) { entry_until = entry_level != 0 ? frame_ms + 2000 : 0; entry_level = level->id; }
-        if (frame_ms < entry_until) {
+        if (frame_ms < entry_until && g_world_only) {
+            // A handheld: the art is 800 wide and the second screen 320, which showed its first word alone. In
+            // words, over the map: "Entering" and the place's name, each on a line of its own.
+            if (!g_bottom_panels) {
+                const std::string name = level->name;
+                const auto& title = scene->font24.line_height() > 0 && scene->font24.measure(name) <= 300 ? scene->font24 : scene->font;
+                const int top = 52, bottom = 52 + 22 + title.line_height() + 10;
+                for (int y = top; y < bottom; ++y)
+                    for (int x = 6; x < 314; ++x) {
+                        auto* pixel = &framebuffer[(std::size_t(y) * kScreenWidth + std::size_t(x)) * 4];
+                        pixel[0] /= 5; pixel[1] /= 5; pixel[2] /= 5;
+                    }
+                const std::string_view entering = "Entering";
+                scene->font.draw_tinted(framebuffer, kScreenWidth, kScreenHeight, scene->pal, 160 - scene->font.measure(entering) / 2, top + 4, entering, 255, 110, 110);
+                title.draw_tinted(framebuffer, kScreenWidth, kScreenHeight, scene->pal, 160 - title.measure(name) / 2, top + 24, name, 255, 120, 110);
+            }
+        } else if (frame_ms < entry_until) {
             static constexpr std::array<std::pair<int, int>, 2> kQuestArt{ { { 8, 1 }, { 20, 5 } } };   // level, quest
             std::string path = scene->level_entry.contains(level->id) ? scene->level_entry.at(level->id) : std::string();
             for (const auto& [quest_level, quest] : kQuestArt)
@@ -490,7 +531,7 @@ auto Town::draw_view(std::vector<std::uint8_t>& framebuffer, std::vector<std::ui
         if (pad_cue && focus_id() == hero.id) draw_pad_hint(framebuffer);
         // A handheld's view has no cursor and no bottom bar: what the Attack / Use button would open, pick
         // up, talk to or enter now is named at the foot of the view (monsters aren't: the swing says it).
-        if (g_world_only && wide && pad_field() && focus_id() == hero.id && !skillbar.mode_hint.empty()
+        if (g_world_only && wide && pad_field() && !death_page() && focus_id() == hero.id && !skillbar.mode_hint.empty()
             && contextual_pick.kind != PadPick::kNone && contextual_pick.kind != PadPick::kMonster) {
             // "A . Use Chest": the button's name on a small plate, then what it does.
             std::string button, hint = skillbar.mode_hint;

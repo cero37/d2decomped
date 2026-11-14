@@ -18,6 +18,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace d2d::client {
@@ -140,6 +141,33 @@ void darken(std::vector<std::uint8_t>& framebuffer, int x, int y, int width, int
 // The knob's x past the bar's left end (FUN_0047e260: double -265 / (count-1) * value, truncated).
 int knob(int count, int val) { return int(265.0 / double(count - 1) * double(val)); }
 
+// A handheld leaves these rows out: the ones game.exe greys without a 3D sound provider or Glide, the
+// ones d2d keeps but doesn't apply, and the automap's (its map is the second screen's own).
+bool handheld_hides(std::string_view name) {
+    for (const std::string_view hidden : { "3DSound", "EAX", "3DBias", "Perspective", "Resolution", "LightQuality", "BlendShadow", "AutoMapOptions" })
+        if (name == hidden) return true;
+    return false;
+}
+
+// A row's or a choice's words for a handheld's page (the frame draws them as images).
+std::string_view page_words(std::string_view name) {
+    static constexpr std::pair<std::string_view, std::string_view> kWords[] = {
+        { "Options", "Options" }, { "Exit", "Save and Exit Game" }, { "ReturnToGame", "Return to Game" },
+        { "SoundOptions", "Sound Options" }, { "VideoOptions", "Video Options" }, { "AutoMapOptions", "Automap Options" },
+        { "CfgOptions", "Controls" }, { "Previous", "Back" }, { "SPrevious", "Back" },
+        { "Sound", "Sound" }, { "Music", "Music" }, { "3DSound", "3D Sound" }, { "EAX", "Environmental Effects" }, { "3DBias", "3D Bias" },
+        { "NPCSpeech", "NPC Speech" }, { "AudioOnly", "Audio Only" }, { "TextOnly", "Text Only" }, { "AudioText", "Audio and Text" },
+        { "Resolution", "Resolution" }, { "LightQuality", "Lighting Quality" }, { "BlendShadow", "Blended Shadows" }, { "Perspective", "Perspective" },
+        { "Gamma", "Gamma" }, { "Contrast", "Contrast" },
+        { "AutoMapMode", "Automap Size" }, { "Full", "Full Screen" }, { "Mini", "Mini Map" }, { "AutoMapFade", "Fade" },
+        { "Center", "Center" }, { "Everything", "Everything" }, { "Auto", "Auto" }, { "AutoMapCenter", "Center When Cleared" },
+        { "AutoMapParty", "Show Party" }, { "AutoMapPartyNames", "Show Names" },
+        { "SmallOff", "Off" }, { "SmallOn", "On" }, { "SmallNo", "No" }, { "SmallYes", "Yes" }, { "Low", "Low" }, { "Medium", "Medium" }, { "High", "High" },
+    };
+    for (const auto& [image, words] : kWords) if (image == name) return words;
+    return name;
+}
+
 }  // namespace
 
 std::vector<std::string_view> game_menu_images() {
@@ -166,7 +194,7 @@ void GameMenu::show(int which) {
 std::vector<int> GameMenu::rows() const {
     std::vector<int> out;
     for (std::size_t row_index = 0; row_index < kMenus[menu].rows.size(); ++row_index)
-        if (expansion || !kMenus[menu].rows[row_index].xp) out.push_back(int(row_index));
+        if ((expansion || !kMenus[menu].rows[row_index].xp) && !(g_world_only && handheld_hides(kMenus[menu].rows[row_index].name))) out.push_back(int(row_index));
     return out;
 }
 
@@ -318,6 +346,61 @@ GameMenu::Action GameMenu::input(const Scene& scene, Audio& audio, const Mouse& 
     }
     // FUN_00454850: one step a frame once more than 50 ms have passed, the clock restarting then (no catch-up).
     if (now_ms - pent_ms > 50) { pent_ms = now_ms; pent = (pent + 1) & 7; }
+    return action;
+}
+
+void GameMenu::fill_page(MenuPage& page) const {
+    const auto shown = rows();
+    page.heading = menu == 0 ? "Game Menu" : menu == 1 ? "Options" : "";
+    for (std::size_t k = 0; k < shown.size(); ++k) {
+        const int row_index = shown[k];
+        const auto& row = kMenus[menu].rows[std::size_t(row_index)];
+        if (row.type == -1) { page.heading = std::string(page_words(row.name)); continue; }
+        MenuPage::Row out;
+        out.text = std::string(page_words(row.name));
+        out.id = int(k);
+        out.on = int(k) == sel;
+        out.dim = !enabled(row_index);
+        out.small = row.name == "Previous" || row.name == "SPrevious";          // the way back: the foot's button
+        const int val = value[std::size_t(menu)][std::size_t(row_index)];
+        if (row.type == 1) out.value = std::string(page_words(row.choices[std::size_t(std::clamp(val, 0, row.count - 1))]));
+        else if (row.type == 2) { out.steps = row.count; out.at = val; }
+        page.rows.push_back(std::move(out));
+    }
+    page.active = !page.rows.empty();
+}
+
+GameMenu::Action GameMenu::input_page(const Scene& scene, Audio& audio, const Mouse& mouse, const std::vector<SDL_Keycode>& keys, const MenuPage& page, bool confirm, std::uint32_t now_ms) {
+    // The keys (a pad's d-pad comes as them) as the frame's menu takes them; no mouse there: the page has the touch.
+    Mouse none;
+    none.x = last_x; none.y = last_y;
+    if (const Action done = input(scene, audio, none, keys, now_ms); done != kNone) return done;
+    const auto slider = [&](const MenuPage::Row& row) {                  // a touch on a slider's row: the knob goes there
+        const int row_index = rows()[std::size_t(sel)];
+        auto& val = value[std::size_t(menu)][std::size_t(row_index)];
+        if (const int place = row.place(mouse.x); place != val) { val = place; changed(audio, row_index); audio.play_sfx(scene, d2d::rules::sound_ids::kCursorPass, 1.f, 0); }
+    };
+    if (confirm) {                                           // the pad's button: the lit row, wherever the cursor is
+        held = drag = false;
+        return sel >= 0 && sel < int(rows().size()) ? activate(scene, audio) : kNone;
+    }
+    Action action = kNone;
+    const auto* over = page.hit(mouse.x, mouse.y);
+    if (over && (over->id < 0 || over->id >= int(rows().size()))) over = nullptr;      // a page laid out for another menu
+    if (mouse.press_this_frame) {
+        held = over != nullptr;
+        drag = false;
+        if (over) {
+            sel = over->id;
+            if (over->steps > 1) { drag = true; slider(*over); }
+        }
+    } else if (held && drag && mouse.down) {
+        if (const auto* row = page.by_id(sel); row && row->steps > 1) slider(*row);
+    }
+    if (mouse.release_this_frame) {
+        if (held && !drag && over && over->id == sel) action = activate(scene, audio);
+        held = drag = false;
+    }
     return action;
 }
 

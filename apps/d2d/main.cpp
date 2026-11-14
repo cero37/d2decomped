@@ -894,10 +894,20 @@ int run_windowed(std::vector<std::uint8_t>& framebuffer,
                     g_bottom_touch.x = touch_x; g_bottom_touch.y = touch_y;
                     if (down) { g_bottom_touch.down = true; g_bottom_touch.pressed = true; }
                     if (up) { g_bottom_touch.down = false; g_bottom_touch.released = true; }
-                } else if (g_world_only && !g_bottom_whole && !g_bottom_zoom.on && touch_y >= kPanelHalf) {   // the bar under a panel's half
+                } else if (g_world_only && !g_bottom_whole && !g_bottom_zoom.on && !g_bottom_map.on && touch_y >= kPanelHalf) {   // the bar under a panel's half
                     if (down) g_bottom_bar_tap = touch_x;
                 } else {
-                    if (g_world_only && g_bottom_zoom.on) {            // an NPC's box, scaled: back to where it is in the frame
+                    if (g_world_only && g_bottom_map.on) {             // a panel fitted to the screen: the frame's point for the touch
+                        int frame_x = 0, frame_y = 0;
+                        bool look_first = false;
+                        if (g_bottom_map.to_frame(touch_x, touch_y, frame_x, frame_y, &look_first)) {
+                            // Something not under the cursor yet, with an empty hand: the cursor goes there, and its hover text shows.
+                            const bool elsewhere = std::abs(frame_x - mouse.x) > 14 || std::abs(frame_y - mouse.y) > 14;
+                            if (down && look_first && elsewhere && !town.held) { mouse.x = frame_x; mouse.y = frame_y; pad_in_use = false; mouse_took_over = true; continue; }
+                            if (mouse.down || down) { mouse.x = frame_x; mouse.y = frame_y; }
+                        } else if (!up) continue;                      // beside every piece: nothing (a finger lifted there still lets go)
+                        if (!down && !mouse.down) continue;            // no press went before it
+                    } else if (g_world_only && g_bottom_zoom.on) {     // an NPC's box, scaled: back to where it is in the frame
                         mouse.x = g_bottom_zoom.source_x + int(float(touch_x - g_bottom_zoom.left) / g_bottom_zoom.scale);
                         mouse.y = g_bottom_zoom.source_y + int(float(touch_y - g_bottom_zoom.top) / g_bottom_zoom.scale);
                     } else if (g_world_only && !g_bottom_whole) { mouse.x = g_bottom_origin_x + touch_x; mouse.y = g_bottom_origin_y + touch_y; }
@@ -1835,7 +1845,9 @@ int run_windowed(std::vector<std::uint8_t>& framebuffer,
                 // item held) goes on the second screen's frame while a panel or a menu is there, where the touch was.
                 auto* second = g_bottom_panels && g_bottom_frame ? const_cast<std::vector<std::uint8_t>*>(g_bottom_frame) : nullptr;
                 int at_x = mouse.x, at_y = mouse.y;
-                if (g_bottom_zoom.on) {               // an NPC's box, scaled into the frame's corner
+                if (g_bottom_map.on) {                // a fitted panel: where the frame's point is on its page
+                    if (!g_bottom_map.to_page(mouse.x, mouse.y, at_x, at_y)) second = nullptr;
+                } else if (g_bottom_zoom.on) {        // an NPC's box, scaled into the frame's corner
                     at_x = g_bottom_zoom.left + int(float(mouse.x - g_bottom_zoom.source_x) * g_bottom_zoom.scale);
                     at_y = g_bottom_zoom.top + int(float(mouse.y - g_bottom_zoom.source_y) * g_bottom_zoom.scale);
                     if (at_x < 0 || at_y < 0 || at_x >= 320 || at_y >= 240) second = nullptr;

@@ -221,6 +221,11 @@ auto Town::toggle_help() -> void {
         help.open = !help.open;
         if (help.open && !mini.open) { mini.open = true; help_opened_mini = true; }
         if (!help.open && help_opened_mini) { mini.open = false; help_opened_mini = false; }
+        if (!help.open && std::exchange(help_from_menu, false)) {   // a handheld's Options -> Controls: back to Options, on its Controls row
+            open_game_menu();
+            game_menu.show(1);
+            game_menu.sel = std::max(0, int(game_menu.rows().size()) - 2);
+        }
     }
 
 auto Town::pad_field_or_free() const -> bool {

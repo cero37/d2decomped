@@ -270,6 +270,8 @@ add_executable(d2d
     town/ambient.cpp
     town/controls.cpp
     town/draw.cpp
+    town/handheld_page.cpp
+    town/handheld_panels.cpp
     town/input.cpp
     town/lan.cpp
     town/net.cpp

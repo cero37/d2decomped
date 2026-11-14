@@ -180,10 +180,27 @@ auto Town::update(std::vector<std::uint8_t>& framebuffer, const Mouse& frame_mou
         }
         // The Help screen's close button; its other clicks go nowhere (FUN_00494f30).
         if (help.open && !controls.open && !game_menu.open) {
-            if (g_world_only) { if (mouse.press_this_frame) toggle_help(); }      // a handheld's page: any touch, or the confirm button
+            if (g_world_only) { if (mouse.press_this_frame) { toggle_help(); pad_a_edge = false; } }   // a handheld's page: any touch, or the confirm button (which is not the next page's too)
             else if (help.input(mouse)) { help.open = true; toggle_help(); }
             mouse.down = mouse.press_this_frame = mouse.release_this_frame = mouse.rpress_this_frame = false;
         }
+        // A handheld's death message, a page of its second screen: a touch on its row, or the pad's button, is Esc's
+        // Resurrect. Not in its first second: the button was held to fight a moment ago.
+        if (death_page()) {
+            if (death_page_ms == 0) death_page_ms = frame_ms ? frame_ms : 1;
+            bool rise = false;
+            if (frame_ms - death_page_ms > 1000) {
+                if (mouse.press_this_frame) {
+                    MenuPage page;
+                    fill_handheld_page(page);
+                    layout_menu_page(page, *scene);
+                    rise = page.hit(mouse.x, mouse.y) != nullptr;
+                }
+                rise = rise || pad_a_edge || pad.move.attack || skill_actions.confirm || skill_actions.skill_slot == 1;
+            }
+            if (rise) { send(cmd::Resurrect{}); death_page_ms = frame_ms ? frame_ms : 1; }
+            mouse.down = mouse.press_this_frame = mouse.release_this_frame = mouse.rpress_this_frame = false;
+        } else death_page_ms = 0;
         // Configure Controls (UI 0xb) takes every key and click while it's up.
         if (controls.open) {
             std::vector<std::uint16_t> virtual_keys;
@@ -332,6 +349,7 @@ auto Town::update(std::vector<std::uint8_t>& framebuffer, const Mouse& frame_mou
                 else if (store.npc >= 0) { send(cmd::CloseTrade{}); inv_open = false; } // the store first
                 else if (speech.npc >= 0) { speech = {}; menu_after_speech = -1; }   // then speech
                 else if (npc_menu.npc >= 0) npc_menu = {};          // then the menu
+                else if (game_menu.open && g_world_only && game_menu.menu > 0) game_menu.show(game_menu.menu > 1 ? 1 : 0);   // a handheld's B: one menu back
                 else if (game_menu.open) close_game_menu();
                 else if (help.open) toggle_help();                    // then the Help screen
                 else if (inv_open || char_open || stash_open || cube_open || tree_open || quest_log.open || hireling.open || party.open) {   // then panels
@@ -390,7 +408,13 @@ auto Town::update(std::vector<std::uint8_t>& framebuffer, const Mouse& frame_mou
         // to the roster. Its volumes go to d2d.cfg.
         bool hud_click = false;
         if (game_menu.open) {
-            const auto action = game_menu.input(*scene, audio, mouse, keys_this_frame, frame_ms);
+            GameMenu::Action action = GameMenu::kNone;
+            if (g_world_only) {                           // a handheld: the menu is a page of the second screen, the pad's button its lit row
+                MenuPage page;
+                fill_handheld_page(page);
+                layout_menu_page(page, *scene);
+                action = game_menu.input_page(*scene, audio, mouse, keys_this_frame, page, pad_a_edge, frame_ms);
+            } else action = game_menu.input(*scene, audio, mouse, keys_this_frame, frame_ms);
             if (game_menu.volume_changed && !cfg_file.empty()
                 && !d2d::userdir::save_cfg(cfg_file, { { "master_volume", std::to_string(audio.master_volume) },
                                                       { "music_volume", std::to_string(audio.music_volume) } }))
@@ -402,7 +426,10 @@ auto Town::update(std::vector<std::uint8_t>& framebuffer, const Mouse& frame_mou
                 d2d::log::warn("d2d.cfg: gamma and contrast not saved");
             game_menu.video_changed = false;
             if (action != GameMenu::kNone) close_game_menu();
-            if (action == GameMenu::kControls) {          // CfgOptions (0x47f400): UI 0xb
+            if (action == GameMenu::kControls && g_world_only) {   // a handheld: its buttons, by name (the key table's frame can't be read there)
+                if (!help.open) toggle_help();
+                help_from_menu = true;
+            } else if (action == GameMenu::kControls) {   // CfgOptions (0x47f400): UI 0xb
                 controls.family = pad_family;
                 controls.pad_extra = pad_controls_page;
                 controls.click_rows = click_keys_on;
