@@ -309,7 +309,8 @@ struct Scene : GameData {
     std::vector<std::uint8_t> rand_transforms;         // Monsters\RandTransforms.dat: 30 x 256
     const std::uint8_t* monster_map(const Npc& npc) const;
     const d2d::dcc::Sprite* overlay_sprite(const OverlayInfo& overlay) const;
-    mutable std::map<std::string, PlayerAnim> npc_anims;   // by root/code/mode/components
+    mutable std::map<std::string, PlayerAnim> npc_anims;
+    [[nodiscard]] const PlayerAnim* npc_anim_if_loaded(const Npc& npc, std::string_view mode) const;   // null: not read yet   // by root/code/mode/components
     const PlayerAnim& npc_anim(const Npc& npc, std::string_view mode) const;
     const PlayerAnim& composite(int d2s_class, int mode, const Appearance& gfx) const;
     // D2D_ANIM_LOG=<file>: each animation's first draw ("chars AMA1HTH",

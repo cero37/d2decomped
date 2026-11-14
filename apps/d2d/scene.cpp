@@ -43,10 +43,20 @@ const Scene::PlayerAnim& Scene::composite(int d2s_class, int mode, const Appeara
 }
 
 // A monster's or object's animation for a mode, loaded once per COF it names.
+static std::string npc_anim_key(const Npc& npc, std::string_view mode) {
+    auto key = npc.root + "/" + npc.code + "/" + std::string(mode) + "/" + std::string(cof_weapon_class(npc, mode));
+    for (const auto& component : npc.comp) key += "/" + component;
+    return key;
+}
+
+const Scene::PlayerAnim* Scene::npc_anim_if_loaded(const Npc& npc, std::string_view mode) const {
+    const auto found = npc_anims.find(npc_anim_key(npc, mode));
+    return found == npc_anims.end() ? nullptr : &found->second;
+}
+
 const Scene::PlayerAnim& Scene::npc_anim(const Npc& npc, std::string_view mode) const {
     const std::string mode_text(mode);
-    auto key = npc.root + "/" + npc.code + "/" + mode_text + "/" + std::string(cof_weapon_class(npc, mode));
-    for (const auto& component : npc.comp) key += "/" + component;
+    const auto key = npc_anim_key(npc, mode);
     auto found = npc_anims.find(key);
     if (found == npc_anims.end()) {
         found = npc_anims.emplace(key, load_npc_composite(mpqs, npc, mode_text)).first;

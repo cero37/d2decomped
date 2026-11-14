@@ -232,10 +232,19 @@ void view_units(const Scene& scene, const View& view, float camera_x, float came
         // A handheld reads animations on a worker when first drawn: its death and corpse are asked for
         // while it's still on its feet, so it falls at once, not a few frames late in its old pose
         // (which then had the corpse replay the fall from the top while that was read).
-        if (Scene::g_anim_async && !down && !row) {
+        // Not in town (its people don't die), and setting up a new one (its COF read on this thread)
+        // at most once a quarter second: all of them at once stalled arriving in town for seconds.
+        if (Scene::g_anim_async && !down && !row && !(view.level && d2d::rules::level_ids::is_town(view.level->id))) {
+            static std::uint32_t last_new_ms = 0;
             Scene::g_anim_read_ahead = true;
-            if (monster.alive()) (void)scene.npc_anim(monster.npc, "DT").ready();
-            if (monster.alive() || monster.mode == "DT") (void)scene.npc_anim(monster.npc, "DD").ready();
+            const auto ahead = [&](std::string_view mode) {
+                if (const auto* had = scene.npc_anim_if_loaded(monster.npc, mode)) { (void)had->ready(); return; }
+                if (now_ms - last_new_ms < 250) return;
+                last_new_ms = now_ms;
+                (void)scene.npc_anim(monster.npc, mode).ready();
+            };
+            if (monster.alive()) ahead("DT");
+            if (monster.alive() || monster.mode == "DT") ahead("DD");
             Scene::g_anim_read_ahead = false;
         }
         // No name, so no hover, for a converted one, and a click there walks.
