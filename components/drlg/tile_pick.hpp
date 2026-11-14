@@ -77,39 +77,50 @@ inline std::vector<const Dt1File*> room_dt1_list(std::uint32_t mask, const RoomD
 // whose running rarity reaches rand(total) + 1.
 // The candidates for a key (FUN_00604ae0): up to 40, the room's DT1s in
 // list order, each one's tiles in reverse file order.
-inline std::vector<std::pair<const Dt1File*, int>> tile_candidates(const std::vector<const Dt1File*>& list, int orient, int style, int seq) {
-    std::vector<std::pair<const Dt1File*, int>> candidates;
+// Up to 40, in a fixed buffer: a lay picks ~8000 tiles, and a heap allocation per pick is dear on a 3DS.
+struct TileCandidates {
+    std::array<std::pair<const Dt1File*, int>, 40> at{};
+    std::size_t count = 0;
+    [[nodiscard]] bool empty() const { return count == 0; }
+};
+inline void find_candidates(TileCandidates& out, const std::vector<const Dt1File*>& list, int orient, int style, int seq) {
+    out.count = 0;
     for (const auto* file : list) {
         if (file->by_key.size() == file->tiles.size()) {
             const auto key = [](const Dt1File::Keyed& keyed) { return std::tuple{ keyed.orient, keyed.style, keyed.seq }; };
             const auto [first, last] = std::ranges::equal_range(file->by_key, std::tuple{ orient, style, seq }, {}, key);
-            for (auto it = first; it != last && candidates.size() < 40; ++it) candidates.emplace_back(file, it->index);
+            for (auto it = first; it != last && out.count < 40; ++it) out.at[out.count++] = { file, it->index };
         } else {
-            for (int i = int(file->tiles.size()) - 1; i >= 0 && candidates.size() < 40; --i) {
+            for (int i = int(file->tiles.size()) - 1; i >= 0 && out.count < 40; --i) {
                 const auto& tile = file->tiles[std::size_t(i)];
-                if (tile.orient == orient && tile.style == style && tile.seq == seq) candidates.emplace_back(file, i);
+                if (tile.orient == orient && tile.style == style && tile.seq == seq) out.at[out.count++] = { file, i };
             }
         }
-        if (candidates.size() >= 40) break;
+        if (out.count >= 40) break;
     }
-    return candidates;
+}
+inline std::vector<std::pair<const Dt1File*, int>> tile_candidates(const std::vector<const Dt1File*>& list, int orient, int style, int seq) {
+    TileCandidates found;
+    find_candidates(found, list, orient, style, seq);
+    return { found.at.begin(), found.at.begin() + std::ptrdiff_t(found.count) };
 }
 
 inline std::pair<const Dt1File*, int> pick_tile(const std::vector<const Dt1File*>& list, d2d::rules::Rng& rng, int orient,
                                            std::uint32_t word) {
     const int style = word ? int((word >> 20) & 0x3f) : 0, seq = word ? int((word >> 8) & 0xff) : 0;
-    auto candidates = tile_candidates(list, orient, style, seq);
+    TileCandidates candidates;
+    find_candidates(candidates, list, orient, style, seq);
     if (candidates.empty()) {
-        candidates = tile_candidates(list, 10, 0, 0);
-        return candidates.empty() ? std::pair<const Dt1File*, int>{ nullptr, -1 } : candidates.front();
+        find_candidates(candidates, list, 10, 0, 0);
+        return candidates.empty() ? std::pair<const Dt1File*, int>{ nullptr, -1 } : candidates.at[0];
     }
     int total = 0;
-    for (auto [file, tile_index] : candidates) total += file->tiles[std::size_t(tile_index)].rarity;
-    if (total < 1) return candidates.front();
+    for (std::size_t i = 0; i < candidates.count; ++i) total += candidates.at[i].first->tiles[std::size_t(candidates.at[i].second)].rarity;
+    if (total < 1) return candidates.at[0];
     int roll = int(rng(total)) + 1;
     std::size_t index = 0;
-    while (candidates.size() > 1 && roll > 0) { roll -= candidates[index].first->tiles[std::size_t(candidates[index].second)].rarity; ++index; }
-    return candidates[index ? index - 1 : 0];
+    while (candidates.count > 1 && roll > 0) { roll -= candidates.at[index].first->tiles[std::size_t(candidates.at[index].second)].rarity; ++index; }
+    return candidates.at[index ? index - 1 : 0];
 }
 
 
