@@ -742,7 +742,8 @@ auto Town::drive_pad_hold(Mouse& mouse, float seconds) -> void {
             pad_hold_text = identify_prompt(pad_config.bindings, pad_family, valid);
         } else if (pad_playing && pad_config.skill_buttons && item && query.hand_empty && !query.imbue) {
             const auto use = item_use(*item);
-            if (!use.label.empty()) pad_hold_text = (use.kind == ItemUseKind::None ? "" : label_of(pad::Action::Interact) + " . ") + std::string(use.label) + "  ";
+            // A handheld's Interact in a panel is its X (main.cpp: it has no right stick to click).
+            if (!use.label.empty()) pad_hold_text = (use.kind == ItemUseKind::None ? "" : (g_world_only ? std::string("X") : label_of(pad::Action::Interact)) + " . ") + std::string(use.label) + "  ";
         }
         if (pad_shows_hold_cue(pad_playing, can_potion, can_equip, can_sell)) {
             if (tracking) pad_hold_fraction = pad_hold.fraction();
@@ -836,7 +837,10 @@ auto Town::pad_tab(int step) -> void {
         if (store.npc < 0) {
             const int current = pad_panel();
             if (current < 0 || held || identify_with >= 0 || use_item.open() || gold_box) return;
-            const int next = (current + (step > 0 ? 1 : 5)) % 6;
+            // A handheld's round has the inventory before the character, as its Start list does.
+            static constexpr std::array<int, 6> kHandheldRound = { 0, 1, 3, 2, 4, 5 };
+            const int place = int(std::ranges::find(kHandheldRound, current) - kHandheldRound.begin());
+            const int next = g_world_only ? kHandheldRound[std::size_t((place + (step > 0 ? 1 : 5)) % 6)] : (current + (step > 0 ? 1 : 5)) % 6;
             if (game_menu.open) close_game_menu();
             inv_open = char_open = tree_open = quest_log.open = party.open = false;
             inv_close_down = char_close_down = tree_close_down = false;

@@ -137,6 +137,12 @@ void draw_bottom_hud(std::vector<std::uint8_t>& framebuffer, const Scene& scene,
                 canvas.put(px, py, 255, 220, 110);
             }
     }
+    for (int column = 0; column < 4; ++column)                   // a belt column its d-pad direction just drank from: a bright rim for a moment
+        if (const auto fired = g_bottom_skills.belt_fired[std::size_t(column)]; fired != 0 && g_bottom_skills.now - fired < 220) {
+            const int x = spots[std::size_t(column)][0], y = spots[std::size_t(column)][1];
+            canvas.rect(x, y, x + cell, y + 2, { 255, 240, 160 }); canvas.rect(x, y + cell - 2, x + cell, y + cell, { 255, 240, 160 });
+            canvas.rect(x, y, x + 2, y + cell, { 255, 240, 160 }); canvas.rect(x + cell - 2, y, x + cell, y + cell, { 255, 240, 160 });
+        }
     constexpr int kIcon = 24, kPitch = 30;                       // a skill's icon at half size, its button's name beside it
     const int skill_top = belt_top - 3 - kIcon - 2;
     {
@@ -154,6 +160,25 @@ void draw_bottom_hud(std::vector<std::uint8_t>& framebuffer, const Scene& scene,
             } else if (id <= -3) {
                 static constexpr std::array<const char*, 7> kActions{ "Use", "Itm", "Inv", "Chr", "Skl", "Map", "Qst" };
                 if (const int action = -3 - id; action < int(kActions.size())) tiny.draw_tinted(framebuffer, kScreenWidth, kScreenHeight, pal, x + 3, skill_top + 9, kActions[std::size_t(action)], 199, 179, 119);
+            }
+            // Not to be had now: the icon dimmed (blue-grey for want of mana); a delay still running counts down over it.
+            if (const int status = skills.status[std::size_t(i)]; status != 0 && id > 0) {
+                for (int py = skill_top + 1; py < skill_top + kIcon + 1; ++py)
+                    for (int px = x + 1; px < x + kIcon + 1; ++px) {
+                        auto* pixel = &framebuffer[(std::size_t(py) * kScreenWidth + std::size_t(px)) * 4];
+                        const int grey = (pixel[0] * 3 + pixel[1] * 6 + pixel[2]) / 10 * 2 / 5;
+                        pixel[0] = std::uint8_t(grey); pixel[1] = std::uint8_t(grey); pixel[2] = std::uint8_t(status == 1 ? std::min(255, grey + 50) : grey);
+                    }
+                if (status == 8 && skills.wait_ms[std::size_t(i)] > 0) {
+                    const int wait = skills.wait_ms[std::size_t(i)];
+                    const std::string left_text = wait >= 10000 ? std::to_string((wait + 999) / 1000) : std::format("{}.{}", wait / 1000, wait % 1000 / 100);
+                    small.draw_tinted(framebuffer, kScreenWidth, kScreenHeight, pal, x + 1 + (kIcon - small.measure(left_text)) / 2, skill_top + 1 + (kIcon - small.line_height()) / 2 - 2, left_text, 255, 255, 255);
+                }
+            }
+            // Its button just worked it: a bright rim for a moment.
+            if (skills.fired[std::size_t(i)] != 0 && skills.now - skills.fired[std::size_t(i)] < 220) {
+                canvas.rect(x, skill_top, x + kIcon + 2, skill_top + 2, { 255, 240, 160 }); canvas.rect(x, skill_top + kIcon, x + kIcon + 2, skill_top + kIcon + 2, { 255, 240, 160 });
+                canvas.rect(x, skill_top, x + 2, skill_top + kIcon + 2, { 255, 240, 160 }); canvas.rect(x + kIcon, skill_top, x + kIcon + 2, skill_top + kIcon + 2, { 255, 240, 160 });
             }
             if (!label.empty()) {                                       // the button, on a dark tab in the slot's corner
                 const int tab_w = tiny.measure(label) + 2, tab_h = tiny.line_height();
@@ -190,7 +215,7 @@ void draw_bottom_hud(std::vector<std::uint8_t>& framebuffer, const Scene& scene,
                 const bool at = index == lists.strip_at;
                 canvas.rect(x, y, x + 100, y + 42, at ? std::array<std::uint8_t, 3>{ 214, 176, 78 } : std::array<std::uint8_t, 3>{ 78, 68, 52 });
                 canvas.rect(x + 1, y + 1, x + 99, y + 41, at ? std::array<std::uint8_t, 3>{ 52, 42, 26 } : std::array<std::uint8_t, 3>{ 26, 23, 20 });
-                const auto name = skillpad::kPanels[std::size_t(index)];
+                const auto name = skillpad::kPanels[std::size_t(skillpad::handheld_panel(index))];
                 scene.font.draw_tinted(framebuffer, kScreenWidth, kScreenHeight, pal, x + 50 - scene.font.measure(name) / 2, y + 21 - scene.font.line_height() / 2, name, at ? 255 : 199, at ? 255 : 179, at ? 255 : 119);
             }
         } else if (lists.wheel_on) {

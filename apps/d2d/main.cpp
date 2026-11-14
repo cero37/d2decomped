@@ -901,6 +901,10 @@ int run_windowed(std::vector<std::uint8_t>& framebuffer,
                         int frame_x = 0, frame_y = 0;
                         BottomMap::Touch how = BottomMap::kClick;
                         if (g_bottom_map.to_frame(touch_x, touch_y, frame_x, frame_y, &how)) {
+                            if (how == BottomMap::kUse) {              // the page's Use button: a right click where the cursor is
+                                if (down) { mouse.rpress_this_frame = true; pad_in_use = false; mouse_took_over = true; }
+                                continue;
+                            }
                             // Something not under the cursor yet, with an empty hand: the cursor goes there, and its hover text shows.
                             const bool elsewhere = std::abs(frame_x - mouse.x) > 14 || std::abs(frame_y - mouse.y) > 14;
                             if (down && (how == BottomMap::kMove || (how == BottomMap::kLookFirst && elsewhere && !town.held))) {
@@ -1145,6 +1149,7 @@ int run_windowed(std::vector<std::uint8_t>& framebuffer,
             const int label_pad = seats.label_pad(coop_game, ui_seat);
             town.pad_family = label_pad >= 0 ? gamepads.family(SDL_JoystickID(label_pad))
                             : gamepads.primary() ? gamepads.primary()->family : pad::Family::Xbox;
+            if (g_world_only) town.pad_family = pad::Family::Nintendo;   // a handheld's buttons carry Nintendo's names, in this frame's prompts too
             if (pad_actions.recentre_cursor) { mouse.x = int(kScreenWidth) / 2; mouse.y = int(kScreenHeight) / 2; }
             if (!pad_field) {
                 mouse.x = std::clamp(mouse.x + int(std::lround(pad_actions.cursor_dx)), -pad_side, int(kScreenWidth) + pad_side - 1);
@@ -1156,7 +1161,14 @@ int run_windowed(std::vector<std::uint8_t>& framebuffer,
                 const auto buttons = [&](std::initializer_list<const Button*> shown) {
                     for (const Button* button : shown) points.push_back({ button->x + button->width / 2, button->y + button->height / 2 });
                 };
-                if (screen == Screen::Title)                 for (const auto& button : title.buttons) buttons({ &button });
+                if (screen == Screen::Title) {
+                    for (const auto& button : title.buttons) {
+                        // A handheld's page leaves these out (Battle.net, its gateway, the videos): the d-pad doesn't stop on them.
+                        const std::string_view text = button.label ? button.label : "";
+                        if (std::getenv("D2D_HANDHELD") && (text.find("BATTLE") != std::string_view::npos || text.find("GATEWAY") != std::string_view::npos || text.find("CINEMATICS") != std::string_view::npos)) continue;
+                        buttons({ &button });
+                    }
+                }
                 else if (screen == Screen::OtherMultiplayer) for (const auto& button : other_multiplayer.buttons) buttons({ &button });
                 else if (screen == Screen::TcpIp) {
                     if (tcpip.box_open) buttons({ &tcpip.box_ok, &tcpip.box_cancel });
@@ -1208,6 +1220,14 @@ int run_windowed(std::vector<std::uint8_t>& framebuffer,
             if (pad_actions.tab_step != 0) town.pad_tab(pad_actions.tab_step);
             if (pad_actions.click_press && !pad_field)   { mouse.down = true;  mouse.press_this_frame = true; }
             if (pad_actions.click_release && mouse.down) { mouse.down = false; mouse.release_this_frame = true; }
+            // A handheld has no right stick to click (the layout's Interact, which uses the item under the cursor in a
+            // panel or a shop): its X, the north button, does that there. The field keeps X as a skill.
+            {
+                static bool north_was = false;
+                const bool north = first.held[std::size_t(pad::Button::North)];
+                if (g_world_only && north && !north_was && !pad_field && (pad_context == pad::Context::Panel || pad_context == pad::Context::Shop)) pad_actions.rclick_press = true;
+                north_was = north;
+            }
             if (pad_actions.rclick_press && screen == Screen::InGame && !pad_field && town.pad_back(mouse.x, mouse.y)) {
                 pad_actions.rclick_press = false;
                 pad_actions.keys.push_back(pad::Key::Escape);
@@ -1954,12 +1974,36 @@ int run_windowed(std::vector<std::uint8_t>& framebuffer,
                 } else if (screen == Screen::CharCreate) {
                     page.active = true;
                     page.heading = character.selected >= 0 ? std::string(kClassKey[character.selected]) + (character.name.empty() ? std::string(": name your hero") : ": " + character.name) : std::string("Choose a class");
-                    for (int index = 0; index < 7; ++index)
-                        page.add(kClassKey[index], kClassPos[index].x, kClassPos[index].y - 50, index == character.selected, false);
+                    for (int index = 0; index < 7; ++index) {       // lit: the class the cursor is on; the one chosen keeps gold words
+                        page.add(kClassKey[index], kClassPos[index].x, kClassPos[index].y - 50, index == character.hovered || (mouse.x == kClassPos[index].x && mouse.y == kClassPos[index].y - 50), false);
+                        page.rows.back().picked = index == character.selected;
+                    }
+                    // What the class is, in the game's own words (render_charcreate's, which the frame shows for the one under the mouse).
+                    if (const int shown = character.selected >= 0 ? character.selected : character.hovered; shown >= 0 && shown < 7) {
+                        static constexpr std::uint16_t kDesc[7] = { 0x140a, 0x1409, 0x140c, 0x1408, 0x140b, 0x57f6, 0x57f7 };   // BA NE PA AM SO DZ AS
+                        if (const auto desc = lookup_string(*scene, kDesc[shown])) { page.notes.push_back(u16_to_latin1(*desc)); page.notes_small = true; }
+                    }
                     page.add("Back", character.cancel_btn.x + character.cancel_btn.width / 2, character.cancel_btn.y + character.cancel_btn.height / 2, over(character.cancel_btn), true);
+                    // The two checkboxes (the frame's 15x16 boxes): lit while ticked. Expansion shows with a class picked, and stays on for the two expansion classes.
+                    page.add("Hardcore", kHardcoreX + kHardcoreW / 2, kHardcoreY + kHardcoreH / 2, character.hardcore, true, false, character.hardcore ? "On" : "Off");
+                    if (character.selected >= 0)
+                        page.add("Expansion", kHardcoreX + kHardcoreW / 2, kExpansionY + kHardcoreH / 2, character.expansion, true,
+                                 kUiToSaveClass[std::size_t(character.selected)] >= 5, character.expansion ? "On" : "Off");
                     page.add("Start", character.ok_btn.x + character.ok_btn.width / 2, character.ok_btn.y + character.ok_btn.height / 2, over(character.ok_btn), true, character.selected < 0);
                 }
                 if (page.active && page.rows.empty()) page.active = false;
+                // A pad's cursor is always on a row of the page: off them all (on a button the page leaves out, or between
+                // two), it goes to the nearest one, which is lit.
+                if (page.active && pad_in_use && std::ranges::none_of(page.rows, &MenuPage::Row::on)) {
+                    MenuPage::Row* nearest = nullptr;
+                    long best = 0;
+                    for (auto& candidate : page.rows) {
+                        if (candidate.dim) continue;
+                        const long dx = candidate.x - mouse.x, dy = candidate.y - mouse.y, apart = dx * dx + dy * dy;
+                        if (!nearest || apart < best) { nearest = &candidate; best = apart; }
+                    }
+                    if (nearest) { mouse.x = nearest->x; mouse.y = nearest->y; nearest->on = true; }
+                }
                 if (page.active) {
                     draw_menu_page(page, *scene);
 #ifndef __3DS__

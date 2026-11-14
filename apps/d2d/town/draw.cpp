@@ -103,6 +103,17 @@ auto Town::draw(std::vector<std::uint8_t>& framebuffer, const Mouse& mouse, std:
         shown.strip_on = skill_strip >= 0; shown.strip_at = skill_strip;
         shown.wheel_on = skillbar.picking == 3; shown.wheel_ids = wheel_ids; shown.wheel_at = wheel_at; shown.wheel_page = wheel_page;
         shown.feedback = shown.wheel_on ? assignment_feedback : std::string();
+        // Each slot's skill as the fight would take it now (Fight::skill_status: its mana, its delay), for the HUD to grey
+        // or count down. Our own World's hero only: a joined game's fight is the host's.
+        shown.now = frame_ms;
+        for (int slot = 0; slot < 7; ++slot) {
+            const int id = slot == 0 ? shown.main : shown.slots[std::size_t(slot - 1)];
+            shown.status[std::size_t(slot)] = shown.wait_ms[std::size_t(slot)] = 0;
+            if (id <= 0 || net_game || lan_client || !fight.actor || !scene->skills.get(id)) continue;      // 0 is Attack
+            const int status = fight.skill_status(id, world_ms);
+            shown.status[std::size_t(slot)] = status == 5 || status == 6 ? 0 : status;                       // a passive, an aura: not a refusal
+            if (status == 8 && fight.actor->skill_delay > world_ms) shown.wait_ms[std::size_t(slot)] = int(fight.actor->skill_delay - world_ms);
+        }
         // A touch on the HUD: a button of the Start list (opens it), a skill on the ring (picks it),
         // the top line (the Start list), the map (the next zoom).
         if (std::exchange(g_bottom_touch.pressed, false) && !g_bottom_panels) {
@@ -155,7 +166,11 @@ auto Town::draw(std::vector<std::uint8_t>& framebuffer, const Mouse& mouse, std:
         static bool panel_was_open = false;
         // An NPC's menu or speech: its box alone, as large as the screen takes (the whole frame at two fifths is too small to read).
         g_bottom_zoom.on = false;
-        if (g_bottom_whole && !game_menu.open && !controls.open && view.pmode != kModeDD && (npc_menu.npc >= 0 || speech.npc >= 0)) {
+        // An NPC's words and its menu of choices are pages of their own (town/handheld_panels.cpp); the hire list alone is still its box, scaled.
+        const bool npc_up = !game_menu.open && !controls.open && view.pmode != kModeDD && (npc_menu.npc >= 0 || speech.npc >= 0);
+        const bool npc_box = npc_up && speech.npc < 0 && npc_menu.list;
+        if (npc_up && !npc_box) g_bottom_whole = false;
+        if (g_bottom_whole && npc_box) {
             int left = int(kScreenWidth), top = int(kScreenHeight), right = 0, bottom = 0;
             const auto take = [&](int x, int y, int width, int height) {
                 left = std::min(left, x); top = std::min(top, y); right = std::max(right, x + width); bottom = std::max(bottom, y + height);
@@ -219,6 +234,7 @@ auto Town::draw(std::vector<std::uint8_t>& framebuffer, const Mouse& mouse, std:
         // A panel with a page of its own (the character sheet, the inventory, the skill tree, the waypoints).
         const bool fitted = g_bottom_panels && !g_bottom_whole && !g_bottom_zoom.on && !help_page && handheld_fit_panel(mouse);
         if (!fitted) g_bottom_map.clear();
+        if (!g_bottom_panels) handheld_beside = 0;
         if (g_bottom_zoom.on || help_page || fitted) {
             g_bottom_origin_x = g_bottom_origin_y = 0;
             panel_was_open = false;
@@ -256,7 +272,9 @@ auto Town::draw(std::vector<std::uint8_t>& framebuffer, const Mouse& mouse, std:
             if (fitted) {
                 int at_x = -100, at_y = -100;
                 if (!g_bottom_map.to_page(mouse.x, mouse.y, at_x, at_y)) at_x = at_y = -100;
-                draw_handheld_hover(ui_buffer, *scene, handheld_hovers.back(), 0, 0, 320, 240, at_x, at_y);
+                // A thing of the panel's; not the frame's own button under one of the page's (but Repair All's, which says what it would cost).
+                if (g_bottom_map.on_piece(mouse.x, mouse.y) || (store.npc >= 0 && mouse.y >= 432 && mouse.y <= 474 && mouse.x >= kCharPanelX - 1 + 273 && mouse.x < kCharPanelX + 320))
+                    draw_handheld_hover(ui_buffer, *scene, handheld_hovers.back(), 0, 0, 320, 240, at_x, at_y);
             } else if (!g_bottom_zoom.on)
                 draw_handheld_hover(ui_buffer, *scene, handheld_hovers.back(), g_bottom_origin_x, g_bottom_origin_y, 320, kPanelHalf, mouse.x, mouse.y);
         }

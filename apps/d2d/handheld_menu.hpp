@@ -25,6 +25,7 @@ struct MenuPage {
     struct Row {
         std::string text, detail; int x = 0, y = 0; bool small = false, on = false, dim = false; int left = 0, top = 0, right = 0, bottom = 0;
         std::string value; int steps = 0, at = 0, id = -1;
+        bool picked = false;            // the screen's pick (the class chosen), where `on` is the cursor: gold words, a lighter ground
         // A slider's bar, and the place a touch at `touch_x` picks on it.
         [[nodiscard]] int bar_left() const { return left + (right - left) * 2 / 5; }
         [[nodiscard]] int bar_right() const { return right - 14; }
@@ -38,10 +39,11 @@ struct MenuPage {
     std::string heading;
     std::array<std::uint8_t, 3> heading_ink{ 255, 232, 150 };
     std::vector<std::string> notes;     // lines of words under the heading (wrapped to the screen), above the rows
+    bool notes_small = false;           // ... in font8, 13 rows a line (a class's description: three lines of it)
     std::array<std::uint8_t, 3> note_ink{ 214, 190, 130 };
     std::vector<Row> rows;
     std::vector<std::uint8_t> pixels;   // 320x240 RGBA, drawn by draw_menu_page
-    void clear() { active = false; heading.clear(); notes.clear(); rows.clear(); heading_ink = { 255, 232, 150 }; note_ink = { 214, 190, 130 }; }
+    void clear() { active = false; heading.clear(); notes.clear(); notes_small = false; rows.clear(); heading_ink = { 255, 232, 150 }; note_ink = { 214, 190, 130 }; }
     void add(std::string text, int x, int y, bool on = false, bool small = false, bool dim = false, std::string detail = {}) {
         Row row; row.text = std::move(text); row.detail = std::move(detail); row.x = x; row.y = y; row.on = on; row.small = small; row.dim = dim;
         rows.push_back(std::move(row));
@@ -69,7 +71,7 @@ inline std::vector<std::string> menu_page_note_lines(const MenuPage& page, const
             const std::string word = note.substr(at, end - at);
             at = end + 1;
             if (word.empty()) continue;
-            if (!line.empty() && scene.font.measure(line + " " + word) > 320 - 16) { lines.push_back(line); line.clear(); }
+            if (!line.empty() && (page.notes_small ? scene.font_small : scene.font).measure(line + " " + word) > 320 - 16) { lines.push_back(line); line.clear(); }
             line += (line.empty() ? "" : " ") + word;
         }
         if (!line.empty()) lines.push_back(line);
@@ -81,7 +83,7 @@ inline std::vector<std::string> menu_page_note_lines(const MenuPage& page, const
 inline void layout_menu_page(MenuPage& page, const Scene& scene) {
     constexpr int kW = 320, kH = 240;
     int area_top = page.heading.empty() ? 4 : 30;
-    area_top += int(menu_page_note_lines(page, scene).size()) * 18 + (page.notes.empty() ? 0 : 6);
+    area_top += int(menu_page_note_lines(page, scene).size()) * (page.notes_small ? 13 : 18) + (page.notes.empty() ? 0 : 6);
     std::vector<MenuPage::Row*> big, foot;
     for (auto& row : page.rows) (row.small ? foot : big).push_back(&row);
     int area_bottom = kH - 4;
@@ -135,14 +137,16 @@ inline void draw_menu_page(MenuPage& page, const Scene& scene) {
         rect(8, 25, kW - 8, 26, { 78, 68, 52 });
         notes_y = 30 + 3 + 9;
     }
-    for (const auto& line : menu_page_note_lines(page, scene)) { put(font, line, kW / 2, notes_y, page.note_ink); notes_y += 18; }
+    if (page.notes_small) notes_y -= 2;
+    for (const auto& line : menu_page_note_lines(page, scene)) { put(page.notes_small ? small : font, line, kW / 2, notes_y, page.note_ink); notes_y += page.notes_small ? 13 : 18; }
     layout_menu_page(page, scene);
     for (const auto& row : page.rows) {
         const std::array<std::uint8_t, 3> rim = row.on ? std::array<std::uint8_t, 3>{ 255, 220, 110 } : row.dim ? std::array<std::uint8_t, 3>{ 44, 40, 34 } : std::array<std::uint8_t, 3>{ 110, 94, 66 };
-        const std::array<std::uint8_t, 3> fill = row.on ? std::array<std::uint8_t, 3>{ 66, 50, 24 } : std::array<std::uint8_t, 3>{ 30, 26, 21 };
+        const std::array<std::uint8_t, 3> fill = row.on ? std::array<std::uint8_t, 3>{ 66, 50, 24 } : row.picked ? std::array<std::uint8_t, 3>{ 50, 42, 26 } : std::array<std::uint8_t, 3>{ 30, 26, 21 };
         rect(row.left, row.top, row.right, row.bottom, rim);
         rect(row.left + (row.on ? 2 : 1), row.top + (row.on ? 2 : 1), row.right - (row.on ? 2 : 1), row.bottom - (row.on ? 2 : 1), fill);
-        const std::array<std::uint8_t, 3> ink = row.dim ? std::array<std::uint8_t, 3>{ 90, 84, 74 } : row.on ? std::array<std::uint8_t, 3>{ 255, 255, 255 } : std::array<std::uint8_t, 3>{ 214, 190, 130 };
+        const std::array<std::uint8_t, 3> ink = row.dim ? std::array<std::uint8_t, 3>{ 90, 84, 74 } : row.on ? std::array<std::uint8_t, 3>{ 255, 255, 255 }
+                                              : row.picked ? std::array<std::uint8_t, 3>{ 255, 232, 150 } : std::array<std::uint8_t, 3>{ 214, 190, 130 };
         const int centre_x = (row.left + row.right) / 2, centre_y = (row.top + row.bottom) / 2, room = row.right - row.left - 6;
         if (row.steps > 1) {                               // a slider: its name, then the bar with its knob
             const int bar_left = row.bar_left(), bar_right = row.bar_right();

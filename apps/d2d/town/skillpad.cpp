@@ -2,6 +2,7 @@
 // The opt-in skill-button mode: casts, the wheel, the panel strip and the
 // per-character .padskills file. The default pad path stays in input.cpp.
 #include "town.hpp"
+#include "handheld_hud.hpp"
 
 #include "common.hpp"
 #include "gamepad_map.hpp"
@@ -358,7 +359,7 @@ auto Town::drive_strip(const pad::Actions& actions) -> void {
     if (actions.strip_step != 0) skill_strip = ((skill_strip + actions.strip_step) % count + count) % count;
     if (!actions.confirm) return;
     menu_handoff.armed = true;                         // this South press must not click the screen it opens
-    switch (skill_strip) {
+    switch (g_world_only ? skillpad::handheld_panel(skill_strip) : skill_strip) {
         case 0: char_open = !char_open; if (char_open) stash_open = cube_open = quest_log.open = hireling.open = false; break;
         case 1: inv_open = !inv_open; if (inv_open) tree_open = false; break;
         case 2: tree_open = !tree_open; if (tree_open) inv_open = false; break;
@@ -374,6 +375,7 @@ auto Town::drive_strip(const pad::Actions& actions) -> void {
             if (character.expansion && view.merc_sheet) {
                 hireling.open = !hireling.open;
                 if (hireling.open) char_open = stash_open = cube_open = quest_log.open = false;
+                if (hireling.open && g_world_only) { inv_open = true; tree_open = false; }   // a handheld: the bag with it, to take what comes off the hireling
             }
             break;
         case 7: toggle_help(); break;
@@ -491,6 +493,7 @@ auto Town::apply_skill_pad(PadPlayer& player_pad, const UnitState& unit, bool de
         if (skill == skillpad::kUnset) skill = right_skill;
         const bool keep = skillpad::binds_action(skill) || skill == kResurrectSkill || skill_known(name, skill);
         perform(keep ? skill : skillpad::kEmpty, actions.main_skill, actions.main_skill_down, skillpad::kSlots);
+        if (&player_pad == &pad && (actions.main_skill || actions.main_skill_down)) g_bottom_skills.fired[0] = now_ms ? now_ms : 1;   // a handheld's HUD lights the slot
     }
     for (int index = 0; index < skillpad::kSlots; ++index) {
         const bool press = actions.skill_slot == index;
@@ -498,6 +501,7 @@ auto Town::apply_skill_pad(PadPlayer& player_pad, const UnitState& unit, bool de
         const int set = player_pad.slot_hold.set_for(index, press, button_down, actions.modifier_held);
         if (set < 0) continue;
         perform(sheet.slot(set == 1, index), press, button_down, index);
+        if (&player_pad == &pad && (press || button_down)) g_bottom_skills.fired[std::size_t(index) + 1] = now_ms ? now_ms : 1;
     }
 }
 

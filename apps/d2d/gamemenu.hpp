@@ -26,7 +26,7 @@ std::vector<std::string_view> game_menu_images();
 // ramp. 3D sound, EAX, 3D bias and perspective are off as on a machine
 // without a 3D provider or Glide.
 struct GameMenu {
-    enum Action { kNone, kClose, kExit, kControls };
+    enum Action { kNone, kClose, kExit, kControls, kQuit };   // kQuit: d2d's, out of the game with nothing saved (a handheld's row)
     bool open = false;
     bool expansion = true;                 // the video / automap menus' LoD rows (FUN_00408f20)
     int menu = 0, sel = 0;                 // 0x7bc93c's menu, 0x7bc938
@@ -34,7 +34,7 @@ struct GameMenu {
     int last_x = -1, last_y = -1;          // where the mouse was (0x7bc980 / 0x7bc984)
     int pent = 0;                          // pentspin's frame (0x7bc944)
     std::uint32_t pent_ms = 0;
-    std::array<std::array<int, 8>, 5> value{};   // each row's value, by its LoD row
+    std::array<std::array<int, 8>, 6> value{};   // each row's value, by its LoD row
     bool restore_automap = false, restore_mini = false;   // reopened after it (0x713058 b = 1)
     bool volume_changed = false;           // the sound sliders moved: the caller keeps them
     bool video_changed = false;            // Gamma / Contrast moved: the caller keeps them in d2d.cfg

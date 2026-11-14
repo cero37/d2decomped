@@ -2,6 +2,7 @@
 // Town (town.hpp): the frame's update. The rest is in this directory.
 #include "handheld_prof.hpp"
 #include "town.hpp"
+#include "handheld_hud.hpp"
 
 #include "audio.hpp"
 #include "automap_reveal.hpp"
@@ -305,7 +306,10 @@ auto Town::update(std::vector<std::uint8_t>& framebuffer, const Mouse& frame_mou
             if (fires(keys::kQuestLog)) toggle_quest_log();
             if (key == SDLK_ESCAPE && view.dead && (!view.ghost || view.all_dead) && !game_menu.open) { send(cmd::Resurrect{}); continue; }
             for (int belt = 0; belt < 4; ++belt)
-                if (fires(keys::kBelt1 + belt)) net.send(cmd::UseBelt{ belt, (SDL_GetModState() & SDL_KMOD_SHIFT) != 0 });
+                if (fires(keys::kBelt1 + belt)) {
+                    net.send(cmd::UseBelt{ belt, (SDL_GetModState() & SDL_KMOD_SHIFT) != 0 });
+                    g_bottom_skills.belt_fired[std::size_t(belt)] = frame_ms ? frame_ms : 1;       // a handheld's HUD lights the column
+                }
             for (int phrase = 0; phrase < 8; ++phrase)
                 if (fires(phrase < 7 ? keys::kSay1 + phrase : int(keys::kSayRetreat))) say(phrase);
             if (fires(keys::kRun) && !view.running) { send(cmd::Run{ true }); run_held = true; }   // 0x469000: run while held
@@ -349,7 +353,7 @@ auto Town::update(std::vector<std::uint8_t>& framebuffer, const Mouse& frame_mou
                 else if (store.npc >= 0) { send(cmd::CloseTrade{}); inv_open = false; } // the store first
                 else if (speech.npc >= 0) { speech = {}; menu_after_speech = -1; }   // then speech
                 else if (npc_menu.npc >= 0) npc_menu = {};          // then the menu
-                else if (game_menu.open && g_world_only && game_menu.menu > 0) game_menu.show(game_menu.menu > 1 ? 1 : 0);   // a handheld's B: one menu back
+                else if (game_menu.open && g_world_only && game_menu.menu > 0) game_menu.show(game_menu.menu > 1 && game_menu.menu < 5 ? 1 : 0);   // a handheld's B: one menu back
                 else if (game_menu.open) close_game_menu();
                 else if (help.open) toggle_help();                    // then the Help screen
                 else if (inv_open || char_open || stash_open || cube_open || tree_open || quest_log.open || hireling.open || party.open) {   // then panels
@@ -437,9 +441,15 @@ auto Town::update(std::vector<std::uint8_t>& framebuffer, const Mouse& frame_mou
             }
             // Save and Exit logs out whoever's pad has the menu. A partner leaves alone; the first
             // player alone ends the game, in local co-op the next player leads and it goes on.
-            if (action == GameMenu::kExit) {
+            // Quit without saving (a handheld's row) goes the same way out, the save left as it last was. A joined
+            // game's save is the host's (Town::save leaves it), and a partner's character is kept as ever.
+            if (action == GameMenu::kExit || action == GameMenu::kQuit) {
                 if (const int seat = focus_seat(); seat > 0) { coop_leave(seat); partner_left = seat; }
-                else if ((handed_over = lead_leaves()) < 0) { save(); screen = Screen::CharSelect; }
+                else if ((handed_over = lead_leaves()) < 0) {
+                    if (action == GameMenu::kExit || lan_client) save();
+                    else d2d::log::info("{} left the game without saving", character.name);
+                    screen = Screen::CharSelect;
+                }
             }
             hud_click = true;
         } else {

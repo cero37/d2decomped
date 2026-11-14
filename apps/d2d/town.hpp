@@ -460,6 +460,8 @@ struct Town {
     void fill_handheld_page(MenuPage& page) const;
     // The open panel as a page that fits the second screen (town/handheld_panels.cpp); false when it has none.
     bool handheld_fit_panel(const Mouse& mouse);
+    bool handheld_left = true;                    // ... and which of the two pages is up
+    int handheld_beside = 0;                      // what is open beside the bag (1 a store, 2 the stash, 3 the hireling): its page shows first
     std::vector<std::vector<TextLine>> handheld_hovers;   // this frame's hover text, kept off the frame for the page to show
     void toggle_help();                     // UI 0x18: only a flag in 1.14d (FUN_00456ee0 draws nothing for it)                // Show Portraits toggled them off
     std::filesystem::path shot_dir;               // Screen Shot's folder (main sets it)

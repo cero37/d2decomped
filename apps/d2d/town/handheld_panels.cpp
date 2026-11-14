@@ -155,19 +155,48 @@ void draw_handheld_hover(std::vector<std::uint8_t>& framebuffer, const Scene& sc
 // a trade with another player, the party, the hireling.
 auto Town::handheld_fit_panel(const Mouse& mouse) -> bool {
         g_bottom_map.clear();
-        if (!scene || party.open || hireling.open || (net_game && net_game->trade.state != 0)) return false;
-        enum Kind { kNoPage, kWaypoints, kTree, kInventory, kCharacter, kGoldBox, kStore, kStash, kCube, kQuests };
-        const bool on_left = mouse.x < int(kScreenWidth) / 2;        // two panels up: the page of the side the cursor is on
-        const Kind kind = gold_box ? kGoldBox
+        if (!scene) return false;
+        enum Kind { kNoPage, kWaypoints, kTree, kInventory, kCharacter, kGoldBox, kStore, kStash, kCube, kQuests, kSpeech, kNpcMenu, kHireling };
+        bool on_left = mouse.x < int(kScreenWidth) / 2;              // two panels up: the page of the side the cursor is on
+        // A store, the stash or the hireling just opened beside the bag: its page first, wherever the cursor was.
+        {
+            const auto& stash = scene->stash_layout[character.expansion ? 1 : 0];
+            const auto& torso = scene->merc_layout.slots[std::size_t(d2d::d2s::body_location::kTorso)];
+            const int beside = store.npc >= 0 ? 1 : stash_open && !cube_open ? 2 : hireling.open && view.merc_sheet ? 3 : 0;
+            if (beside != std::exchange(handheld_beside, beside) && beside != 0) {
+                if (!on_left) cursor_move = beside == 1 ? std::pair{ 96 + 14, 123 + 14 } : beside == 2 ? std::pair{ stash.grid_x + stash.box_w / 2, stash.grid_y + stash.box_h / 2 }
+                                                                                                    : std::pair{ torso[0] + torso[2] / 2, torso[1] + torso[3] / 2 };
+                handheld_left = true;
+            }
+            // Beside the bag the page is the side the cursor was last on a cell or a slot of: a button of one side's page
+            // may stand for a point on the other side of the frame (Sell, from the bag's page) and must not turn the page.
+            if (beside != 0) {
+                const auto& bag = scene->inv_layout[std::size_t(std::max(character.character_class, 0))];
+                const auto in = [&](int left, int top, int width, int height) { return mouse.x >= left && mouse.x < left + width && mouse.y >= top && mouse.y < top + height; };
+                bool in_bag = in(bag.grid_x, bag.grid_y, bag.cols * bag.box_w, bag.rows * bag.box_h);
+                for (const auto& box : bag.slots) in_bag = in_bag || (box[2] > 0 && in(box[0], box[1], box[2], box[3]));
+                bool in_other = beside == 1 ? in(96, 123, 290, 290) : beside == 2 ? in(stash.grid_x, stash.grid_y, stash.cols * stash.box_w, stash.rows * stash.box_h) : false;
+                if (beside == 3) for (const auto& box : scene->merc_layout.slots) in_other = in_other || (box[2] > 0 && in(box[0], box[1], box[2], box[3]));
+                if (in_bag) handheld_left = false; else if (in_other) handheld_left = true;
+                on_left = handheld_left;
+            }
+        }
+        const bool words = speech.npc >= 0, choices = npc_menu.npc >= 0 && !npc_menu.list && !npc_menu.lines.empty();
+        if (!words && !choices && (party.open || (net_game && net_game->trade.state != 0))) return false;
+        const bool merc = hireling.open && view.merc_sheet;
+        const Kind kind = words ? kSpeech : choices ? kNpcMenu
+                        : gold_box ? kGoldBox
                         : store.npc >= 0 ? (on_left || !inv_open ? kStore : kInventory)
                         : cube_open ? kCube
                         : stash_open ? (on_left || !inv_open ? kStash : kInventory)
+                        : merc ? (on_left || !inv_open ? kHireling : kInventory)
                         : waypoint.open ? kWaypoints
                         : quest_log.open ? (on_left || !(inv_open || tree_open) ? kQuests : tree_open ? kTree : kInventory)
                         : inv_open && char_open ? (mouse.x < int(kScreenWidth) / 2 ? kCharacter : kInventory)
                         : tree_open && char_open ? (mouse.x < int(kScreenWidth) / 2 ? kCharacter : kTree)
                         : tree_open ? kTree : inv_open ? kInventory : char_open ? kCharacter : kNoPage;
         if (kind == kNoPage) return false;
+        if (kind == kSpeech || kind == kNpcMenu) handheld_hovers.clear();   // whatever lies under an NPC's page says nothing over it
         static std::vector<std::uint8_t> pixels;
         pixels.assign(std::size_t(kW) * kH * 4, 0);
         Page page{ pixels, *scene };
@@ -310,12 +339,39 @@ auto Town::handheld_fit_panel(const Mouse& mouse) -> bool {
             const std::string gold_words = std::format("Gold {}", stats.get(d2d::d2s::kGold));
             page.text(small, gold_words, (kW - grid_w) / 2, line_y, kGold);
             map.spots.push_back({ (kW - grid_w) / 2 - 2, line_y - 7, (kW - grid_w) / 2 + small.measure(gold_words) + 6, line_y + 7, 493, 462 });
-            if (store.npc >= 0 || stash_open) {
+            if (store.npc >= 0 || stash_open || merc) {
                 const auto& stash = scene->stash_layout[character.expansion ? 1 : 0];
+                const auto& torso = scene->merc_layout.slots[std::size_t(body::kTorso)];
                 const int right = (kW + grid_w) / 2;
-                turn(right - 96, line_y - 8, right, line_y + 8, store.npc >= 0 ? "To the store" : "To the stash",
-                     store.npc >= 0 ? 96 + 14 : stash.grid_x + stash.box_w / 2, store.npc >= 0 ? 123 + 14 : stash.grid_y + stash.box_h / 2);
+                if (store.npc >= 0) {
+                    turn(right - 84, line_y - 8, right, line_y + 8, "To the store", 96 + 14, 123 + 14);
+                    // Sell, as the store's own button: on, a thing touched twice (once to read its price) is sold.
+                    const bool selling = store.mode == 2;
+                    page.box(right - 84 - 4 - 78, line_y - 8, right - 84 - 4, line_y + 8, selling);
+                    page.text(small, selling ? "Selling: on" : "Sell: off", right - 84 - 4 - 39, line_y, selling ? kWhite : kInk, 0);
+                    map.spots.push_back({ right - 84 - 4 - 78, line_y - 8, right - 84 - 4, line_y + 8, kCharPanelX - 1 + 169 + 22, 453 });
+                }
+                else if (stash_open) turn(right - 96, line_y - 8, right, line_y + 8, "To the stash", stash.grid_x + stash.box_w / 2, stash.grid_y + stash.box_h / 2);
+                else turn(right - 96, line_y - 8, right, line_y + 8, "To the hireling", torso[0] + torso[2] / 2, torso[1] + torso[3] / 2);
             } else page.text(small, "B: close", (kW + grid_w) / 2, line_y, kDimInk, 1);
+            // The thing the cursor is on, if it can be used (a scroll, a tome, a potion): a button for it, which a finger has no
+            // right click for. Identify then asks for the thing to identify: a touch on it (twice: once to read it).
+            if (store.npc < 0) {
+                const int left = (kW - grid_w) / 2 + small.measure(gold_words) + 12, right = (kW + grid_w) / 2 - (stash_open || merc ? 104 : 60);
+                const d2d::d2s::Item* under = held ? nullptr : bag_at(mouse.x, mouse.y);
+                if (identify_with >= 0) page.text(small, "Touch what to identify", (left + right) / 2, line_y, kGold, 0);
+                else if (under) {
+                    const auto use = item_use(*under);
+                    if (use.kind != ItemUseKind::None && right - left >= 60) {
+                        const std::string label = "Use: " + std::string(use.label);
+                        page.box(left, line_y - 8, right, line_y + 8, true);
+                        page.text(small, small.measure(label) <= right - left - 6 ? label : std::string("Use"), (left + right) / 2, line_y, kWhite, 0);
+                        BottomMap::Spot spot{ left, line_y - 8, right, line_y + 8, mouse.x, mouse.y };
+                        spot.use = true;
+                        map.spots.push_back(spot);
+                    } else if (!use.label.empty()) page.text(small, std::string(use.label), (left + right) / 2, line_y, kDimInk, 0);
+                }
+            }
         } else if (kind == kTree) {
             // The tree's own art (icons, the lines between them) at a size that shows all six rows; its tabs in words beside it.
             constexpr int kSrcX = kTreeR - 0x131 - 8, kSrcY = kTreeB - 0x1a2 - 0x30 - 6, kSrcW = 0x131 - 0xa7 + 0x30 + 22, kSrcH = 0x1a2 - 0x4d + 0x30 + 18;
@@ -378,6 +434,83 @@ auto Town::handheld_fit_panel(const Mouse& mouse) -> bool {
             }
             const auto close = skill_tree_close(character.character_class, tree_tab);
             button(kW - 84, 212, kW - 4, 237, "Close", close.left + 17, close.bottom - 17, close.contains(mouse.x, mouse.y));
+        } else if (kind == kSpeech) {
+            // What an NPC says: the frame's box shows six lines of it; here the whole screen's worth rises past, in the
+            // speech's own font and at its own pace (Speech::offset_px, which the voice keeps time with).
+            const auto& told = scene->font_formal11.line_height() > 0 ? scene->font_formal11 : font;
+            const auto& pal = scene->act_pal.entries().empty() ? scene->pal : scene->act_pal;
+            const int cell = told.sheet().frames_per_direction() > 0 ? int(told.sheet().frame(0, 0).height) : 16;
+            constexpr int kTop = 4, kBottom = 208;
+            page.rect(0, kTop - 2, kW, kBottom + 2, { 20, 17, 14 });
+            int widest = 0;
+            for (const auto& line : speech.lines) widest = std::max(widest, told.measure(line));
+            const int left = std::max(4, (kW - widest) / 2), offset = speech.offset_px(now_ms);
+            for (std::size_t index = 0; index < speech.lines.size(); ++index) {
+                // The frame's box has a line enter at its foot (112 rows down) and leave at its top; here it enters 92 rows
+                // further down (five lines sooner) and leaves at the same moment, so the page starts half full.
+                const int base = kTop + 112 - offset + int(index) * 18;
+                if (base - cell + 1 >= kBottom || base < kTop) continue;
+                told.draw_tinted(pixels, kW, kH, pal, left, base - cell + 1, speech.lines[index], 255, 255, 255, kTop, kBottom);
+            }
+            page.box(4, 212, kW - 4, 237, false);
+            page.text(page.fit("Touch, or press A or B, to close", kW - 16), "Touch, or press A or B, to close", kW / 2, 224, kInk, 0);
+            map.spots.push_back({ 0, 0, kW, kH, mouse.x, mouse.y });       // any press shuts the speech: the cursor stays where it is
+        } else if (kind == kNpcMenu) {
+            // An NPC's menu (and its talk list, a confirmation, a refusal): its heading, then a large row for each choice.
+            MenuPage list;
+            list.active = true;
+            int base = npc_menu.y;
+            const int over_line = npc_menu.line_at(mouse.x, mouse.y);
+            for (std::size_t index = 0; index < npc_menu.lines.size(); ++index) {
+                const auto& line = npc_menu.lines[index];
+                base += line.height;
+                if (line.text.empty()) continue;
+                if (line.header) { if (list.heading.empty()) list.heading = line.text; else list.notes.push_back(line.text); continue; }
+                list.add(line.text, npc_menu.x + npc_menu.box_width / 2, base - line.height / 2, over_line == int(index));
+            }
+            draw_menu_page(list, *scene);
+            pixels = list.pixels;
+            for (const auto& row : list.rows) map.spots.push_back({ row.left, row.top, row.right, row.bottom, row.x, row.y });
+        } else if (kind == kHireling) {
+            // The hireling: what it wears, pixel for pixel (a weapon, the helm over the armour, the other hand), and its sheet in words.
+            namespace body = d2d::d2s::body_location;
+            const auto& sheet = *view.merc_sheet;
+            const auto slot = [&](int which) { return scene->merc_layout.slots[std::size_t(which)]; };
+            const bool left_first = slot(body::kRightArm)[0] <= slot(body::kLeftArm)[0];
+            const std::array<std::vector<int>, 3> columns{ { { left_first ? body::kRightArm : body::kLeftArm }, { body::kHead, body::kTorso }, { left_first ? body::kLeftArm : body::kRightArm } } };
+            int x = 2;
+            for (const auto& column : columns) {
+                int y = 24, wide = 0;
+                for (const int which : column) {
+                    const auto box = slot(which);
+                    if (box[2] <= 0) continue;
+                    map.pieces.push_back(part(box[0] - 1, box[1] - 1, box[2] + 2, box[3] + 2, x, y, 1.f, true));
+                    y += box[3] + 4; wide = std::max(wide, box[2] + 2);
+                }
+                x += wide + 2;
+            }
+            for (const auto& piece : map.pieces) page.piece(ui_buffer, piece);
+            page.text(page.fit(merc_label, x - 6), merc_label, 4, 11, kGold);
+            int y = 12;
+            const int side = x + 6;
+            const auto line = [&](const std::string& name, const std::string& value, Rgb c = kWhite) {
+                page.text(small, name, side, y, kInk);
+                page.text(small, value, kW - 6, y, c, 1);
+                y += 15;
+            };
+            line("Level", std::to_string(sheet.level));
+            line("Life", std::format("{} / {}", sheet.life, sheet.max_life));
+            line("Experience", std::to_string(sheet.exp));
+            line("Next level", std::to_string(sheet.next));
+            line("Strength", std::to_string(sheet.str));
+            line("Dexterity", std::to_string(sheet.dex));
+            line("Damage", std::format("{}-{}", sheet.min, sheet.max));
+            line("Defense", std::to_string(sheet.defense));
+            static constexpr std::array<const char*, 4> kMercResist = { "Fire resistance", "Cold resistance", "Lightning res.", "Poison resistance" };
+            for (std::size_t index = 0; index < 4; ++index) line(kMercResist[index], std::to_string(sheet.res[index]), sheet.res[index] < 0 ? Rgb{ 255, 77, 77 } : kWhite);
+            const int close_x = kCharPanelX + 0x110 + 16, close_y = int(kScreenHeight) - 0x3f - kCharPanelY - 16;
+            if (inv_open) turn(side - 4, 196, kW - 4, 216, "To my items", to_inventory_x, to_inventory_y);
+            button(side - 4, 218, kW - 4, 238, "Close", close_x, close_y, over(close_x - 16, close_y - 16, 33, 33));
         } else if (kind == kGoldBox) {
             // The gold box as it is, and its four buttons large beside the finger: less, more (held, they run), OK, Cancel.
             map.pieces.push_back(part(215, 140, 210, 158, (kW - 210) / 2, 2));
@@ -397,13 +530,16 @@ auto Town::handheld_fit_panel(const Mouse& mouse) -> bool {
                 const bool empty = store.tabs[std::size_t(tab)].empty();
                 button(side, 4 + tab * 25, kW - 2, 4 + tab * 25 + 23, string_id(*scene, kTabString[std::size_t(tab)]), kCharPanelX + 80 * tab + 40, 75, tab == store.tab, empty);
             }
-            // Its own buttons (buy, sell, repair...), as drawn: two to a row.
+            // Its four buttons in words (the frame's are pictures): Buy and Sell stay down while on, as there.
             static constexpr int kButtonX[4] = { 116, 169, 221, 273 };
+            const bool repairs = store_button_frames(store)[2] == 6;
+            const std::array<std::string, 4> names{ "Buy", "Sell", repairs ? "Repair" : "", repairs ? "Repair All" : "Leave" };
             for (int index = 0; index < 4; ++index) {
-                map.pieces.push_back(part(kCharPanelX - 1 + kButtonX[index] - 2, 432, 38, 46, side + index % 2 * 40, 106 + index / 2 * 48));
-                page.piece(ui_buffer, map.pieces.back());
+                if (names[std::size_t(index)].empty()) continue;
+                const bool down = (index < 2 && store.mode == index + 1) || (index == 2 && store.mode == 3);
+                button(side, 106 + index * 22, kW - 2, 106 + index * 22 + 20, names[std::size_t(index)], kCharPanelX - 1 + kButtonX[index] + 22, 453, down);
             }
-            page.text(small, std::format("Gold {}", stats.get(d2d::d2s::kGold)), side + 2, 208, kGold);
+            page.text(small, std::format("Gold {}", stats.get(d2d::d2s::kGold)), side + 2, 204, kGold);
             if (inv_open) turn(side, 216, kW - 2, 237, "To my items", to_inventory_x, to_inventory_y);
         } else if (kind == kStash) {
             const auto& stash = scene->stash_layout[character.expansion ? 1 : 0];
@@ -480,14 +616,24 @@ auto Town::handheld_fit_panel(const Mouse& mouse) -> bool {
         }
         // The pad's cursor starts where the frame left it, which may be on nothing the page shows: then it goes to the
         // page's main piece (the grid's first cell; the tree has its own start, Town::pad_focus) or its first button.
-        if (int at_x = 0, at_y = 0; pad_playing && kind != kTree && !map.to_page(mouse.x, mouse.y, at_x, at_y)) {
+        if (int at_x = 0, at_y = 0; pad_playing && kind != kTree && kind != kSpeech && kind != kNpcMenu && !map.to_page(mouse.x, mouse.y, at_x, at_y)) {
             const BottomMap::Piece* start = nullptr;
             for (const auto& piece : map.pieces) if (piece.look_first) start = &piece;
             if (start) cursor_move = std::pair{ start->src_x + std::min(14, start->src_w / 2), start->src_y + std::min(14, start->src_h / 2) };
             else if (!map.spots.empty()) cursor_move = std::pair{ map.spots.front().x, map.spots.front().y };
         }
+        // What the pad's buttons would do with the thing under the cursor ("X to buy", "Hold B to sell"...), which the
+        // frame writes at its foot: along the page's foot here, with the hold's progress under it.
+        if (pad_playing && !pad_hold_text.empty() && (kind == kInventory || kind == kStore || kind == kStash || kind == kCube || kind == kHireling)) {
+            Page foot{ pixels, *scene };
+            const int width = std::min(kW - 4, small.measure(pad_hold_text) + 12), left = (kW - width) / 2;
+            foot.rect(left, kH - 15, left + width, kH, { 110, 94, 66 });
+            foot.rect(left + 1, kH - 14, left + width - 1, kH - 1, { 12, 10, 8 });
+            foot.text(small, pad_hold_text, kW / 2, kH - 8, kGold, 0);
+            if (pad_hold_fraction > 0.f) foot.rect(left + 1, kH - 3, left + 1 + int(float(width - 2) * std::clamp(pad_hold_fraction, 0.f, 1.f)), kH - 1, kLit);
+        }
         // The pad's cursor on the page: a small ring where its point lands (the hand itself is drawn over it).
-        if (int at_x = 0, at_y = 0; pad_playing && !held && map.to_page(mouse.x, mouse.y, at_x, at_y)) {
+        if (int at_x = 0, at_y = 0; pad_playing && !held && map.on_piece(mouse.x, mouse.y) && map.to_page(mouse.x, mouse.y, at_x, at_y)) {
             Page ring{ pixels, *scene };
             for (const auto& [grow, c] : { std::pair{ 7, Rgb{ 20, 16, 10 } }, std::pair{ 6, kLit }, std::pair{ 5, kLit } }) {
                 ring.rect(at_x - grow, at_y - grow, at_x + grow + 1, at_y - grow + 1, c); ring.rect(at_x - grow, at_y + grow, at_x + grow + 1, at_y + grow + 1, c);
