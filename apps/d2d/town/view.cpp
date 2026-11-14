@@ -229,6 +229,13 @@ void view_units(const Scene& scene, const View& view, float camera_x, float came
         const bool down = monster.buried, row = !down && monster.seq_frame >= 0;   // a sequence: its row's mode and frame
         const auto& anim = scene.npc_anim(monster.npc, down ? std::string_view("S1") : row ? monster.seq_mode : std::string_view(monster.mode));
         const auto mpf = anim.ms_per_frame();
+        // A handheld reads animations on a worker when first drawn: its death and corpse are asked for
+        // while it's still on its feet, so it falls at once, not a few frames late in its old pose
+        // (which then had the corpse replay the fall from the top while that was read).
+        if (Scene::g_anim_async && !down && !row) {
+            if (monster.alive()) (void)scene.npc_anim(monster.npc, "DT").ready();
+            if (monster.alive() || monster.mode == "DT") (void)scene.npc_anim(monster.npc, "DD").ready();
+        }
         // No name, so no hover, for a converted one, and a click there walks.
         // game.exe's hit test (FUN_00466870) drops a unit FUN_00465c60 refuses: outside town a
         // monster of the player's alignment (cursor-units.md).

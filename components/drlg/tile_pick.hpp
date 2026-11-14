@@ -6,10 +6,12 @@
 
 #include <rules.hpp>
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <cstring>
 #include <string>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -20,7 +22,21 @@ struct Dt1Head { int orient = 0, style = 0, seq = 0, rarity = 0, material = 0; }
 struct Dt1File {
     std::string name;                                   // lower-case file name
     std::vector<Dt1Head> tiles;                         // file order
+    // The tiles by (orient, style, seq), each key's in reverse file order (index_tiles): a pick
+    // looks its key up, where scanning every header of every DT1 per pick was most of a lay.
+    struct Keyed { int orient, style, seq, index; };
+    std::vector<Keyed> by_key;
 };
+// Dt1File::by_key, built once the headers are read (never lazily: builds on workers share files).
+inline void index_tiles(Dt1File& file) {
+    file.by_key.clear();
+    file.by_key.reserve(file.tiles.size());
+    for (int i = 0; i < int(file.tiles.size()); ++i)
+        file.by_key.push_back({ file.tiles[std::size_t(i)].orient, file.tiles[std::size_t(i)].style, file.tiles[std::size_t(i)].seq, i });
+    std::ranges::sort(file.by_key, [](const Dt1File::Keyed& a, const Dt1File::Keyed& b) {
+        return std::tie(a.orient, a.style, a.seq, b.index) < std::tie(b.orient, b.style, b.seq, a.index);
+    });
+}
 template <class Bytes> Dt1File dt1_heads(std::string name, const Bytes& bytes) {
     Dt1File file{ std::move(name), {} };
     auto read_i32 = [&](std::size_t offset) { std::int32_t value = 0; if (offset + 4 <= bytes.size()) std::memcpy(&value, bytes.data() + offset, 4); return value; };
@@ -29,6 +45,7 @@ template <class Bytes> Dt1File dt1_heads(std::string name, const Bytes& bytes) {
         const auto header = std::size_t(off) + std::size_t(i) * 0x60;
         file.tiles.push_back({ read_i32(header + 0x14), read_i32(header + 0x18), read_i32(header + 0x1c), read_i32(header + 0x20), (read_i32(header + 4) >> 16) & 0xffff });
     }
+    index_tiles(file);
     return file;
 }
 
@@ -63,9 +80,15 @@ inline std::vector<const Dt1File*> room_dt1_list(std::uint32_t mask, const RoomD
 inline std::vector<std::pair<const Dt1File*, int>> tile_candidates(const std::vector<const Dt1File*>& list, int orient, int style, int seq) {
     std::vector<std::pair<const Dt1File*, int>> candidates;
     for (const auto* file : list) {
-        for (int i = int(file->tiles.size()) - 1; i >= 0 && candidates.size() < 40; --i) {
-            const auto& tile = file->tiles[std::size_t(i)];
-            if (tile.orient == orient && tile.style == style && tile.seq == seq) candidates.emplace_back(file, i);
+        if (file->by_key.size() == file->tiles.size()) {
+            const auto key = [](const Dt1File::Keyed& keyed) { return std::tuple{ keyed.orient, keyed.style, keyed.seq }; };
+            const auto [first, last] = std::ranges::equal_range(file->by_key, std::tuple{ orient, style, seq }, {}, key);
+            for (auto it = first; it != last && candidates.size() < 40; ++it) candidates.emplace_back(file, it->index);
+        } else {
+            for (int i = int(file->tiles.size()) - 1; i >= 0 && candidates.size() < 40; --i) {
+                const auto& tile = file->tiles[std::size_t(i)];
+                if (tile.orient == orient && tile.style == style && tile.seq == seq) candidates.emplace_back(file, i);
+            }
         }
         if (candidates.size() >= 40) break;
     }
