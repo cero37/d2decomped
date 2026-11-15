@@ -133,7 +133,13 @@ auto Town::draw(std::vector<std::uint8_t>& framebuffer, const Mouse& mouse, std:
                     drive_wheel(put);
                 }
             } else if (y < 22 && pad_field()) skill_strip = 0;
-            else if (y < 166) g_handheld_zoom = (g_handheld_zoom + 1) % 3;
+            else if (y < 166) {
+                g_handheld_zoom = (g_handheld_zoom + 1) % 3;
+                // Say so: a play tester's tap on the map zoomed the world in and they found no way back.
+                static constexpr std::array<const char*, 3> kZoom = { "View: close", "View: normal", "View: far" };
+                belt_note = std::string(kZoom[std::size_t(std::clamp(g_handheld_zoom, 0, 2))]) + "  (touch the map again to change)";
+                belt_note_at = std::max<std::uint32_t>(1, std::uint32_t(SDL_GetTicks()));
+            }
         }
         g_bottom_touch.released = false;
         // A touch on the bar under an open panel: flip its halves, or close it (as Esc does).
@@ -654,7 +660,7 @@ auto Town::draw_view(std::vector<std::uint8_t>& framebuffer, std::vector<std::ui
             }
         }
         // A belt slot just used (the D-pad): what went, over the prompt's line, for a second and a half.
-        if (g_world_only && wide && !belt_note.empty() && belt_note_at && std::uint32_t(SDL_GetTicks()) - belt_note_at < 1500) {
+        if (g_world_only && wide && !belt_note.empty() && belt_note_at && std::uint32_t(SDL_GetTicks()) - belt_note_at < (belt_note.starts_with("View:") ? 3000u : 1500u)) {
             const auto& pal = scene->act_pal.entries().empty() ? scene->pal : scene->act_pal;
             const auto& font = g_handheld_zoom > 0 && scene->font24.line_height() > 0 ? scene->font24 : scene->font;
             const int width = fb_width(*wide), line = font.line_height();

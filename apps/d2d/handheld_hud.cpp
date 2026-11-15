@@ -314,6 +314,23 @@ void draw_bottom_hud(std::vector<std::uint8_t>& framebuffer, const Scene& scene,
                 placed.push_back({ tx - 2, ty, tx + width + 2, ty + 11 });
                 small_font.draw_tinted(framebuffer, kScreenWidth, kScreenHeight, pal, tx, ty, words, 240, 210, 120);
             }
+            // The camp's people: a pale dot and the name, on the map only (one off it isn't shown), clear of the other names.
+            for (const auto& person : g_map_people) {
+                const int mx = int(std::lround((person.x - person.y) * 80 / float(kDivisor))) - scroll_x + 8;
+                const int my = int(std::lround((person.x + person.y) * 40 / float(kDivisor))) - scroll_y - 8;
+                if (mx < x0 + 2 || mx > x1 - 2 || my < y0 + 2 || my > y1 - 2) continue;
+                for (int d = -1; d <= 1; ++d) for (int e = -1; e <= 1; ++e) canvas.put(mx + d, my + e, 170, 220, 255);
+                const int width = small_font.measure(person.text);
+                const int tx = std::clamp(mx - width / 2, x0 + 1, x1 - width - 1);
+                int ty = -1;
+                for (int step = 0; step < 6; ++step) {
+                    const int candidate = std::clamp(my - 13 + (step + 1) / 2 * 11 * (step % 2 ? 1 : -1), y0 + 1, y1 - 11);
+                    if (!clashes(tx - 2, candidate, tx + width + 2, candidate + 11)) { ty = candidate; break; }
+                }
+                if (ty < 0) continue;                                // no free line near: the dot alone
+                placed.push_back({ tx - 2, ty, tx + width + 2, ty + 11 });
+                small_font.draw_tinted(framebuffer, kScreenWidth, kScreenHeight, pal, tx, ty, person.text, 170, 220, 255);
+            }
             mark(state.map_x, state.map_y, { 80, 120, 255 });
         }
     }

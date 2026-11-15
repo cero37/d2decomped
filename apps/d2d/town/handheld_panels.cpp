@@ -236,6 +236,14 @@ auto Town::handheld_sell(int mouse_x, int mouse_y) -> bool {
 
 auto Town::handheld_map_labels() -> void {
     static const Level* made_for = nullptr;
+    g_map_people.clear();
+    if (g_world_only && scene && level && d2d::rules::level_ids::is_town(level->id))   // each frame: they walk about
+        for (std::size_t i = 0; i < level->npcs.size(); ++i) {
+            const auto& npc = level->npcs[i];
+            const UnitState* state = i < view.npc_states.size() ? &view.npc_states[i] : nullptr;
+            if (npc.root == "objects" || npc.name.empty() || (state && state->hidden)) continue;
+            g_map_people.push_back({ (state ? state->x : npc.x) + float(level->world_x), (state ? state->y : npc.y) + float(level->world_y), npc.name });
+        }
     if (!g_world_only || !scene || !level || !world.game_data) { g_map_labels.clear(); made_for = nullptr; return; }
     if (made_for == level) return;
     made_for = level;
@@ -629,7 +637,7 @@ auto Town::handheld_fit_panel(const Mouse& mouse) -> bool {
                 told.draw_tinted(pixels, kW, kH, pal, left, base - cell + 1, speech.lines[index], 255, 255, 255, kTop, kBottom);
             }
             page.box(4, 212, kW - 4, 237, false);
-            const std::string foot = "Up / Down: read on    A, B or touch: close";
+            const std::string foot = "Up: back  Down: on    A, B or touch: close";
             page.text(page.fit(foot, kW - 16), foot, kW / 2, 224, kInk, 0);
             map.spots.push_back({ 0, 0, kW, kH, mouse.x, mouse.y });       // any press shuts the speech: the cursor stays where it is
         } else if (kind == kNpcMenu) {
@@ -716,7 +724,18 @@ auto Town::handheld_fit_panel(const Mouse& mouse) -> bool {
                 const bool down = (index < 2 && store.mode == index + 1) || (index == 2 && store.mode == 3);
                 button(side, 106 + index * 22, kW - 2, 106 + index * 22 + 20, names[std::size_t(index)], kCharPanelX - 1 + kButtonX[index] + 22, 453, down);
             }
-            page.text(small, stats.get(d2d::d2s::kGold) ? std::format("Gold {}", stats.get(d2d::d2s::kGold)) : std::string("No gold"), side + 2, 204, kGold);
+            // Buy the stock the cursor is on, for its price, with a touch: a finger had no way to buy (the pad has X / Y).
+            const int gold_now = int(stats.get(d2d::d2s::kGold));
+            if (const int stock = store_item_at(*scene, store, mouse.x, mouse.y); stock >= 0 && !held && store.mode != 2) {
+                const auto& ware = store.tabs[std::size_t(store.tab)][std::size_t(stock)];   // an index of the tab
+                const int cost = d2d::rules::item_price(scene->rules, ware, store.npc_id, false, store.header, store.reduced);
+                const bool afford = cost >= 0 && cost <= gold_now;
+                const std::string words = cost < 0 ? std::string("Buy") : afford ? std::format("Buy for {}", cost) : std::format("{} gold: too dear", cost);
+                page.box(side, 194, kW - 2, 214, afford, !afford);
+                page.text(page.fit(words, kW - 2 - side - 6), words, (side + kW - 2) / 2, 204, afford ? kWhite : kDimInk, 0);
+                if (afford) { BottomMap::Spot spot{ side, 194, kW - 2, 214, mouse.x, mouse.y }; spot.buy = true; map.spots.push_back(spot); }
+            } else
+                page.text(small, gold_now ? std::format("Gold {}", gold_now) : std::string("No gold"), side + 2, 204, kGold);
             if (inv_open) turn(side, 216, kW - 2, 237, "To my items", to_inventory_x, to_inventory_y);
         } else if (kind == kStash) {
             const auto& stash = scene->stash_layout[character.expansion ? 1 : 0];

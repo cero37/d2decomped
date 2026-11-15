@@ -950,6 +950,10 @@ int run_windowed(std::vector<std::uint8_t>& framebuffer,
                                 if (down) { (void)town.handheld_sell(mouse.x, mouse.y); pad_in_use = false; mouse_took_over = true; }
                                 continue;
                             }
+                            if (how == BottomMap::kBuy) {              // Buy for N: the store's thing under the cursor, bought (as the pad's X)
+                                if (down) { town.pad_trade(mouse.x, mouse.y); pad_in_use = false; mouse_took_over = true; }
+                                continue;
+                            }
                             if (how == BottomMap::kUse) {              // the page's Use button: a right click where the cursor is
                                 if (down) { mouse.rpress_this_frame = true; pad_in_use = false; mouse_took_over = true; }
                                 continue;

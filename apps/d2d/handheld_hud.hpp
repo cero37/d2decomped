@@ -59,6 +59,8 @@ inline BottomSkills g_bottom_skills;
 // player) and where to. A new player found no way out of the camp (the emulator play test).
 struct MapLabel { float x = 0, y = 0; std::string text; };
 inline std::vector<MapLabel> g_map_labels;
+// The camp's people, on the same map (a play tester spent 35 moves looking for Akara): where each stands now, and the name.
+inline std::vector<MapLabel> g_map_people;
 // Which of the list's nine buttons, or of the ring's `shown` icons, a touch at (x, y) is on; -1 for none.
 int bottom_strip_hit(int x, int y);
 int bottom_wheel_hit(int x, int y, int shown);
@@ -121,8 +123,8 @@ struct BottomMap {
     struct Piece { int src_x = 0, src_y = 0, src_w = 0, src_h = 0, dst_x = 0, dst_y = 0; float scale = 1.f; bool look_first = false; };
     // move: the touch only puts the cursor at the point (to bring the other side's page), no click.
     // use: the touch is a right click where the cursor is (the thing under it is used), not a click at the point.
-    struct Spot { int left = 0, top = 0, right = 0, bottom = 0, x = 0, y = 0; bool move = false, use = false, stash = false, sell = false; };
-    enum Touch { kClick, kLookFirst, kMove, kUse, kStash, kSell };
+    struct Spot { int left = 0, top = 0, right = 0, bottom = 0, x = 0, y = 0; bool move = false, use = false, stash = false, sell = false, buy = false; };
+    enum Touch { kClick, kLookFirst, kMove, kUse, kStash, kSell, kBuy };
     bool on = false;
     std::vector<Piece> pieces;
     std::vector<Spot> spots;
@@ -136,6 +138,7 @@ struct BottomMap {
                 if (how && spot.use) *how = kUse;
                 if (how && spot.stash) *how = kStash;
                 if (how && spot.sell) *how = kSell;
+                if (how && spot.buy) *how = kBuy;
                 return true;
             }
         for (const auto& piece : pieces) {
