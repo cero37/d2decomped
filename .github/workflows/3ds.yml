@@ -38,12 +38,22 @@ jobs:
       - name: Build dependencies
         run: |
           [ -f .deps-3ds/prefix/lib/libSDL3.a ] || DEPS=.deps-3ds JOBS=4 sh platform/3ds/deps.sh
+      # A compiler cache kept between runs: a from-scratch build is ~12 min, most pushes change a few files.
+      - name: Compiler cache
+        uses: actions/cache@v4
+        with:
+          path: .ccache
+          key: 3ds-ccache-${{ github.sha }}
+          restore-keys: 3ds-ccache-
       - name: Build
         run: |
+          command -v ccache >/dev/null || (apt-get update -qq && apt-get install -y -qq ccache >/dev/null)
           export PATH=$PATH:/opt/devkitpro/devkitARM/bin:/opt/devkitpro/tools/bin
+          export CCACHE_DIR="$GITHUB_WORKSPACE/.ccache" CCACHE_MAXSIZE=2G CCACHE_COMPRESS=1 CCACHE_BASEDIR="$GITHUB_WORKSPACE"
           cmake -S platform/3ds -B build-3ds -G Ninja -DCMAKE_TOOLCHAIN_FILE=/opt/devkitpro/cmake/3DS.cmake \
-            -DD2D_3DS_DEPS="$GITHUB_WORKSPACE/.deps-3ds"
-          cmake --build build-3ds -j 3
+            -DD2D_3DS_DEPS="$GITHUB_WORKSPACE/.deps-3ds" -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+          cmake --build build-3ds -j 4
+          ccache -s | head -5
           arm-none-eabi-strip -o build-3ds/d2d-stripped.elf build-3ds/d2d.elf
       - name: Banner and icon
         run: |
