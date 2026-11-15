@@ -9,6 +9,7 @@
 #include "scene.hpp"
 #include "watchdog.hpp"
 
+#include <level_ids.hpp>
 #include <SDL3/SDL_timer.h>
 #include <cof.hpp>
 #include <combat.hpp>
@@ -444,6 +445,9 @@ void render_world(std::vector<std::uint8_t>& framebuffer,
     // test). Over the hero's own pixels the half blend changes nothing; over what hides it, it shows a ghost.
     struct HeroDraw { const Scene::PlayerAnim* anim; d2d::palette::Palette pal; int dir; std::uint32_t at; int x, y; };
     std::optional<HeroDraw> hero_draw;
+    // ... and the others near the hero (monsters, a hireling, the camp's people): a pack behind a tree took a
+    // tester from 71 to 32 with nothing on screen (the emulator play test, round 12).
+    std::vector<HeroDraw> near_draws;
     auto draw_units_through = [&](int diag) {
         for (; next_unit < order.size() && diag_of(order[next_unit]) <= diag; ++next_unit) {
             const Unit& unit = *order[next_unit];
@@ -541,6 +545,7 @@ void render_world(std::vector<std::uint8_t>& framebuffer,
                     else if (!blank) {
                         draw_composite(framebuffer, *unit.anim, upal, unit.dir, elapsed, anchor_x, anchor_y);
                         if (g_world_only && unit.npc == -1 && !unit.object) hero_draw = HeroDraw{ unit.anim, upal, unit.dir, elapsed, anchor_x, anchor_y };
+                        else if (g_world_only && !unit.object && !d2d::rules::level_ids::is_town(level.id) && near_draws.size() < 24) near_draws.push_back({ unit.anim, upal, unit.dir, elapsed, anchor_x, anchor_y });
                     }
                     if (!blank && hovered && unit.name && !unit.name->empty()) bounds = composite_bounds(*unit.anim, unit.dir, elapsed, anchor_x, anchor_y);
                 }
@@ -617,7 +622,13 @@ void render_world(std::vector<std::uint8_t>& framebuffer,
         else if (light) blit_dt1_tile_lit(framebuffer, tile, *light, iso_x - kIsoW / 2, iso_y - (std::abs(tile.height) - kIsoH), roof.cell_x, roof.cell_y, 255, cutout);
         else blit_dt1_tile(framebuffer, tile, pal, iso_x - kIsoW / 2, iso_y - (std::abs(tile.height) - kIsoH), 255, cutout);
     }
-    if (hero_draw) draw_composite(framebuffer, *hero_draw->anim, hero_draw->pal, hero_draw->dir, hero_draw->at, hero_draw->x, hero_draw->y, 4);
+    if (hero_draw) {
+        for (const auto& other : near_draws) {
+            const int dx = other.x - hero_draw->x, dy = other.y - hero_draw->y;
+            if (dx * dx + dy * dy <= 220 * 220) draw_composite(framebuffer, *other.anim, other.pal, other.dir, other.at, other.x, other.y, 4);
+        }
+        draw_composite(framebuffer, *hero_draw->anim, hero_draw->pal, hero_draw->dir, hero_draw->at, hero_draw->x, hero_draw->y, 4);
+    }
 }
 
 bool blit_dcc_frame(std::vector<std::uint8_t>& framebuffer,
