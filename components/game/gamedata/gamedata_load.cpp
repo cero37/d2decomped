@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Definitions for gamedata_load.hpp: GameData from the MPQs.
 #include "gamedata_load.hpp"
+#include <malloc.h>
 
 #include "gamedata.hpp"
 #include "log.hpp"
@@ -1806,7 +1807,7 @@ std::optional<GameData> open_game_data(const fs::path& data_dir, const fs::path&
                 auto bytes = mpqs.try_read(R"(data\local\LNG\ENG\expansionstring.tbl)");
                 return bytes ? d2d::tbl::Table(*bytes) : d2d::tbl::Table{};
             }();
-        d2d::log::info("Opened the MPQs and strings ({} ms)", d2d::log::ms() - start_ms);
+        d2d::log::info("Opened the MPQs and strings ({} ms; heap {} KiB)", d2d::log::ms() - start_ms, std::size_t(mallinfo().uordblks) / 1024);
         game_data.patched = patched;
         game_data.data_dir = data_dir;
         game_data.mpqs = std::move(mpqs);
@@ -1817,15 +1818,22 @@ std::optional<GameData> open_game_data(const fs::path& data_dir, const fs::path&
     }
 }
 
+// The heap at a load step (a handheld's 96 MiB: where it goes; racy with the menus' loading on the main thread).
+static void heap_mark(const char* step) { d2d::log::info("  heap after {}: {} KiB", step, std::size_t(mallinfo().uordblks) / 1024); }
+
 void load_game_tables(GameData& game_data, const d2d::mpq::Stack& mpqs) {
+    heap_mark("the menus (before the tables)");
     load_tables(game_data, mpqs);
+    heap_mark("the tables (items, levels, sounds...)");
 }
 
 void load_game_world(GameData& game_data, d2d::mpq::Stack& mpqs, std::uint32_t map_seed) {
     const auto start_ms = d2d::log::ms();
     auto act1 = std::make_unique<d2d::drlg::OutdoorAssets>();
     d2d::drlg::load_outdoor_assets(*act1, [&](const std::string& path) { return mpqs.try_read(path); });
+    heap_mark("act 1 outdoor assets");
     place_act1(game_data, mpqs, *act1, map_seed);
+    heap_mark("act 1 placed (the camp)");
     for (const int level_id : game_data.prest_automap)               // the DT1s preset_rooms picks from
         if (!std::ranges::contains(d2d::rules::level_ids::kMiniatureTowns, level_id))
             if (const auto row = d2d::drlg::level_row(act1->levels, level_id))
@@ -1834,14 +1842,17 @@ void load_game_world(GameData& game_data, d2d::mpq::Stack& mpqs, std::uint32_t m
     // The other levels build when they're first wanted (GameData::level).
     game_data.builder = std::make_shared<GameData::LevelBuilder>();
     game_data.builder->act1 = std::move(act1);
+    heap_mark("preset automap DT1s");
     load_npcs(game_data, mpqs);
+    heap_mark("npcs");
     load_monsters(game_data, mpqs);
+    heap_mark("monsters");
     // The camp's critters: Levels.txt names them by MonStats Id, known only now.
     for (std::size_t row = 0; row < game_data.builder->levels.size(); ++row)
         if (game_data.builder->levels.get(row, "Id") == "1")
             game_data.town.critters = level_critters(game_data.monsters, [&](const std::string& column) { return game_data.builder->levels.get(row, column); });
     load_skills(game_data, mpqs);
-    d2d::log::info("Loading game data... done ({} ms)", d2d::log::ms() - start_ms);
+    d2d::log::info("Loading game data... done ({} ms; heap {} KiB)", d2d::log::ms() - start_ms, std::size_t(mallinfo().uordblks) / 1024);
     d2d::log::info("  Items: {}; sounds: {}; town NPCs/objects: {}",
                    game_data.item_tables ? "tables loaded" : "no item tables",
                    game_data.sounds.size(), game_data.town.npcs.size());

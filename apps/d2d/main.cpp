@@ -30,6 +30,8 @@
 #include "hw_cursor.hpp"
 #include "keyconfig.hpp"
 #include "load.hpp"
+
+#include <malloc.h>
 #include "lobby.hpp"
 #include "platform.hpp"
 #include "roster.hpp"
@@ -866,6 +868,21 @@ int run_windowed(std::vector<std::uint8_t>& framebuffer,
             text_active = want;
         }
         heartbeat_ms.store(frame_start_ms, std::memory_order_relaxed);
+        // A handheld: the menus' backgrounds, logo and fire let go while a game is on, read again for the menus.
+        if (static const bool handheld_art = std::getenv("D2D_HANDHELD") != nullptr; handheld_art && scene) {
+            static bool art_dropped = false;
+            if (!art_dropped && screen == Screen::InGame && town.have_world) {
+                const auto before = std::size_t(mallinfo().uordblks);
+                drop_menu_art(*scene);
+                art_dropped = true;
+                d2d::log::info("memory: the menus' pictures let go ({} KiB)", (before - std::min(before, std::size_t(mallinfo().uordblks))) / 1024);
+            } else if (art_dropped && screen != Screen::InGame) {
+                const auto before = std::size_t(mallinfo().uordblks);
+                try { load_menu_art(*scene); } catch (const std::exception& error) { d2d::log::warn("the menus' pictures: {}", error.what()); }
+                art_dropped = false;
+                d2d::log::info("memory: the menus' pictures read again (+{} KiB)", (std::size_t(mallinfo().uordblks) - std::min(before, std::size_t(mallinfo().uordblks))) / 1024);
+            }
+        }
 
         mouse.press_this_frame = false;
         mouse.release_this_frame = false;
@@ -1883,6 +1900,13 @@ int run_windowed(std::vector<std::uint8_t>& framebuffer,
                 if (const int act = town.view_act(); act != scene->palette_act)
                     load_act_palettes(*scene, scene->mpqs, act);
                 town.update(framebuffer, mouse, keys_this_frame, screen, audio, now_ms, last_ms);
+                // A handheld's heap past 80%: the caches give back early, every 3 s, not only once a build has failed
+                // (from the fifth outdoor area each build ran out and some tiles were never read again: the scripted runs).
+                if (static std::uint32_t trimmed_at = 0; d2d::game::g_free_memory && d2d::game::g_heap_percent.load(std::memory_order_relaxed) >= 80 && now_ms - trimmed_at > 3000) {
+                    trimmed_at = now_ms;
+                    d2d::log::info("memory: heap at {}%, caches trimmed", d2d::game::g_heap_percent.load(std::memory_order_relaxed));
+                    d2d::game::g_free_memory();
+                }
                 // A handheld arriving in another act's town: the game is saved and entered again
                 // there, as Save and Exit then the same character would, so the act left behind
                 // gives its levels' memory back (set_map_seed). Single player on this machine only,

@@ -28,6 +28,7 @@
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <new>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -392,6 +393,10 @@ public:
             return find(name, strict_installer);
         } catch (const InstallerMismatch& error) {   // not damage: a later plain read still gets the base
             d2d::log::warn("{}.", error.what());
+            return std::nullopt;
+        } catch (const std::bad_alloc&) {            // not damage either: out of memory. Never marked failed (the file was then
+            if (!on_main) throw;                      // never read again: black tiles); a level's build gives memory back, tries again
+            d2d::log::warn("{}: out of memory", name);
             return std::nullopt;
         } catch (const std::exception& error) {
             shared_->failed.insert(Archive::key(name));

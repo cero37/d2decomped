@@ -4,6 +4,8 @@
 // of its own; load.hpp fills GameData at start.
 #include "gamedata.hpp"
 
+#include <malloc.h>
+
 #include "ai.hpp"
 #include "log.hpp"
 
@@ -1287,6 +1289,7 @@ std::optional<std::vector<d2d::drlg::Outdoor::RoomSeed>> camp_room_seeds(const G
 
 std::unique_ptr<Level> build_level(const GameData& game_data, GameData::LevelBuilder& builder, int id) {
     const auto start_ms = d2d::log::ms();
+    const auto heap_before = std::size_t(mallinfo().uordblks);   // what a level costs (the handheld's heap: the play tests)
     std::lock_guard lock(builder.mutex);
     if (!builder.mpqs) builder.mpqs = game_data.mpqs.reopen();
     auto& assets = *builder.act1;
@@ -1396,6 +1399,16 @@ std::unique_ptr<Level> build_level(const GameData& game_data, GameData::LevelBui
     stamp_footprints(*level);
 
     d2d::log::info("  {} built ({} ms)", level->name, d2d::log::ms() - start_ms);
+    {
+        std::size_t tiles = 0, cells = 0, picks = 0, room_tiles = 0;
+        for (const auto& archive : level->dt1s) tiles += archive.size();
+        for (const auto& cell : level->picks) { ++cells; picks += cell.size(); }
+        for (const auto& room : level->room_tiles) room_tiles += room[0].size() + room[1].size();
+        d2d::log::info("  {} memory: heap +{} KiB (racy: the main thread allocates too); {} DT1 files, {} tile records ({} B each); "
+                       "{} cells, {} picks ({} B each); {} room tiles; walk grid {} KiB; {} lookups",
+                       level->name, (std::size_t(mallinfo().uordblks) - heap_before) / 1024, level->dt1s.size(), tiles, sizeof(d2d::dt1::Tile),
+                       cells, picks, sizeof(Level::Pick), room_tiles, level->walk.size() * 2 / 1024, level->tile_lookup.size());
+    }
     return level;
 }
 

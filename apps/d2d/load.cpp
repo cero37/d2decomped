@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Definitions for load.hpp: the Scene: GameData (gamedata_load.hpp) plus sprites, fonts, palettes, saves.
 #include "load.hpp"
+#include <malloc.h>
 
 #include "common.hpp"
 #include "gamemenu.hpp"
@@ -475,6 +476,43 @@ void load_saves(Scene& scene, const fs::path& dir) {
     d2d::log::info("Characters: {} in {}", scene.saves.size(), dir.string());
 }
 
+// The menus' big pictures: the screens' backgrounds (LoD's title: the fenced rogue camp at night; classic TitleScreen
+// is the same 4x3 layout), the logo's flames, the fire. A handheld lets them go while a game is on (drop_menu_art:
+// megabytes of a 96 MiB heap that ran out from the fifth area on) and reads them again for the menus.
+void load_menu_art(Scene& scene) {
+    const auto& mpqs = scene.mpqs;
+    auto title = mpqs.try_read(R"(data\global\ui\FrontEnd\gameselectscreenEXP.dc6)");
+    if (!title) title = mpqs.try_read(R"(data\global\ui\FrontEnd\TitleScreen.DC6)");
+    if (!title) throw std::runtime_error("no title screen asset");
+    scene.background = d2d::dc6::Sprite(*title);
+    scene.logo_static = d2d::dc6::Sprite(mpqs.read(R"(data\global\ui\FrontEnd\Diablo2.dc6)"));
+    scene.logo_bl = d2d::dc6::Sprite(mpqs.read(R"(data\global\ui\FrontEnd\D2logoBlackLeft.DC6)"));
+    scene.logo_br = d2d::dc6::Sprite(mpqs.read(R"(data\global\ui\FrontEnd\D2logoBlackRight.DC6)"));
+    scene.logo_fl = d2d::dc6::Sprite(mpqs.read(R"(data\global\ui\FrontEnd\D2logoFireLeft.DC6)"));
+    scene.logo_fr = d2d::dc6::Sprite(mpqs.read(R"(data\global\ui\FrontEnd\D2logoFireRight.DC6)"));
+    scene.credits_bg = [&] {
+            // creditsbckgexpand.dc6 (LoD) -> creditsbckg.dc6 (classic).
+            auto bytes = mpqs.try_read(R"(data\global\ui\CharSelect\creditsbckgexpand.dc6)");
+            if (!bytes) bytes = mpqs.read(R"(data\global\ui\CharSelect\creditsbckg.dc6)");
+            return d2d::dc6::Sprite(*bytes);
+        }();
+    scene.charcreate_bg = [&] {
+            auto bytes = mpqs.try_read(R"(data\global\ui\FrontEnd\charactercreationscreenEXP.dc6)");
+            if (!bytes) bytes = mpqs.read(R"(data\global\ui\FrontEnd\CharacterCreate.dc6)");
+            return d2d::dc6::Sprite(*bytes);
+        }();
+    scene.fire = d2d::dc6::Sprite(mpqs.read(R"(data\global\ui\FrontEnd\fire.DC6)"));
+    scene.charselect_bg = d2d::dc6::Sprite(mpqs.read(R"(data\global\ui\CharSelect\characterselectscreenEXP.dc6)"));
+    scene.tcpip_bg = d2d::dc6::Sprite(mpqs.read(R"(data\global\ui\FrontEnd\tcpipbckg.dc6)"));
+    if (auto bytes = mpqs.try_read(R"(data\global\ui\FrontEnd\CinematicsSelectionEXP.dc6)")) scene.cinematics_panel = d2d::dc6::Sprite(*bytes);
+}
+
+void drop_menu_art(Scene& scene) {
+    for (auto* sprite : { &scene.background, &scene.logo_static, &scene.logo_bl, &scene.logo_br, &scene.logo_fl, &scene.logo_fr,
+                          &scene.credits_bg, &scene.charcreate_bg, &scene.fire, &scene.charselect_bg, &scene.tcpip_bg, &scene.cinematics_panel })
+        *sprite = d2d::dc6::Sprite{};
+}
+
 std::optional<Scene> load_scene(const fs::path& data_dir, const fs::path& patch_installer) {
     auto data = game::open_game_data(data_dir, patch_installer, /*tile_pixels=*/true);
     if (!data) return std::nullopt;
@@ -482,11 +520,6 @@ std::optional<Scene> load_scene(const fs::path& data_dir, const fs::path& patch_
     try {
         Scene scene{ std::move(*data) };
         const auto& mpqs = scene.mpqs;
-        // Prefer the LoD title asset (fenced rogue camp at night). Classic
-        // TitleScreen is only 4×3 sub-frames; LoD is the same layout.
-        auto title = mpqs.try_read(R"(data\global\ui\FrontEnd\gameselectscreenEXP.dc6)");
-        if (!title) title = mpqs.try_read(R"(data\global\ui\FrontEnd\TitleScreen.DC6)");
-        if (!title) throw std::runtime_error("no title screen asset");
 
         // Sky = title/credits (game.exe hardcodes palette\sky\pal.pl2 in
         // 5 sites of the menu loader — docs/research/re/frontend-menu-table.md).
@@ -502,38 +535,19 @@ std::optional<Scene> load_scene(const fs::path& data_dir, const fs::path& patch_
                                 R"(data\global\palette\Sky\Pal.PL2)"));
         scene.fechar_pl2 = d2d::palette::Pl2(mpqs.read(
                                 R"(data\global\palette\fechar\Pal.PL2)"));
-        scene.background = d2d::dc6::Sprite(*title);
-        scene.logo_static = d2d::dc6::Sprite(mpqs.read(R"(data\global\ui\FrontEnd\Diablo2.dc6)"));
-        scene.logo_bl = d2d::dc6::Sprite(mpqs.read(R"(data\global\ui\FrontEnd\D2logoBlackLeft.DC6)"));
-        scene.logo_br = d2d::dc6::Sprite(mpqs.read(R"(data\global\ui\FrontEnd\D2logoBlackRight.DC6)"));
-        scene.logo_fl = d2d::dc6::Sprite(mpqs.read(R"(data\global\ui\FrontEnd\D2logoFireLeft.DC6)"));
-        scene.logo_fr = d2d::dc6::Sprite(mpqs.read(R"(data\global\ui\FrontEnd\D2logoFireRight.DC6)"));
+        load_menu_art(scene);   // the backgrounds, the logo, the fire (a handheld lets them go in a game)
         scene.btn_wide = d2d::dc6::Sprite(mpqs.read(R"(data\global\ui\FrontEnd\WideButtonBlank.dc6)"));
         scene.btn_wide2 = d2d::dc6::Sprite(mpqs.read(R"(data\global\ui\FrontEnd\WideButtonBlank02.dc6)"));
         scene.btn_narrow = d2d::dc6::Sprite(mpqs.read(R"(data\global\ui\FrontEnd\NarrowButtonBlank.dc6)"));
         scene.btn_short = d2d::dc6::Sprite(mpqs.read(R"(data\global\ui\CharSelect\ShortButtonBlank.dc6)"));
-        scene.credits_bg = [&] {
-                // creditsbckgexpand.dc6 (LoD) → creditsbckg.dc6 (classic).
-                auto bytes = mpqs.try_read(R"(data\global\ui\CharSelect\creditsbckgexpand.dc6)");
-                if (!bytes) bytes = mpqs.read(R"(data\global\ui\CharSelect\creditsbckg.dc6)");
-                return d2d::dc6::Sprite(*bytes);
-            }();
-        scene.charcreate_bg = [&] {
-                auto bytes = mpqs.try_read(R"(data\global\ui\FrontEnd\charactercreationscreenEXP.dc6)");
-                if (!bytes) bytes = mpqs.read(R"(data\global\ui\FrontEnd\CharacterCreate.dc6)");
-                return d2d::dc6::Sprite(*bytes);
-            }();
-        scene.fire = d2d::dc6::Sprite(mpqs.read(R"(data\global\ui\FrontEnd\fire.DC6)"));
         scene.medium_button = d2d::dc6::Sprite(mpqs.read(R"(data\global\ui\FrontEnd\MediumButtonBlank.dc6)"));
         scene.medium_sel_button = d2d::dc6::Sprite(mpqs.read(R"(data\global\ui\FrontEnd\MediumSelButtonBlank.dc6)"));
         scene.textbox = d2d::dc6::Sprite(mpqs.read(R"(data\global\ui\FrontEnd\textbox.dc6)"));
         scene.clickbox = d2d::dc6::Sprite(mpqs.read(R"(data\global\ui\FrontEnd\clickbox.dc6)"));
         if (auto grey = mpqs.try_read(R"(data\global\ui\FrontEnd\joingameclickboxgrey.dc6)")) scene.clickbox_grey = d2d::dc6::Sprite(*grey);
-        scene.charselect_bg = d2d::dc6::Sprite(mpqs.read(R"(data\global\ui\CharSelect\characterselectscreenEXP.dc6)"));
         scene.charselect_box = d2d::dc6::Sprite(mpqs.read(R"(data\global\ui\CharSelect\charselectbox.dc6)"));
         scene.charselect_scroll = d2d::dc6::Sprite(mpqs.read(R"(data\global\ui\FrontEnd\joingamescrollbars.dc6)"));
         scene.tall_button = d2d::dc6::Sprite(mpqs.read(R"(data\global\ui\CharSelect\TallButtonBlank.dc6)"));
-        scene.tcpip_bg = d2d::dc6::Sprite(mpqs.read(R"(data\global\ui\FrontEnd\tcpipbckg.dc6)"));
         scene.ip_box = d2d::dc6::Sprite(mpqs.read(R"(data\global\ui\FrontEnd\IPAddressBox.dc6)"));
         scene.popup_ok_cancel = d2d::dc6::Sprite(mpqs.read(R"(data\global\ui\FrontEnd\PopUpOKCancel2.dc6)"));
         scene.cancel_button = d2d::dc6::Sprite(mpqs.read(R"(data\global\ui\FrontEnd\CancelButtonBlank.dc6)"));
@@ -560,9 +574,7 @@ std::optional<Scene> load_scene(const fs::path& data_dir, const fs::path& patch_
         // Rogue-camp world data — separate call so a DS1/DT1 miss doesn't
         // nuke the whole scene; the InGame screen falls back to the credits
         // placeholder when world is empty.
-        if (auto bytes = mpqs.try_read(R"(data\global\ui\FrontEnd\CinematicsSelectionEXP.dc6)"))
-            scene.cinematics_panel = d2d::dc6::Sprite(*bytes);
-        d2d::log::info("Menus loaded in {} ms.", d2d::log::ms() - start_ms);
+        d2d::log::info("Menus loaded in {} ms (heap {} KiB).", d2d::log::ms() - start_ms, std::size_t(mallinfo().uordblks) / 1024);
         return scene;
     } catch (const std::exception& error) {
         d2d::log::error("load_scene: {}", error.what());
@@ -599,7 +611,7 @@ void finish_scene(Scene& scene, const fs::path& save_dir, std::uint32_t map_seed
         load_act_palettes(scene, mpqs, 0);
         want_nearby(scene, scene.town);         // the town's neighbours build while the menus run (deviations.md improvement 8)
         step("");
-        d2d::log::info("Scene loaded in {} ms.", d2d::log::ms() - start_ms);
+        d2d::log::info("Scene loaded in {} ms (heap {} KiB).", d2d::log::ms() - start_ms, std::size_t(mallinfo().uordblks) / 1024);
     } catch (const std::exception& error) {
         d2d::log::error("finish_scene: {}", error.what());
     }
@@ -639,7 +651,7 @@ void preload_camp(const Scene& scene, int act, int save_class, const std::vector
     for (const auto* art : { &scene.inv_panel, &scene.inv_tab, &scene.border_frame, &scene.inv_belt, &scene.inv_boots, &scene.inv_ring_amulet,
                              &scene.inv_armor, &scene.inv_helm_glove, &scene.inv_weapons, &scene.store_panel })
         (void)art->total_frames();
-    d2d::log::info("Act {}'s camp made ready in {} ms", act + 1, d2d::log::ms() - start_ms);
+    d2d::log::info("Act {}'s camp made ready in {} ms (heap {} KiB)", act + 1, d2d::log::ms() - start_ms, std::size_t(mallinfo().uordblks) / 1024);
 }
 
 // The act's palette (palette\ACTn\pal.dat) and its 32 light levels: PL2
