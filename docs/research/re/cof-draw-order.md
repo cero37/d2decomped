@@ -41,6 +41,23 @@ the viewer behind it (the row was taken as the DCC direction).
 - Frame: `FUN_005feb80` returns no cell when the frame is at or past the
   DCC's frames per direction (the cache record +0x24): that layer draws
   nothing on those frames, the others do.
+  Run for real (`tools/emu/sprite_frame_block.py`, 30,000 random blobs, 4
+  mutants caught): `FUN_005feb80` (EAX = the decoded sprite buffer,
+  ECX = the draw state, stack: the frame data) compares the frame, as an
+  unsigned, with **byte +4 of the buffer** (`FUN_005fec50` hands it the
+  buffer `FUN_0040a9e0` returns, the cache record's +0x3c; the record's
+  own +0x24 is a copy `FUN_005ff760` takes from the raw file's +0x18: not
+  shown equal to buffer +4 here). It is 0 for a frame at or past it. The
+  direction: state mode (+8) 2 is 0, mode 4 the state's +0x40, anything
+  else (and mode 6 with flag +4 & 2) `FUN_00600c90(state +0x40, byte
+  +3 - 1)`; a direction at or above byte +3 - 1 (signed) is 0 too, so byte
+  +3 holds the directions plus one. Direction offsets are at +0xc + 4 *
+  direction (negative: 0); each frame block must start with a zero dword
+  and have width, height (+4, +8) up to 0x100, the next block is at
+  `+0x23 + [+0x1c] + [+0x14]` on (negative: 0, even after the wanted block),
+  and the wanted frame's block comes back. Not run: real DCC buffers, and
+  the d2d side (`world_view`'s `past_cof` and the layer frame test are not
+  diffed against it).
 - In the data: 29 paladin pieces (tower shield `pashtorwlhth` 8 frames
   in a 10-frame walk; claymore, flail, polearm walks; throws) and the
   Frozen Horror's death (`f0`, 13 of 14): bugs.md #29.
@@ -91,8 +108,11 @@ bit 0 for them), so the two agree apart from that last stem. This
 replaces the list in earlier notes, which left out 0x209, the objects and
 the +0x10 test, and put 0x2c0 with the second group. Overlay row 0x7a
 (`mephisto`) is a `.dc6` too.
-`FUN_005fe990` loads it, and a file that isn't there is fatal
-(error 0x413). d2d tries `.dcc` then `.dc6` (the same files) and draws
+`FUN_005fe990` loads it; a file that isn't there is not fatal: the open
+returns handle 0 and the cached header comes back with bit 0 set
+(`tools/emu/cof_layer_file.py` runs both functions on game.exe: path
+strings over random records, then the header, offset table, cache hit and
+the fatal lines 0x418, 0x444 and 0x449). d2d tries `.dcc` then `.dc6` (the same files) and draws
 the other layers when neither is there, so it needs none of these rules;
 `Scene::overlay_sprite` (apps/d2d/scene/render.cpp) reads row 0x7a's
 `.dc6` through that fallback.
@@ -269,20 +289,25 @@ of the PL2 (`FUN_006c8000` keeps it at 0x98a040):
 The row writer (`FUN_00608110`, through `FUN_00608540`) reads
 `T[screen * 256 + sprite]`. Fitted against the installed act 1 palette,
 table 0's screen share is a quarter, table 1's a half, table 2's three
-quarters. The shares are from the data, not from `FUN_00605880`'s weights.
+quarters. `FUN_00605880`'s sprite weights agree: `0xbf`, `0x7f` and `0x3f`
+over 255 (../formats/pl2.md, `tests/test_pl2_blends.cpp`).
 
 In the 1,064 COFs of the listfile, transparent layers use effect 1
 (monster tokens LG and E9, layer 1), 3 (239 layers) and 6 (layer 8 of
 monster token EG's COFs and object token PY's). d2d's `draw_mode`
-(world_view.hpp) matches 0..5; effect 6 is the greater of each RGB channel,
-and the PL2 table at +0x5b500 is still unread (deviations.md
-approximation 9).
+(world_view.hpp) matches all seven. Effect 6's table is `FUN_00605b70`'s:
+the sprite weighted by its own greatest channel,
+`(screen * (255 - w) + sprite * w) / 255` with `w = max(r, g, b)` of the
+sprite (../formats/pl2.md). `blit_dcc_frame` draws it with
+`palette::max_component_blend` in RGB, as it does the other tables
+(deviations.md approximation 1).
 
 Re-check:
 
 ```sh
 cd tools/emu && uv run python cof_effects.py | diff - ../../tests/cof_effect_cases.inc
 cmake --build build --target test_cof_effects && build/tests/test_cof_effects
+cmake --build build --target test_pl2_max_blend && build/tests/test_pl2_max_blend
 ```
 
 The unit graphics record, the COF caches and the motion offsets around the

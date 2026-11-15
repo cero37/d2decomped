@@ -111,6 +111,7 @@ struct ItemBase {
     int version = 0;                                   // version (+0xf6): 100 an expansion item
     std::string type2;                                 // type2 (+0x120)
     int hit_class = 0;                                 // weapons.txt "hit class" (sound_ids::hit_class): its swing and impact sounds
+    std::string wclass;                                // weapons.txt wclass (the item record's +0xc0 class key): attack_start_frame's row
     int min_misdam = 0, max_misdam = 0;                // weapons.txt minmisdam / maxmisdam: a thrown one's (stats 159 / 160)
 };
 // Prices (FUN_0062efb0, docs/research/re/store.md): npc.txt by MonStats Id.
@@ -1642,15 +1643,37 @@ struct ClassGains {
     int mana_regen = 120;                              // ManaRegen (record +0x3a): seconds to fill the mana globe
 };
 
-// The player's mana a frame (FUN_005806f0, 256ths), unless state 0x55
-// (nomanaregen) is on: max mana over ManaRegen x 25 frames (7500 when it's
-// 0), at least 1, times (100 + manarecoverybonus (27)) / 100 (FUN_00483360,
-// truncating); plus
-// manarecovery (26), flat. The caller caps it at what's missing.
-inline std::int64_t mana_per_frame(std::int64_t max_mana, int regen_seconds, int bonus_pct, int flat) {
-    const std::int64_t frames = regen_seconds * 25 != 0 ? regen_seconds * 25 : 7500;
-    const std::int64_t base = std::max<std::int64_t>(max_mana / frames, 1);
-    return base * (100 + bonus_pct) / 100 + flat;
+// game.exe's MulDiv (FUN_00483360): value x times / over, truncated, 0 over
+// 0. Up to 0x100000 with times up to 0x10000 it multiplies in 32 bits (the
+// product wraps); a bigger times over at most times / 16 divides it first,
+// as a bigger value over at most value / 16 does the value (each multiply
+// wrapping); else 64 bits.
+inline int mul_div(int value, int times, int over) {
+    if (over == 0) return 0;
+    if (value <= 0x100000) {
+        if (times <= 0x10000) return int(std::uint32_t(value) * std::uint32_t(times)) / over;
+        if (over <= times >> 4) return int(std::uint32_t(times / over) * std::uint32_t(value));
+    } else if (over <= value >> 4) {
+        return int(std::uint32_t(value / over) * std::uint32_t(times));
+    }
+    return int(std::int64_t(value) * times / over);
+}
+
+// The player's mana a frame (FUN_005806f0 up to 0x58079e, 256ths), in its
+// 32-bit math: unless state 0x55 (nomanaregen, `no_regen`: 0x580724) is
+// on, the max (FUN_00625d60) over the CharStats ManaRegen byte x 25 frames
+// (7500 when it's 0; idiv), at least 1, then MulDiv(that, 100 +
+// manarecoverybonus (27), 100) (FUN_00483360); plus manarecovery (26),
+// flat, the add wrapping. The caller caps it at what's missing.
+// tools/emu/mana_frame.py runs it against game.exe (tests/test_mana_frame.cpp).
+inline std::int64_t mana_per_frame(std::int64_t max_mana, int regen_seconds, int bonus_pct, int flat, bool no_regen = false) {
+    std::uint32_t amount = 0;
+    if (!no_regen) {
+        const int frames = regen_seconds * 25 != 0 ? regen_seconds * 25 : 7500;
+        const int base = std::max(int(std::uint32_t(max_mana)) / frames, 1);
+        amount = std::uint32_t(mul_div(base, int(std::uint32_t(bonus_pct) + 100u), 100));
+    }
+    return int(amount + std::uint32_t(flat));
 }
 
 // Spends up to n unspent stat points (stat 4) on stat (0 strength, 1
@@ -1757,7 +1780,9 @@ inline bool pick_up(std::vector<d2d::d2s::Item>& items, std::optional<d2d::d2s::
 // 1 / 2 / 3 / 4 / 8 value, 5 / 6 / 7 min / max / % damage, 9 / 22 / 24
 // param, 10 skill tab (class*3+tab -> class<<3|tab), 11 chance to cast
 // (param skill<<6 | level, value chance, 5 if none), 12 random skill
-// (param min..max, value param), 19 charges (FUN_0065f6a0: of c = min
+// (param min..max, value param), 18 by time (FUN_0065f870: the period,
+// param 0..3, + ((max + 256) << 10 | (min + 256)) << 2, each 0..1023;
+// returns the max part), 19 charges (FUN_0065f6a0: of c = min
 // rand(c - c/8) + c/8 + 1 now, value now | c<<8), 20 indestructible
 // (stat 152), 21 class skills, 36 the param drawn, value the func's val.
 // With `on` (the item the mods land on, FUN_0065fec0's kind 1 superior)
@@ -1771,7 +1796,7 @@ inline bool pick_up(std::vector<d2d::d2s::Item>& items, std::optional<d2d::d2s::
 // 11 / 19's level is max, or with none off ilvl and the skill's reqlevel
 // ((ilvl - req) / 4 + 1 up to its maxlvl; negative: one per (99 - req) /
 // -max levels past req). Codes match whatever their case.
-// ponytail: 18 (by time) is dropped; sockets (14) only draws; 5 / 6 don't
+// ponytail: sockets (14) only draws; 5 / 6 don't
 // clamp a negative to the base (kept by max damage, not min); without
 // `on` (affixes) damage is one-hand, charges full and 11 / 19 off ilvl 1.
 struct ModItem { d2d::d2s::Item* item; const ItemBase* base; int kind; bool throwable, raise; };   // raise: ac / dur% (1 / 3 / 13) raise the defence too (superior: FUN_0065fec0 kind 1)
@@ -1875,6 +1900,13 @@ inline void apply_mod(const Tables& tables, const Mod& mod, std::vector<d2d::d2s
                 if (result != 0 && stat == kMaxDamage) damage(kMaxDamage, kSecondaryMaxDamage, kThrowMaxDamage, result);
                 else put(stat, 0, result);
                 break;
+            case 18: {                                     // FUN_0065f870: by time, at param 0
+                if (stat < 0) break;
+                const int low = std::clamp(mod.min + 256, 0, 1023), high = std::clamp(mod.max + 256, 0, 1023);
+                put(stat, 0, std::clamp(par, 0, 3) + (high * 1024 + low) * 4);
+                result = high;
+                break;
+            }
             case 19: {
                 if (stat < 0) break;
                 const int level = skill_level();

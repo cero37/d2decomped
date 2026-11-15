@@ -15,9 +15,11 @@
 #include <missiles.hpp>
 #include <rules.hpp>
 
+#include <algorithm>
 #include <cassert>
 #include <cstdio>
 #include <exception>
+#include <utility>
 
 using namespace d2d::game;
 
@@ -42,7 +44,7 @@ int main() try {
     belt.slot = d2d::d2s::body_location::kBelt;
     belt.props.push_back({ .stat = d2d::d2s::kItemPierce, .value = 20 });
     belt.props.push_back({ .stat = d2d::d2s::kSkillPierce, .value = 40 });
-    hero.character.merc_items.push_back(belt);
+    hero.character.merc_items.push_back(std::move(belt));
     hero.merc_pierce_idx = 1;                                           // {1, 666} under 60: 3 draws land
     hero.pierce_idx = 1;
     hero.psum[d2d::d2s::kSkillPierce] = 40;
@@ -66,9 +68,19 @@ int main() try {
     monster.type = 0;
     monster.hit_points = 100;
     monster.stats.hit_points = 100;
-    fight.monsters.push_back(monster);
+    fight.monsters.push_back(std::move(monster));
     for (int left = 2; left >= 0; --left) assert(!fight.skill_missile_hits(arrow, 0, 7000) && arrow.pierce == left);
     assert(fight.skill_missile_hits(arrow, 0, 7000));
+
+    // Its plain arrow (no skill): the same charges, spent a hit; the last flies no further.
+    row.last_collide = true;
+    Missile plain{ &row, 0, 0, 1, 0, 0, 7000, 8000, {} };
+    plain.friendly = true; plain.by_merc = true;
+    fight.seed_pierce(plain, true);
+    assert(plain.pierce == 3);
+    for (int left = 2; left >= 0; --left) assert(!fight.plain_missile_hits(plain, 0, 7000) && plain.pierce == left && plain.last_hit == 0);
+    assert(std::ranges::contains(*plain.struck, 0));   // the tick passes it by from now on (A, B, A is not charged twice)
+    assert(fight.plain_missile_hits(plain, 0, 7000));
 
     hero.character.merc_items.clear();
     hero.psum[d2d::d2s::kSkillPierce] = 40;

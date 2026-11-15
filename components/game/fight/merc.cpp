@@ -110,17 +110,17 @@ auto Fight::merc_fighter() const -> d2d::rules::Fighter {
         return fighter;
     }
 
-auto Fight::merc_gear() const -> MercGear {
+auto Fight::merc_gear(const Hero& hero) const -> MercGear {
         using namespace d2d::d2s;
         MercGear gear;
         auto add = [](d2d::rules::StatSum& into, const std::vector<ItemProp>& props) {
             for (const auto& prop : props) if (prop.stat >= 0 && std::size_t(prop.stat) < into.size()) into[std::size_t(prop.stat)] += prop.value;
         };
-        for (const auto& item : actor->character.merc_items) {
+        for (const auto& item : hero.character.merc_items) {
             if (item.location != item_location::kEquipped) continue;
             add(gear.sum, item.props);
             for (const auto& socketed : item.socketed_items) add(gear.sum, socket_props(*game_data, item, socketed));
-            add(gear.sum, set_bonus_props(*game_data, actor->character.merc_items, item));
+            add(gear.sum, set_bonus_props(*game_data, hero.character.merc_items, item));
             std::int64_t enhanced_defense = 0;
             auto own = item.props;                        // its sockets' too (Pul's ac%)
             for (const auto& socketed : item.socketed_items) for (const auto& prop : socket_props(*game_data, item, socketed)) own.push_back(prop);
@@ -190,7 +190,7 @@ auto move_route(const Level& level, const UnitState& unit, int from_x, int from_
 // FUN_0064e7b0, its size, mask 0x1c09); none: it stays.
 void put_near(const Level& level, const Crowd& crowd, UnitState& unit, float x, float y) {
     if (const auto spot = free_spot_near(level, crowd, &unit, int(std::floor(x * 5)), int(std::floor(y * 5)), unit.shape.size, 0x1c09)) {
-        unit.x = (float(spot->first) + 0.5f) / 5; unit.y = (float(spot->second) + 0.5f) / 5;
+        unit.x = Fine::centre(spot->first); unit.y = Fine::centre(spot->second);
     }
 }
 
@@ -215,10 +215,13 @@ bool room_teleport(const GameData& game_data, const Level& level, const Crowd& c
     return false;
 }
 
-auto Fight::merc_turn(std::uint32_t now_ms, float elapsed, const Crowd& crowd, bool town) -> void {
+// The merc's hireable_think, fed its view of its owner, footsteps and target.
+auto Fight::merc_turn(std::uint32_t now_ms, float /* elapsed: a turn is a frame */, const Crowd& crowd, bool town) -> void {
         auto& unit = actor->merc->unit;
         const auto set = [&](std::string_view mode) {
             actor->merc->mode = mode; unit.mode_ms = now_ms; unit.walking = mode == "WL" || mode == "RN";
+            // Stat 0x148 + 1 for each client sent its turn to NU (FUN_00597e20's mode 1 branch, a call a client from FUN_00598220).
+            if (mode == "NU") actor->merc_pierce_idx += std::uint32_t(std::ranges::count_if(heroes, [&](const Hero* hero) { return std::abs(unit.x - hero->player.x) < 30 && std::abs(unit.y - hero->player.y) < 30; }));
             if (!unit.walking) unit.path.clear();
             // The merc's FHR is its items' (merc_fighter): no 1.14d Skills.txt aurastat or passivestat
             // is item_fastergethitrate (stat 99), so no state of its changes it.
@@ -275,7 +278,7 @@ auto Fight::merc_turn(std::uint32_t now_ms, float elapsed, const Crowd& crowd, b
                     missile.to = { target.unit.x, target.unit.y };
                     const auto fighter = merc_fighter();                    // its bow's damage and attack rating with its gear
                     missile.min = fighter.min; missile.max = fighter.max; missile.attack_rating = fighter.attack_rating; missile.level = actor->merc_st.level; missile.friendly = true; missile.caster = actor->id; missile.by_merc = true;
-                    // ponytail: this hit ends the missile on the first unit (tick.cpp), so FUN_0059f940's charges are not applied here.
+                    seed_pierce(missile, true);                             // FUN_0059f940: the maker's, for every missile of a Pierce row
                     missiles.push_back(std::move(missile));
                 } else if (target.alive() && distance <= kMeleeReach + 0.3f) {
                     // A melee skill (Bash, Stun; Jab only off its sequence) builds
@@ -303,7 +306,8 @@ auto Fight::merc_turn(std::uint32_t now_ms, float elapsed, const Crowd& crowd, b
         if (actor->merc->mode == "WL" || actor->merc->mode == "RN") {                    // velocitypercent: the move's pace
             // MonStats Velocity in WL and RN (FUN_00621360, +0x32) x the walk %, at least 25 (FUN_00623f50).
             const int velocity = type_info ? type_info->velocity : 6;
-            if (walk_on(*level, unit, cells_per_sec(float(velocity)) * float(std::max(100 + actor->merc->move_pct, 25)) / 100 * elapsed, crowd)) return;
+            const UnitState* foe = actor->merc_chase && actor->merc_target >= 0 ? &monsters[std::size_t(actor->merc_target)].unit : nullptr;
+            if (walk_on(*level, unit, path_velocity(velocity, std::max(100 + actor->merc->move_pct, 25)), crowd, foe)) return;
             set("NU");
             actor->merc_chase = false;
             actor->merc->next_act = now_ms;                                      // a walk's end thinks at once (FUN_005a8030)
@@ -349,12 +353,15 @@ auto Fight::merc_turn(std::uint32_t now_ms, float elapsed, const Crowd& crowd, b
         const int chosen = d2d::rules::sight_choice(sight_foes, d2d::rules::search_sight(sight_foes), path_to_primary, target_gap);
         actor->merc_target = chosen >= 0 ? sight_index[std::size_t(chosen)] : -1;
         if (actor->merc_target < 0) target_gap = -1;
+        // State 0x3c is decrepify: a monster's curse on the merc (actor->curses[1]).
+        const auto* curse = game_data->skills.get(actor->curses[1].skill);
+        const bool slowed = curse && now_ms < actor->curses[1].until && curse->auratarget == "decrepify";
         d2d::rules::MercView view{ .cls = actor->merc_npc->hc_idx, .x = merc_x, .y = merc_y, .size = size, .mode = d2d::rules::kMonsterNeutral,
                                    .owner_x = sub(actor->player.x), .owner_y = sub(actor->player.y), .owner_mode = actor->owner_mode,
                                    .end_x = sub(actor->player.path.empty() ? actor->player.x : actor->player.path.back().first),
                                    .end_y = sub(actor->player.path.empty() ? actor->player.y : actor->player.path.back().second),
                                    .ring = actor->footsteps, .cursor = actor->footstep_cursor,
-                                   .on_bit40 = level->blocked(unit.x, unit.y, 0x40), .town = town, .target = target_gap };
+                                   .on_bit40 = level->blocked(unit.x, unit.y, 0x40), .town = town, .target = target_gap, .slowed = slowed };
         auto area_at = [&](int from_x, int from_y, int x, int y) { return int(area_id_at(*game_data, *level, centre(from_x), centre(from_y), centre(x), centre(y))); };   // FUN_0061b130
         std::vector<std::pair<float, float>> route;
         auto try_move = [&](const d2d::rules::MercMove& move) {

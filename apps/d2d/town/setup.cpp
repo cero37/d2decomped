@@ -16,6 +16,7 @@
 #include "party.hpp"
 #include "platform.hpp"
 #include "scene.hpp"
+#include "storage_close.hpp"
 #include "ui.hpp"
 
 #include <cues.hpp>
@@ -69,6 +70,8 @@ auto Town::take_view(std::span<const std::uint8_t> bytes, const View* local) -> 
             return false;
         }
         if (local && !net_game && local->merc && view.merc) view.merc->fhr = local->merc->fhr;   // the wire has none: a local game keeps what World::view() computed
+        if (local && !net_game && local->party_pets.size() == view.party_pets.size())             // nor a party merc's
+            for (std::size_t i = 0; i < view.party_pets.size(); ++i) view.party_pets[i].fhr = local->party_pets[i].fhr;
         if (lan_client) lan_take_npcs();
         level = view.level;
         if (net_game) net_overlay();
@@ -131,7 +134,7 @@ std::filesystem::path automap_dir(const World& world) { return world.characters 
 auto Town::enter() -> void {
         shake = {}; quest_quakes.clear(); shake_rng = d2d::rules::Rng{ 666 };
         automap.cells.clear();                    // a new game: what the files beside the save kept
-        automap.placed.clear();
+        for (auto& tree : automap.trees) tree.clear();
         automap_reveal.new_game();                // its rooms' tiles come with clear flags
         other_automaps.clear();
         quest_log = {};                           // done animations play again in a new game
@@ -229,6 +232,29 @@ auto Town::toggle_quest_log() -> void {
         if (quest_log.open) { quest_log.open = false; return; }
         quest_log_open(quest_log, quest_bits(), quest_state(), view_act());
         char_open = stash_open = cube_open = false;
+    }
+
+// The Inventory, Character and Skill Tree keys and the mini-panel's
+// buttons: not past the stash, the Cube or a store (storage_close.hpp).
+// The inventory stays drawn beside them all; a store passes UI 1, whose
+// flag then toggles unseen under it (not modelled: d2d shuts the
+// inventory with the store).
+auto Town::toggle_inventory() -> void {
+        if (d2d::client::panel_key_refused(d2d::client::kUiInventory, stash_open, cube_open, store.npc >= 0) || store.npc >= 0) return;
+        inv_open = !inv_open;
+        if (inv_open) tree_open = false;
+    }
+
+auto Town::toggle_character() -> void {
+        if (d2d::client::panel_key_refused(d2d::client::kUiCharacter, stash_open, cube_open, store.npc >= 0)) return;
+        char_open = !char_open;
+        if (char_open) stash_open = cube_open = quest_log.open = hireling.open = false;
+    }
+
+auto Town::toggle_skill_tree() -> void {
+        if (d2d::client::panel_key_refused(d2d::client::kUiSkillTree, stash_open, cube_open, store.npc >= 0)) return;
+        tree_open = !tree_open;
+        if (tree_open) inv_open = false;
     }
 
 auto Town::quest_log_button_now() const -> QuestLogButton {

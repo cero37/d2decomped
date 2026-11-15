@@ -231,7 +231,7 @@ Read from the code; `FUN_004623c0`, `FUN_00461840`, `FUN_004677b0` and
   `FUN_00467a70`; otherwise `FUN_004623c0` + `FUN_00461840`, a walk to the
   click's spot. So a left click on a converted monster walks there,
   as on empty ground, unless shift is held: then it is the attack in
-  place (`FUN_00461700(0)`), as on empty ground. `FUN_004623c0`'s own glue
+  place (`FUN_00461700(0)`), as on empty ground. `FUN_00461700` itself is run on game.exe by `tools/emu/attack_command.py`: with the argument 0 it never looks at the shift flag, so the spot command is 5 (left, 8 for the alternate) and 0xc (right, 0xf), the same code a plain click sends; at a unit shift and the alternate pick 6 / 7 / 9 / 0xa (left) and 0xd / 0xe / 0x10 / 0x11 (right). `FUN_004623c0`'s own glue
   (the held-frame throttle at 7 frames / 280 ms, rejecting a move when
   either axis distance is 0x100 or more or both axes are under 1, the
   per-flag minimum step) and `FUN_00461840`'s (a failed
@@ -488,8 +488,10 @@ condition is d2d's co-op addition.
 ### The kept label's draw (`FUN_00453060`, 0x453060, 150 bytes)
 
 The reader of the kept text of `FUN_00452be0` / `FUN_00452d20`. `FUN_00453060()`
-(one caller, the frame's `FUN_00456ee0`; read from the disassembly, no
-oracle run). Nothing when the text at 0x7a2c80 is empty (`FUN_00526800`).
+(one caller, the frame's `FUN_00456ee0`; read from the disassembly and run:
+`tools/emu/ui_label.py` runs it with the width and height getters hooked
+and diffs 2004 anchors, widths, heights and screen sizes against the rule
+below. The decompile hides the x: `FUN_00502320` takes it in EDX). Nothing when the text at 0x7a2c80 is empty (`FUN_00526800`).
 Otherwise, with W = the text's width in the current font
 (`FUN_00501820` = `FUN_005017d0`, the glyph widths) + 8 and
 H = the font's line height (`FUN_00501a40`, byte +10 of its header;
@@ -503,7 +505,9 @@ frontend-text-box.md) + 7:
 - then the text buffer is cleared (`_memset`, 0xa0 bytes), so the label is
   one frame's.
 
-The width kept at 0x7a2d28 is not read here. d2d: not ported.
+The anchor (0x7a2d20, 0x7a2d24) sits right after the 0xa0-byte text buffer,
+so the `_memset` leaves it; the oracle also checks that both anchor coordinates survive the clear. The width kept at 0x7a2d28 is not read here.
+d2d: not ported. Re-check: `cd tools/emu && uv run python ui_label.py`.
 
 ### The frame of cels (`FUN_00452e50`, 0x452e50, 518 bytes)
 

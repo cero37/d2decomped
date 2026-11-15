@@ -28,6 +28,7 @@
 #include <filesystem>
 #include <functional>
 #include <tuple>
+#include <utility>
 #include <variant>
 
 namespace filesystem = std::filesystem;
@@ -127,7 +128,7 @@ int main() try {
     // where he died (0x5b3eaf: Act 4's map at his spot), not where the player is.
     const auto* plains = data->level(d2d::rules::level_ids::kPlainsOfDespair);
     assert(plains);
-    const auto ghost_code = data->mon_npc[std::size_t(d2d::rules::IzualQuest::kGhost)].code;
+    const auto& ghost_code = data->mon_npc[std::size_t(d2d::rules::IzualQuest::kGhost)].code;
     const auto ghosts = [&](const Level& where) { return std::ranges::count(where.npcs, ghost_code, &Npc::code); };
     const auto on_plains = ghosts(*plains), in_town = ghosts(*world.level);
     world.izual.state = 4;
@@ -165,7 +166,7 @@ int main() try {
     stone_alpha.object_id = d2d::rules::object_ids::kStoneAlpha;
     stone_alpha.x = 20;
     stone_alpha.y = 20;
-    stony->npcs.push_back(stone_alpha);
+    stony->npcs.push_back(std::move(stone_alpha));
     world.portal[2] = {};
     world.stones_portal_in = quest_timer_steps(1);
     runs_after(world, now_ms, 2, "the stones' portal", [&] { return world.stones_portal_in == 0; });

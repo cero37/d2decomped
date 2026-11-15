@@ -48,6 +48,21 @@ always takes `FUN_005e4830`.
 
 ### FUN_005e4830
 
+`tools/emu/ai_necropet_owner_distance.py` compares the distant-owner follow
+and teleport branches against `necropet_think` over 72 cases, including the
+29 and 50 distance boundaries and three velocity pairs. Owner lookup,
+distance and the follow action are hooked; closer-owner and failed movement
+paths are not checked. From the worktree root with `GAME_EXE` set to stock
+1.14d:
+
+```sh
+mkdir -p build/ai-necropet-distance
+uv run --no-sync --project tools/emu python tools/emu/ai_necropet_owner_distance.py --cpp > build/ai-necropet-distance/cases.cpp
+c++ -std=c++23 -Icomponents -Icomponents/rules -Icomponents/d2s -Icomponents/txt build/ai-necropet-distance/cases.cpp -o build/ai-necropet-distance/cases
+build/ai-necropet-distance/cases > build/ai-necropet-distance/cases.txt
+uv run --no-sync --project tools/emu python tools/emu/ai_necropet_owner_distance.py --cases build/ai-necropet-distance/cases.txt --exe "$GAME_EXE"
+```
+
 1. No owner: if the AI control's +0x1c (the owner's id, refreshed every
    think) still finds a unit, `FUN_005e3ea0` mode 3, else stand 10.
 2. Gap to the owner (`FUN_005dc380`, the pet's size) over 50: mode 3 (a
@@ -94,7 +109,9 @@ always takes `FUN_005e4830`.
 
 The merc's `FUN_005e3930` grown: `(ECX game, EDX owner; pet, mode, run,
 pct, reach)`. A walk is `FUN_005dee50`, a run `FUN_005deeb0` (a walk in
-state 0x3c). Returns 1 when a move set off. Mode 1's "once" extra call
+state 0x3c, Decrepify: traced against stock 1.14d,
+`tools/emu/ai_pet_decrepify_probe.py`; `rules::PetView::slowed`). Returns
+1 when a move set off. Mode 1's "once" extra call
 below (`SetCombatAndMonStats`'s ctx) goes through the same
 `FUN_005a6190`/`GetAiParamFromUnit` getter as the merc's (`merc-ai.md`
 "Following"); the other modes' pace is a plain argument.
@@ -201,9 +218,15 @@ a monster, so `FUN_005dd510` takes the primary (no path test).
 - **BladeCreeper** (`0x5ea540`, init `0x5ea510`: -1, 1, 0; Blade Sentinel): +0x14 its last frame
   (Skill1's calc on); past it, dies. Its missile is made once (+0x1c,
   `FUN_0056ede0`). It walks (path type 0xf, 20 steps) to one end of its line
-  (`FUN_0058ee80` +0xc / +0x14; +0x18 which first), flipping when one fails;
+  (`FUN_0058ee80`'s record: +0x18 0 takes the end at +0xc / +0x10 first, else
+  the end at +0x14 / +0x18), flipping +0x18 when one fails;
   else 5 about the owner (`FUN_005df530`; with no owner `FUN_005de200(2)`),
   else stand 5. No line: stand 3.
+  d2d starts it at -1, 1, 0 (`Fight::summon_one`, `rules::blade_sentinel_init`,
+  FUN_005ea510 read at 0x73d07c). Its think `blade_sentinel_think` is not
+  dispatched live: BladeCreeper isn't in `traced_pet_ai`, so the pet takes
+  the untraced stand-in in `Fight::pets_turn`. `tests/test_blade_sentinel_init.cpp`
+  holds the three values; nothing checks `summon_one`'s branch in play.
 - **Raven** (`0x5ecc10`, init `0x5ecb70`: +0x14 -1, +0x18 aip3 + 1, +0x1c
   a seed step's low bit): +0x14 its hits (-1 at first: Skill1's
   `FUN_004efcb0`, else 3); 0 and it dies (`FUN_0057ccb0`). Over 50 from the
@@ -312,6 +335,20 @@ skill aip8 (N) names, its level with bonuses (`FUN_006439f0`,
 `FUN_006442a0(.., 1)`). +0x14 / +0x18 stay as `FUN_005b0e00` cleared them.
 Each think (`0x5eafa0`) gives itself the owner's left and right skills at
 +0x1c / 3 + their level with bonuses / 2, at least 1 (`FUN_005eaf00`).
+
+`tools/emu/ai_shadow_hand.py` compares this calculation against d2d's
+`shadow_hand_level` over 5,002 nonnegative inputs, including no owner. The
+skill-level lookup is hooked; skill lookup and other think behaviour are not
+checked. From the worktree root, with the emulator environment set up and
+`GAME_EXE` pointing to stock 1.14d:
+
+```sh
+mkdir -p build/ai-shadow-oracle
+uv run --no-sync --project tools/emu python tools/emu/ai_shadow_hand.py --cpp > build/ai-shadow-oracle/cases.cpp
+c++ -std=c++20 -Icomponents -Icomponents/d2s -Icomponents/txt build/ai-shadow-oracle/cases.cpp -o build/ai-shadow-oracle/cases
+build/ai-shadow-oracle/cases > build/ai-shadow-oracle/cases.txt
+uv run --no-sync --project tools/emu python tools/emu/ai_shadow_hand.py --cases build/ai-shadow-oracle/cases.txt --exe "$GAME_EXE"
+```
 
 ### ShadowMaster's think (FUN_005eb970)
 

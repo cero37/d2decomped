@@ -33,7 +33,7 @@ All lookup tables contain palette indices. A 256 × 256 table occupies
 | `0x05A500` | `0x100` | Green tone ramps | `FUN_00605f00` |
 | `0x05A600` | `0x100` | Blue tone ramps | `FUN_00605f00` |
 | `0x05A700` | `0xE00` | 14 additional shifts; semantics not yet named | Contiguous loader block |
-| `0x05B500` | `0x10000` | Max-component-weighted blend, **not** 50/50 alpha | `FUN_00605b70` |
+| `0x05B500` | `0x10000` | Each sprite colour over each screen colour, weighted by the sprite's greatest channel (cof-draw-order.md), **not** 50/50 alpha | `FUN_00605b70` |
 | `0x06B500` | `0x100` | Darkened colour shift, each channel scaled to two thirds | `FUN_00605b70` |
 | `0x06B600` | `0x27` | 13 text colours, three bytes each | `FUN_00606930` copies 39 bytes |
 | `0x06B627` | `0xD00` | 13 text-colour index shifts | `FUN_00605d20` builds the last 12; loader copies all 13 |
@@ -46,9 +46,27 @@ All lookup tables contain palette indices. A 256 × 256 table occupies
 `0x81e468`, and text colours/shifts to `0x7d563c` / `0x7d5668`.
 
 For the alpha tables, `FUN_00605880` computes each output colour as
-`column * (255 - weight) / 255 + row * weight / 255`, then finds the nearest
-base-palette entry with `FUN_00605210`. Thus the three weights `0xbf`,
-`0x7f`, and `0x3f` select approximately 75%, 50%, and 25% row contribution.
+`(row * (255 - weight) + column * weight) / 255` per channel (unsigned,
+truncated), then finds the nearest base-palette entry with `FUN_00605210`.
+The weighted colour is the outer loop's, stored as the column (the low byte
+of the index), which the renderer's `T[screen * 256 + sprite]` makes the
+sprite. Thus the three weights `0xbf`, `0x7f`, and `0x3f` give the sprite
+about 75%, 50%, and 25%. `FUN_006059b0` (additive) takes each channel's sum,
+255 at most, and `FUN_00605aa0` (multiply) `row * column / 255`.
+`tests/test_pl2_blends.cpp` rebuilds all five tables this way from each of
+Acts 1–4's files, and no cell differs; d2d's `palette::alpha_blend`,
+`additive_blend` and `multiply_blend` are these colours before the nearest
+lookup.
+
+`FUN_00605b70` builds the `0x5b500` table the same way, but the weight is
+per colour: for each outer colour `s` it takes `w = max(s.r, s.g, s.b)`, and
+each cell is the nearest base entry of `(other * (255 - w) + s * w) / 255`
+per channel (unsigned, truncated). The outer colour is the column, the low
+byte of the index, as in `FUN_00605880`. The renderer reads
+`T[screen * 256 + sprite]` (`FUN_00608110`, cof-draw-order.md "Draw
+effects"), so the sprite's greatest channel is its own opacity: black
+leaves the screen as it was, and any full channel covers it. It is COF draw
+effect 6 (`FUN_006c8250` mode 6 picks `0x831b68`).
 
 ## d2d comparison
 
@@ -62,11 +80,17 @@ max-component-weighted table, until 2026-11-03 (51,800 Act 1 cells off).
 The method has no runtime caller yet; its diagonal-identity test passes for
 either table, so only the oracle identifies it.
 
+`Pl2::max_blend()` reads `0x5b500` (installed at `0x831b68`) and matches it
+in all 65,536 cells of each of Acts 1–4. `tests/test_pl2_max_blend.cpp`
+rebuilds the table from `palette::max_component_blend` and
+`Palette::nearest` (`FUN_00605210`) for each act's file, and no cell
+differs, so the formula above is the whole of it.
+
 Reproduce the Act 1 oracle comparison:
 
 ```sh
 cmake --build build --target mpq-cat pl2-dump
-for table in additive blend50; do
+for table in additive blend50 maxblend; do
   (cd tools/emu && uv run python pl2.py "$table" 1) > ".cache/pl2-oracle-${table}.txt"
   build/tools/mpq-cat/mpq-cat "$D2_MPQ_DIR" 'data\global\palette\act1\pal.pl2' \
     | build/tools/pl2-dump/pl2-dump "$table" > ".cache/pl2-d2d-${table}.txt"

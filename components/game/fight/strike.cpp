@@ -106,6 +106,12 @@ auto Fight::player_fighter(d2d::rules::Fighter* kick ,
         const std::array<int, 4> res{ int(resistances[0]), int(resistances[2]), int(resistances[1]), int(resistances[3]) };
         auto fighter = d2d::rules::make_fighter(game_data->rules, weapon, shield, sum, weapon_sum, actor->character.stats, gains,
                                           int(actor->character.panel.defense), res, boots, throwing);
+        {   // The swing starts by the weapon in hand: slot 4 else slot 5, a weapon, not broken and its requirements met (FUN_0063c9b0 -> FUN_0062a4e0,
+            // the `weapon` chosen above), else nothing.
+            const auto base = weapon ? game_data->rules.item_base.find(weapon->code) : game_data->rules.item_base.end();
+            if (!weapon || base != game_data->rules.item_base.end())
+                fighter.attack_start = d2d::rules::attack_start_frame(actor->character.character_class, weapon ? std::string_view(base->second.wclass) : std::string_view{});
+        }
         {                                                    // poison length reduction: the panel's difficulty penalty, no max stat so at most 75 (FUN_0057be00)
             const int diff = actor->character.header.active_difficulty();
             const std::int64_t penalty = actor->character.header.expansion() ? game_data->resist_penalty[std::size_t(diff)] : std::array<std::int64_t, 3>{ 0, -20, -50 }[std::size_t(diff)];
@@ -243,17 +249,18 @@ auto Fight::calc_env() -> d2d::rules::CalcEnv {
     }
 
 auto Fight::friendly_auras(float x, float y) const -> std::vector<AuraOn> { return auras_at(x, y, false); }
-auto Fight::enemy_auras(float x, float y) const -> std::vector<AuraOn> { return auras_at(x, y, true); }
+auto Fight::enemy_auras(const Monster& monster) const -> std::vector<AuraOn> { return auras_at(monster.unit.x, monster.unit.y, true, &monster); }
 
-auto Fight::auras_at(float x, float y, bool enemy) const -> std::vector<AuraOn> {
+auto Fight::auras_at(float x, float y, bool enemy, const Monster* taker) const -> std::vector<AuraOn> {
         using namespace d2d::d2s;
         std::vector<AuraOn> out;
-        const auto add = [&](int skill_id, int lvl, d2d::rules::CalcEnv env, float from_x, float from_y) {
+        const auto add = [&](int skill_id, int lvl, d2d::rules::CalcEnv&& env, float from_x, float from_y) {
             const auto* skill = game_data->skills.get(skill_id);
             const bool kind = enemy ? skill && skill->aura && (skill->srvdofunc == ServerDoFunction::kEnemyAura || skill->srvdofunc == ServerDoFunction::kHolyFreeze)
                                     : skill && skill->srvdofunc == ServerDoFunction::kFriendlyAura;
             if (!kind || lvl < 1) return;
             if (std::hypot(from_x - x, from_y - y) * 5 > float(d2d::rules::eval_calc(game_data->skills, skill->aurarange, env, skill->id, lvl))) return;
+            if (enemy && taker && !aura_takes(*skill, *taker, from_x, from_y)) return;
             out.push_back({ skill, lvl, std::move(env) });
         };
         const auto no_skills = [](int) { return 0; };
@@ -580,11 +587,11 @@ auto Fight::monster_dots(std::uint32_t now_ms, float elapsed) -> void {
 
 auto Fight::strike(std::uint32_t now_ms) -> void {
         if (const auto* skill = game_data->skills.get(actor->swing_skill); skill && missile_skill(*skill)) {   // Magic Arrow: the bow's action frame
-            if (!actor->pstruck && now_ms >= actor->player.mode_ms + std::uint32_t(float(player_anim(actor->pmode).action_ms()) / actor->prate)) { actor->pstruck = true; settle_cast(); do_sounds(now_ms); fire(*skill, now_ms); start_delay(now_ms); }
+            if (!actor->pstruck && now_ms >= actor->player.mode_ms + action_at()) { actor->pstruck = true; settle_cast(); do_sounds(now_ms); fire(*skill, now_ms); start_delay(now_ms); }
             return;
         }
         if (const auto* skill = game_data->skills.get(actor->swing_skill); skill && (skill->srvdofunc == ServerDoFunction::kThrow || skill->srvdofunc == ServerDoFunction::kDoubleThrow)) {   // the throws (TH)
-            if (!actor->pstruck && now_ms >= actor->player.mode_ms + std::uint32_t(float(player_anim(actor->pmode).action_ms()) / actor->prate)) { actor->pstruck = true; do_sounds(now_ms); spot(*skill, now_ms); start_delay(now_ms); }
+            if (!actor->pstruck && now_ms >= actor->player.mode_ms + action_at()) { actor->pstruck = true; do_sounds(now_ms); spot(*skill, now_ms); start_delay(now_ms); }
             return;
         }
         if (!actor->seq.empty()) {
@@ -608,7 +615,7 @@ auto Fight::strike(std::uint32_t now_ms) -> void {
             return;
         }
         if (actor->pstruck || actor->attack_mon < 0
-            || now_ms < actor->player.mode_ms + std::uint32_t(float(player_anim(actor->pmode).action_ms()) / actor->prate)) return;
+            || now_ms < actor->player.mode_ms + action_at()) return;
         actor->pstruck = true;
         do_sounds(now_ms);
         const int struck = actor->attack_mon;
@@ -787,21 +794,26 @@ auto Fight::spot(const d2d::rules::Skill& skill, std::uint32_t now_ms, const Cas
                 // FUN_005c9800: calc1 %, calc2 the least (256ths), the floor
                 // only in an expansion game; FUN_005c96a0 on each unit, its
                 // record through FUN_0057c6c0 with the attacker's pierce.
+                // Its walk (FUN_0056b7e0, the caster in EDX, x = y = 0: the
+                // caster's spot) takes Skills.txt's aurafilter (+0x50, 0x8783):
+                // a monster behind a wall (0x200, mask 4) isn't struck.
                 const int pct = calc(skill, skill.calc[0], lvl), low = calc(skill, skill.calc[1], lvl);
                 const int floor_pct = actor->character.header.expansion() ? game_data->static_field_min[std::size_t(std::clamp(game_difficulty, 0, 2))] : 0;
                 const int ltng_pierce = pierce()[1];
-                within(actor->player.x, actor->player.y, calc(skill, skill.aurarange, lvl), [&](std::size_t monster_index) {
+                const float radius = float(calc(skill, skill.aurarange, lvl));
+                for (std::size_t monster_index = 0; monster_index < monsters.size(); ++monster_index) {
                     const auto& struck = monsters[monster_index];
+                    if (std::hypot(struck.unit.x - caster.x, struck.unit.y - caster.y) * 5 > radius || !filter_takes(skill.aura_filter, struck, caster.x, caster.y)) continue;
                     const int res = target_of(monster_index).res[3];
                     const int fine = d2d::rules::static_field_fine(struck.life_fine(), struck.max_life_fine(), pct, low, floor_pct, res);
-                    if (fine < 0) return;
+                    if (fine < 0) continue;
                     const int got = d2d::rules::resisted_fine(fine, res < 100 ? std::max(res - ltng_pierce, -100) : res);
                     d2d::rules::Blow blow{ .hit = true };
                     blow.damage = got >> 8;
                     blow.frac = got & 255;
                     blow.elemental = got > 0;
                     land(monster_index, blow, true, now_ms, striker_of(caster));
-                });
+                }
                 break;
             }
             case ServerDoFunction::kCorpseExplosion: case ServerDoFunction::kPoisonExplosion: {

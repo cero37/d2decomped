@@ -182,6 +182,7 @@ auto World::bring_party(const Level* from, const Level* destination, float x, fl
 }
 
 auto World::quests() -> d2d::rules::QuestBits& { return actor->character.header.quests[std::size_t(std::clamp(actor->character.header.active_difficulty(), 0, 2))]; }
+auto World::congrats() -> std::uint64_t& { return actor->character.header.congrats[std::size_t(std::clamp(actor->character.header.active_difficulty(), 0, 2))]; }
 
 auto World::item_ids() -> void {
         for (auto& item : actor->character.items) if (item.id < 0) item.id = next_item_id++;
@@ -217,6 +218,16 @@ auto World::take_character(const Character& entering) -> void {
         // ... but a save made while dead (a handheld's Save and Exit with the death page up: round 17) held life 0: the
         // hero rose in camp at 0 beside its corpse. It comes in with its full life.
         if (actor->character.stats.values[d2d::d2s::kLife] <= 0) actor->character.stats.values[d2d::d2s::kLife] = actor->character.stats.values[d2d::d2s::kMaxLife];
+        // The same restore (FUN_0056af80, 0x56afb4..0x56b00f) puts gold and stash gold back through
+        // FUN_0053ff00, which sets a stat to 0 when it would pass its cap: the purse's clvl x 10000
+        // (FUN_00622e70), the stash's 2,500,000 (FUN_00623460).
+        {
+            using namespace d2d::d2s;
+            auto& values = actor->character.stats.values;
+            constexpr std::int64_t kStashGoldMax = 2500000;
+            if (values[kGold] > values[kLevel] * 10000) values[kGold] = 0;
+            if (values[kGoldBank] > kStashGoldMax) values[kGoldBank] = 0;
+        }
         // The save's maxima are its own (Fight::own_stats): the last game's
         // gear and Battle Orders shares go, or the next refresh adds none and
         // the next save takes them off again.

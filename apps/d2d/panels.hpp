@@ -6,6 +6,7 @@
 #include "scene.hpp"
 
 #include <ai.hpp>
+#include <automap_cells.hpp>
 #include <d2s.hpp>
 #include <d2s_items.hpp>
 #include <dc6.hpp>
@@ -55,11 +56,12 @@ void draw_inventory(std::vector<std::uint8_t>& framebuffer, const Scene& scene, 
 // cursor (0x7bcbf4 with 0x7bcbe4 set). FUN_00483960's colours are the nearest
 // palette entry of (0x80, 0, 0), (0, 0x80, 0), (0, 0, 0x80), (0x80, 0x40, 0x40);
 // the first, third and fourth are act 1's 0x08 / 0xea / 0x4d, and green is
-// that lookup on the palette in use.
-// ponytail: cursor mode 8 (DAT_007a6af0) with Items.txt Transmogrify clear
-// (FUN_0062a0a0, +0x139) is red, not green. draw_inventory does not know that
-// cursor, a child stat list flagged 2, or the player in state 0x36. A cursor
-// item kept off the drawn list is not seen either.
+// that lookup on the palette in use. Its red for cursor mode 8 with
+// Items.txt Transmogrify clear (0x48417a) never runs: mode 8 is only
+// FUN_00468040 with EDX set, and both its calls clear EDX (stubs.md).
+// ponytail: draw_inventory does not know a child stat list flagged 2, or
+// the player in state 0x36. A cursor item kept off the drawn list is not
+// seen either.
 inline void tint_cells(std::vector<std::uint8_t>& framebuffer, const Scene& scene, const d2d::d2s::Item& item, const d2d::rules::Wearer& wearer,
                        const std::array<int, 4>& rect, const d2d::d2s::Header* header = nullptr, bool under_cursor = false,
                        bool stat_list_flag_2 = false, bool player_state_36 = false) {
@@ -154,8 +156,10 @@ void draw_char_panel(std::vector<std::uint8_t>& framebuffer, const Scene& scene,
 //   H-27), draw mode 2; gold (FUN_004fb180(f4, c0, 4c)), red under 25 px,
 //   blue over max.
 //   hover (FUN_00502280, centred, bottom): "Stamina: %d / %d" at W/2-76,
-//   H-52; "Experience: %u / %u" at W/2-146, H-51; "Run (key)" at W/2-145,
-//   H-23 (FUN_00497300). FUN_00502280 only keeps the text: the frame's
+//   H-52; "Experience: %u / %u" at W/2-146, H-51; "Run" at W/2-145,
+//   H-23 (FUN_00497300), then 0x1052 " (%s)" with the key's name for
+//   each bound key of Toggle Run (0x23), slot 1's then slot 0's (0x49735d,
+//   0x4973b6): `run_keys`. FUN_00502280 only keeps the text: the frame's
 //   FUN_00503000 draws it after the mini-panel (FUN_00456ee0), so with
 //   `hovers` set they go there to be drawn as late. Globes (FUN_00498120):
 //   "Life: %d / %d" / "Mana: %d / %d" plain, centred on 65 / W-80,
@@ -164,7 +168,7 @@ void draw_char_panel(std::vector<std::uint8_t>& framebuffer, const Scene& scene,
 // The maxima include what's worn (Fight::item_max).
 // The shown life / mana / stamina glide (FUN_00496dd0: rules::glide) on
 // the client's frame (`frame`, 25 a second).
-// ponytail: no skill icons; the run key shown is R, not the hotkey's binding.
+// ponytail: no skill icons.
 struct HudHover { int centre = 0, bottom = 0; TextLine line; };   // a bar's hover text, centred on `centre`
 struct Hud { bool poisoned = false, running = false, run_down = false, weapon_set_two = false, hidden = false, left_open = false, right_open = false, stamina_blue = false, stamina_shrine = false;
              std::array<std::string, 4> belt_keys{};     // the keys bound to Use Belt 1..4, by name (draw_belt)   // weapon_set_two: the inventory shows switch set II; hidden: local co-op's (the portraits instead); left / right_open: a panel on that side (the 800 border frame); stamina_blue / stamina_shrine: the View's
@@ -174,7 +178,8 @@ struct Hud { bool poisoned = false, running = false, run_down = false, weapon_se
              std::vector<HudHover>* hovers = nullptr;    // set: the bars' hover texts go here, for the frame's late draw (draw_hud_hovers); null: drawn at once
              int life_preview = 0, mana_preview = 0;     // View::life_preview / mana_preview: the potions' preview fill
              bool life_text = false, mana_text = false;  // "Show HP Text" / "Show MP Text" (0x7befdc / 0x7befe0): the globe's text without the cursor on it
-             int holy_shield = 0; };                     // effective Holy Shield level while state 0x65 is on, else 0 (FUN_00485be0)
+             int holy_shield = 0;                        // effective Holy Shield level while state 0x65 is on, else 0 (FUN_00485be0)
+             std::array<std::string, 2> run_keys{}; };   // Toggle Run's keys by name, slot 1 then slot 0; empty: unbound (FUN_00497300)
 void draw_hud_hovers(std::vector<std::uint8_t>& framebuffer, const Scene& scene, const std::vector<HudHover>& hovers);
 void draw_hud(std::vector<std::uint8_t>& framebuffer, const Scene& scene, const d2d::d2s::Stats& stats,
               const Hud& hud = {}, int mouse_x = -1, int mouse_y = -1);
@@ -205,7 +210,7 @@ void draw_level_buttons(std::vector<std::uint8_t>& framebuffer, const Scene& sce
 
 // The stash panel: art frames 0..3 as 2x2 at the left-panel spot, items
 // (location 0, panel 5) in the inventory.txt bank grid.
-// ponytail: no "close" button of its own; classic stash untested.
+// Its close button: storage_close.hpp. ponytail: classic stash untested.
 // Rect {x, y, w, h} of a stored item in a grid layout.
 std::array<int, 4> grid_rect(const Scene& scene, const Scene::InvLayout& layout, const d2d::d2s::Item& item);
 
@@ -257,15 +262,15 @@ void draw_belt(std::vector<std::uint8_t>& framebuffer, const Scene& scene, const
 // One automap per Levels.txt Layer: the town and the act 1 wilderness
 // share layer 0, so the map shows them together; cells sit in act
 // coordinates.
-// A cell goes in its list's tree (FUN_00457b00) unless one sits at its
-// (x, y) already that it matches: same cel group (0x711258 -> 0x7a3150),
-// or it has none.
+// A cell goes in its list's tree (FUN_00457b00; rules/automap_cells.hpp)
+// unless the one it meets at its (x, y) has its cel group (0x711258 ->
+// 0x7a3150), or it has none.
 // Saved next to the character (d2s_automap.hpp): load_automap reads the
 // layer's cells in, save_automap appends the ones added since.
 struct Automap {
     struct Cell { int cel, x, y; int list = 0; bool saved = false; };   // list: 0 floors, 1 walls, 2 units, 3 miniatures
     std::vector<Cell> cells;
-    std::set<std::tuple<int, int, int, int>> placed;               // list, y, x, cel group (-1 none)
+    std::array<d2d::rules::AutomapTree, 4> trees;                  // each list's cell tree (FUN_00457b00), which admits a cell
     int cel_file = 0;                                              // list 3's: 0 none, 1..3 a town's miniature (layer +4)
     bool open = false;
     bool add(const Cell& cell);
@@ -288,12 +293,8 @@ struct Automap {
     std::vector<std::string> lines;
 };
 
-// Interchangeable cels (0x711258, cel then group).
-inline constexpr int kCelGroups[][2] = {
-    {0,0},{1,0},{2,0},{3,0},{6,1},{7,1},{8,1},{11,2},{12,2},{13,3},{14,3},{20,4},{38,4},{21,5},{39,5},{46,6},{47,6},
-    {48,6},{49,6},{51,7},{52,7},{53,7},{54,7},{60,8},{70,8},{61,9},{71,9},{120,10},{169,10},{171,10},{121,11},{170,11},
-    {172,11},{257,12},{258,12},{259,12},{266,13},{267,13},{337,14},{338,14},{472,15},{473,15},{474,15},{475,15},
-    {520,16},{521,16},{522,16},{533,17},{534,17} };
+// Interchangeable cels (0x711258, cel then group): rules/automap_cells.hpp.
+inline constexpr const auto& kCelGroups = d2d::rules::kAutomapCelGroups;
 // The player mark's outline (0x6d6638), half-scale steps.
 inline constexpr int kMark[13][2] = { {0,-1},{2,-2},{4,-1},{2,0},{4,1},{2,2},{0,1},{-2,2},{-4,1},{-2,0},{-4,-1},{-2,-2},{0,-1} };
 

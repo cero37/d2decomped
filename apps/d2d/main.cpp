@@ -56,7 +56,9 @@
 #include "handheld_prof.hpp"
 #include <palette.hpp>
 #include <screenshot.hpp>
+#ifdef D2D_WITH_SENTRY
 #include <sentry.h>
+#endif
 #include <sound_ids.hpp>
 #include <switches.hpp>
 #include <tcp.hpp>
@@ -106,15 +108,31 @@
 #ifdef _WIN32
 #include <windows.h>
 #endif
+#ifdef __vita__
+#include <SDL3/SDL_main.h>   // SDL's main runs ours on a 512 KB stack
+#endif
+#ifdef __ANDROID__
+#include <SDL3/SDL_main.h>   // SDL's activity calls ours as SDL_main
+#include <pthread.h>
+#endif
 
 using namespace d2d::client;
 
 #ifdef __3DS__
 [[noreturn]] void d2d_3ds_leave();   // platform/3ds/src/main_3ds.cpp: tell HOME we're gone and end, the heap left in place
 #endif
+#ifdef __vita__
+// newlib's heap: most of the extended-memory app mode (ATTRIBUTE2=12,
+// apps/d2d/CMakeLists.txt), where D2Vita sees ~355 MiB free at boot.
+// ponytail: a guess, not measured on a Vita; lower it if SDL's GXM runs short.
+extern "C" {
+unsigned int _newlib_heap_size_user = 300 * 1024 * 1024;
+}
+#endif
 
 namespace {
 
+#ifdef D2D_WITH_SENTRY
 std::string cpu_model() {
 #if defined(_WIN32) && (defined(_M_IX86) || defined(_M_X64))
     int registers[4]{};
@@ -166,6 +184,7 @@ constexpr const char* cpu_architecture() {
     return "unknown";
 #endif
 }
+#endif   // D2D_WITH_SENTRY
 
 std::string crash_notes_from_environment() {
 #ifdef _WIN32
@@ -183,6 +202,7 @@ std::string crash_notes_from_environment() {
 #endif
 }
 
+#ifdef D2D_WITH_SENTRY
 void sentry_log_sink(d2d::log::Level level, std::string_view line) {
     const std::string message(line);
     auto breadcrumb = sentry_value_new_breadcrumb("default", message.c_str());
@@ -359,6 +379,19 @@ private:
     sentry_uuid_t attachment_{};
     std::thread worker_;
 };
+#else   // -DD2D_GAME_ONLY=ON builds without Sentry (apps/d2d/CMakeLists.txt)
+class SentrySession {
+public:
+    SentrySession(bool requested, const fs::path&, std::string_view, std::string_view) {
+        if (requested) d2d::log::warn("This d2d was built without crash reporting.");
+    }
+    [[nodiscard]] bool enabled() const { return false; }
+};
+
+struct SentryFrameAttachment {
+    void update(std::span<const std::uint8_t>) {}
+};
+#endif   // D2D_WITH_SENTRY
 
 // Set by main() before entering the loop — a lazy way to plumb --start-*
 // through without threading extra parameters everywhere.
@@ -505,6 +538,7 @@ int run_windowed(std::vector<std::uint8_t>& framebuffer,
     // A set cap is the sleep's alone: a present held to the next refresh after it would miss the rate.
     if (g_fps_cap > 0) SDL_SetRenderVSync(win.renderer, 0);
     SentryFrameAttachment crash_frame;
+#ifdef D2D_WITH_SENTRY
     if (sentry_is_enabled()) {
         auto graphics = sentry_value_new_object();
         sentry_value_set_by_key(graphics, "renderer",
@@ -526,17 +560,19 @@ int run_windowed(std::vector<std::uint8_t>& framebuffer,
         }
         sentry_set_context("graphics", graphics);
     }
+#endif
     d2d::log::info("  Window: {}x{} (scale {}), renderer {}", kScreenWidth * g_scale, kScreenHeight * g_scale, g_scale,
                    SDL_GetRendererName(win.renderer));
     // The title shows while finish_scene loads the rest (only the menus'
-    // part of the scene is read here); then the menus take input.
-    // ponytail: input waits too (a few hundred ms); clicks in that time are dropped.
+    // part of the scene is read here); then the menus take input. Only a quit
+    // is taken off SDL's queue meanwhile: a click waits there for the menus.
     // (Black when the startup videos come first, or another screen was asked for.)
     const bool title_first = (g_start_screen.empty() && !g_video) || g_start_screen == "title";
     const auto boot_title = scene && title_first ? std::optional<TitleUI>(title_ui(*scene, g_coop_lobby)) : std::nullopt;
     while (loading.valid() && loading.wait_for(std::chrono::milliseconds(0)) != std::future_status::ready) {
+        SDL_PumpEvents();
         SDL_Event event;
-        while (SDL_PollEvent(&event)) if (event.type == SDL_EVENT_QUIT) quit = true;
+        while (SDL_PeepEvents(&event, 1, SDL_GETEVENT, SDL_EVENT_QUIT, SDL_EVENT_QUIT) > 0) quit = true;
         if (boot_title) render_title(framebuffer, *scene, boot_title->buttons, std::uint32_t(SDL_GetTicks()));
         // The handheld loads for a good while: say so over the buttons, which don't answer yet.
         if (boot_title && std::getenv("D2D_HANDHELD")) draw_loading_note(framebuffer, *scene, std::uint32_t(SDL_GetTicks()));
@@ -1260,7 +1296,15 @@ int run_windowed(std::vector<std::uint8_t>& framebuffer,
                     if (tcpip.box_open) buttons({ &tcpip.box_ok, &tcpip.box_cancel });
                     else buttons({ &tcpip.join, &tcpip.host, &tcpip.cancel });
                 } else if (screen == Screen::CharCreate) {
-                    for (const auto& position : kClassPos) points.push_back({ position.x, position.y - 50 });   // ponytail: a spot up each figure, not its frame's box
+                    // Each figure's idle frame 0 box, its centre: where a click picks it (class_under, FUN_005003a0).
+                    for (std::size_t index = 0; index < std::size(kClassPos); ++index) {
+                        const auto& position = kClassPos[index];
+                        const auto* idle = scene ? &scene->class_anims[index][0] : nullptr;
+                        if (!idle || idle->frames_per_direction() == 0) { points.push_back({ position.x, position.y - 50 }); continue; }
+                        const auto& frame = idle->frame(0, 0);
+                        points.push_back({ position.x + frame.offset_x + int(frame.width) / 2,
+                                           position.y + frame.offset_y - int(frame.height) / 2 });
+                    }
                     buttons({ &character.cancel_btn, &character.ok_btn });
                 } else if (screen == Screen::CharSelect) {
                     if (csu.confirm_delete) buttons({ &csu.popup_no, &csu.popup_yes });
@@ -1549,7 +1593,7 @@ int run_windowed(std::vector<std::uint8_t>& framebuffer,
                     if (i >= cin_ui.unlocked) { entry.hovered = entry.pressed = false; continue; }
                     Screen dummy = screen;
                     update_button(entry, mouse, dummy, quit);
-                    if (entry.hovered && mouse.release_this_frame && video_mpqs.contains(kCinematicVideo[std::size_t(i)])) {
+                    if (entry.clicked && video_mpqs.contains(kCinematicVideo[std::size_t(i)])) {
                         video_queue = { kCinematicVideo[std::size_t(i)] };
                         video_return = Screen::Cinematics;
                         audio.stop(audio.music);
@@ -1598,13 +1642,13 @@ int run_windowed(std::vector<std::uint8_t>& framebuffer,
                 auto clicked = [&](Button& button) {
                     Screen stay = screen;
                     update_button(button, mouse, stay, quit);
-                    return button.hovered && mouse.release_this_frame;
+                    return button.clicked;
                 };
                 const bool escape = std::ranges::find(keys_this_frame, SDLK_ESCAPE) != keys_this_frame.end();
                 if (!tcpip.popup.empty()) {                  // the failed test's popup: OK back to these options (FUN_0042ffe0)
                     Screen stay = screen;
                     update_button(tcpip.popup_ok, mouse, stay, quit);
-                    if ((tcpip.popup_ok.hovered && mouse.release_this_frame) || escape) tcpip.popup.clear();
+                    if (tcpip.popup_ok.clicked || escape) tcpip.popup.clear();
                 } else if (tcpip.box_open) {
                     // The edit line (record 0x10d) takes up to 255 characters.
                     for (const char letter : text_this_frame) if (tcpip.address.size() < 255) tcpip.address.push_back(letter);
@@ -1660,7 +1704,7 @@ int run_windowed(std::vector<std::uint8_t>& framebuffer,
                 if (!csu.popup.empty()) {   // a failed join's popup takes the input until OK
                     Screen stay = screen;
                     update_button(csu.popup_ok, mouse, stay, quit);
-                    if ((csu.popup_ok.hovered && mouse.release_this_frame)
+                    if (csu.popup_ok.clicked
                         || std::ranges::any_of(keys_this_frame, [](SDL_Keycode key) { return key == SDLK_RETURN || key == SDLK_KP_ENTER || key == SDLK_ESCAPE; })) {
                         csu.popup.clear();
                         screen = csu.popup_return;
@@ -1673,8 +1717,8 @@ int run_windowed(std::vector<std::uint8_t>& framebuffer,
                     update_button(csu.popup_no, mouse, stay, quit);
                     update_button(csu.popup_yes, mouse, stay, quit);
                     const auto key = [&](auto... wanted) { return std::ranges::any_of(keys_this_frame, [&](SDL_Keycode got) { return ((got == wanted) || ...); }); };
-                    const bool yes = (csu.popup_yes.hovered && mouse.release_this_frame) || key(SDLK_RETURN, SDLK_KP_ENTER);
-                    if (yes || (csu.popup_no.hovered && mouse.release_this_frame) || key(SDLK_ESCAPE)) csu.confirm_delete = false;
+                    const bool yes = csu.popup_yes.clicked || key(SDLK_RETURN, SDLK_KP_ENTER);
+                    if (yes || csu.popup_no.clicked || key(SDLK_ESCAPE)) csu.confirm_delete = false;
                     if (yes && g_no_save) d2d::log::info("--no-save: {} not deleted", scene->saves[std::size_t(std::clamp(csu.selected, 0, int(scene->saves.size()) - 1))].name);
                     if (yes && !g_no_save && csu.selected >= 0 && csu.selected < int(scene->saves.size())) {
                         // FUN_0043c750: every file <save dir><name>.* (the .d2s, .key, .ma*, ...).
@@ -1696,7 +1740,7 @@ int run_windowed(std::vector<std::uint8_t>& framebuffer,
                     static constexpr SDL_Keycode kDifficultyKey[3] = { SDLK_R, SDLK_N, SDLK_H };   // records 0xa8..0xaa
                     for (int index = 0; index < 3; ++index)
                         if ((index < 2 || csu.hell_open)
-                            && ((csu.difficulty_btn[std::size_t(index)].hovered && mouse.release_this_frame)
+                            && (csu.difficulty_btn[std::size_t(index)].clicked
                                 || std::ranges::find(keys_this_frame, kDifficultyKey[index]) != keys_this_frame.end()))
                             chosen_difficulty = index;
                     if (chosen_difficulty < 0) {
@@ -1790,9 +1834,14 @@ int run_windowed(std::vector<std::uint8_t>& framebuffer,
                     && asks_difficulty(scene->saves[std::size_t(csu.selected)])) {
                     screen = Screen::CharSelect;
                     csu.pick_difficulty = true;
+                    for (auto& button : csu.difficulty_btn) disarm(button);
                     csu.hell_open = top_difficulty(scene->saves[std::size_t(csu.selected)]) >= 2;
                 }
-                if (csu.delete_btn.hovered && mouse.release_this_frame && csu.selected >= 0 && csu.selected < count) csu.confirm_delete = true;
+                if (csu.delete_btn.clicked && csu.selected >= 0 && csu.selected < count) {
+                    csu.confirm_delete = true;
+                    disarm(csu.popup_yes);
+                    disarm(csu.popup_no);
+                }
                 if (screen == Screen::InGame) {
                     // Load the picked save into the in-game character.
                     const auto& header = scene->saves[std::size_t(csu.selected)];
@@ -2155,7 +2204,8 @@ int run_windowed(std::vector<std::uint8_t>& framebuffer,
                 const bool seat_colour = coop_game && std::ranges::count_if(gamepads.pads(), [](const Gamepads::Pad& pad) { return !pad.built_in; }) >= 2;
                 const auto& lead = kSeatColours[std::size_t(std::clamp(town.focus_colour(), 0, 3))];
                 const auto& hand_pal = seat_colour ? tinted(pal, lead[0], lead[1], lead[2]) : pal;
-                // ponytail: the plain hand only; a held item or identify pick is drawn into the frame.
+                // The OS cursor carries the plain hand only; a held item or identify pick is
+                // drawn into the frame, as game.exe draws every cursor (deviations.md row 19).
                 os_cursor = g_hw_cursor && win.pointer_at(mouse.x, mouse.y) && win.show_cursor(frame, hand_pal);
                 if (!os_cursor)
                     blit_sprite(framebuffer, frame, hand_pal, mouse.x + cursor_dx + frame.offset_x,
@@ -2410,6 +2460,27 @@ extern "C" void d2d_sigint_handler(int) {
  * Touch controls remain opt-in through the flag or saved configuration.
  */
 int main(int argc, char** argv) {
+#ifdef __ANDROID__
+    // SDL calls this on its Java thread, with Android's 1 MB stack; this
+    // frame and load_scene's take 1.1 MB. Run again on a thread of 16 MB.
+    static thread_local bool on_own_stack = false;
+    if (!on_own_stack) {
+        struct Call { int argc; char** argv; int result; } call{argc, argv, 1};
+        pthread_attr_t attributes;
+        pthread_attr_init(&attributes);
+        pthread_attr_setstacksize(&attributes, 16u << 20);
+        pthread_t thread;
+        const auto body = [](void* raw) -> void* {
+            auto* const pending = static_cast<Call*>(raw);
+            on_own_stack = true;
+            pending->result = SDL_main(pending->argc, pending->argv);
+            return nullptr;
+        };
+        if (pthread_create(&thread, &attributes, body, &call) != 0) return 1;
+        pthread_join(thread, nullptr);
+        return call.result;
+    }
+#endif
     d2d::mpq::mark_main_thread();   // its archive reads go before the workers'
     // Ctrl-C and SIGTERM set the loop-quit flag instead of terminating
     // mid-frame. SIGPIPE gets ignored so a closed devctl client doesn't
@@ -2427,6 +2498,12 @@ int main(int argc, char** argv) {
     }
 #endif
 
+#ifdef __ANDROID__
+    // No HOME there: the app's own external folder
+    // (Android/data/<package>/files), which needs no permission and which
+    // adb can fill (docs/android.md).
+    if (const char* files = SDL_GetAndroidExternalStoragePath(); files && *files) setenv("D2D_USER_DIR", files, 0);
+#endif
     // Per-user dir, thirdeye layout (components/userdir): d2d.cfg, save/,
     // screenshots/. Config loads global -> ./ -> user, later wins.
     const fs::path user_dir = d2d::userdir::user_dir("d2d");
@@ -2555,6 +2632,9 @@ int main(int argc, char** argv) {
         const char* env = std::getenv("D2_MPQ_DIR");
         const char* base = SDL_GetBasePath();
         std::error_code cwd_ec;
+#if defined(__vita__) || defined(__SWITCH__) || defined(__ANDROID__)
+        if (cfg["data"].empty()) cfg["data"] = user_dir.string();   // the MPQs' folder there (userdir.hpp)
+#endif
         const auto found = d2d::install::resolve_data_dir(data_dir_str, env ? env : "", base ? fs::path(base) : fs::path{},
                                                           fs::current_path(cwd_ec), cfg["data"]);
         if (!found.error.empty()) {
@@ -2630,8 +2710,10 @@ int main(int argc, char** argv) {
         if (args.size() != 2 || args[1] != "CONFIRM_CRASH")
             return std::string("err usage: crash-test CONFIRM_CRASH\n");
         d2d::log::warn("Triggering the explicitly requested Sentry crash test.");
+#ifdef D2D_WITH_SENTRY
         sentry_set_tag("crash_test", "true");
         sentry_crash();
+#endif
         return std::string("err Sentry crash test unexpectedly returned\n");
     });
     channel.listen(devctl_path);

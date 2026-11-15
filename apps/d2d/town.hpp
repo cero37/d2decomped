@@ -76,8 +76,9 @@ void draw_monster_bar(std::vector<std::uint8_t>& framebuffer, const Scene& scene
 // its cast overlay once from when the client first saw it (StateClock).
 // Overlay lights are stamped by frame_light. These overlay kinds don't
 // use LoopWaitTime (FUN_00470c30: only kind 6 waits).
-// ponytail: kind 8 rotates the visible state's overlays after 50 ticks
-// (FUN_0046def0 / 0046df40); d2d draws the active states together.
+// ponytail: kind 8 (states in flag list +0xd0) shows one state's overlays
+// at a time, rotating every 50 ticks (FUN_0046df40, states.md "Rotating
+// overlays"); d2d draws the active states together.
 struct StateClock {
     struct Seen { std::uint32_t start = 0, last = 0; float x = 0, y = 0; bool off = false; };
     std::map<std::pair<int, const GameData::StateInfo*>, Seen> seen;   // by (unit key, state)
@@ -171,7 +172,8 @@ std::pair<int, std::uint32_t> view_seq(const Scene& scene, int cls, const View& 
 // A light's radius moves toward a new one 8 eighths (a subtile) a frame
 // (FUN_004755a0: +0x18 toward +0x1c); a new light starts at its first
 // radius (FUN_00474160; an overlay's InitRadius).
-// ponytail: light quality is taken as high (2: shadows on).
+// Light quality is always high (2: shadows on): deviations.md #4
+// (game.exe drops it by frame rate, FUN_00475780).
 // `player_at`: where the player stands when it isn't the camera's point (local co-op's camera).
 Lighting frame_light(const Scene& scene, const View& view, float cam_x, float cam_y, std::span<const View::Shot> effects = {}, int ambient = -1,
                      std::span<const Unit> units = {}, const Unit* player_look = nullptr, std::uint32_t now = 0,
@@ -212,6 +214,8 @@ struct Town {
     std::uint32_t net_drift_ms = 0;                          // since when d2d's player has been far from the host's (0: not)
     std::uint32_t net_follow_ms = 0;                         // when the host was last told where our walk is
     bool inv_close_down = false, char_close_down = false, tree_close_down = false;   // the inventory's / character panel's close button held
+    bool stash_close_down = false;                           // the stash's close button held (0x7bce38)
+    bool cube_close_down = false;                            // the Cube's close button held (0x7bce40)
     bool hold_interact = false;                              // the left press sent an Interact: the hold walks no more till it's done (LAB_00462b1d)
     int entry_level = 0;                                     // the level whose "entering" art last started (0: the game's first)
     std::uint32_t entry_until = 0;                           // shown till then (2 s from a level change)
@@ -530,6 +534,7 @@ struct Town {
     // gear, passives, masteries, states).
     [[nodiscard]] d2d::rules::CalcEnv tip_env() const;
     std::array<std::string, 4> belt_key_names{};
+    std::array<std::string, 2> run_key_names{};    // Toggle Run's keys by name, slot 1 then 0 (update_hotkey_names)
     bool menu_press = false;                       // an NPC menu took this press: the store ignores it till it's let go   // Use Belt 1..4's keys by name (update_hotkey_names)
     [[nodiscard]] int pad_panel() const;
     void pad_tab(int step);
@@ -719,6 +724,9 @@ struct Town {
     [[nodiscard]] QuestState quest_state() const { return { view.quest_log, view.game_quests, view.den_left, net_game != nullptr }; }
     int view_act() const;
     void toggle_quest_log();               // Q and the mini-panel (FUN_004a3fe0)
+    void toggle_inventory();               // I, C, T and the mini-panel (FUN_00455f20 via FUN_00453910)
+    void toggle_character();
+    void toggle_skill_tree();
     [[nodiscard]] QuestLogButton quest_log_button_now() const;
 
     // The client's side of a click: what it asks the server for

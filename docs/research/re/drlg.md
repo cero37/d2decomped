@@ -994,7 +994,17 @@ the level seed, as outdoors).
    redone.
 3. **Preset by links** (FUN_006709b0): mask 1 left, 8 above, 2 right, 4
    below; act 1 caves (LevelType 3) take def 0x34 + mask (53 Cave W … 67
-   Cave NSEW), file −1; this clears the room's special flag (flags & 2).
+   Cave NSEW), file −1. The stack flag sets the preset's flags bit 1 (value
+   2, the special mark) when 0 and clears it otherwise; a def of 0 writes
+   nothing. EBX is the room, EAX comes back as the room, and a LevelType
+   outside the 20 it handles (3 4 7 8 0xa 0xd 0xe 0xf 0x11 0x12 0x13 0x16
+   0x17 0x18 0x19 0x1c 0x20..0x23) is fatal (FUN_00408090(0x160)). Others:
+   def = mask + 0x6c, 0xa7, 0xcd, 0x101, 0x12d, 0x19d, 0x1e1, 0x1fd, 0x2f1,
+   0x298, 0x2c0, 0x344, 0x422 for types 4 7 8 0xa 0xd 0x11 0x12 0x13 0x16
+   0x18 0x19 0x1c 0x22; tables for 0xe 0xf 0x17 0x20 0x23. Run:
+   `tools/emu/drlg_room_helpers.py` (11,088 cases: LevelTypes 0..0x25 and four larger values; its model
+   reads the tables from game.exe, FUN_00670810 runs for real); no d2d
+   comparison.
 4. **Special rooms** (LevelType 3, FUN_00672550): k = rand & 3; records
    `{def to replace, def to set, file, side}` at 0x6ef8a8 + 0x10 k (the
    entrance: 60→86 below, 54→84 left, 56→85 above, 53→83 right), then
@@ -1019,6 +1029,13 @@ the level seed, as outdoors).
    +0x1cc), a special keeps the roll. FUN_00667ed0 then makes the rooms:
    one when the preset is under 13×13, else one per 8×8 block (rows, then
    columns), each allocated in turn.
+   Before that FUN_00667970 walks every wall layer of the whole DS1 once:
+   a warp wall (orientation 10/11, style < 8, sequence 0 / 4 or hidden)
+   ORs 0x10 << style into the 8×8 cell (x / 8, y / 8) it lies in (cell 0
+   when FUN_00667ed0's last argument makes one room), and style 30..33
+   tiles go on the level's start list (+0x1d8). Each room takes its own
+   cell's flags, so d2d's walk of each room's own cells
+   (`room_tiles.hpp`, `vis` / `starts`) gives the same rooms the same bits.
 
 **Act 2's mazes** (FUN_00673b30 by LevelType; 2026-10-10):
 

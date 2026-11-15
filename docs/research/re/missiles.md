@@ -609,11 +609,20 @@ stat 0x148: the player's `psum` and `pierce_idx` (bumped by each
 `cmd::UseSkill`), or the merc's gear and `merc_pierce_idx` on a skill
 missile. A struck monster spends one while
 that owner still has either stat, with no draw (`skill_missile_hits`,
-tests/game/test_merc_pierce.cpp). ponytail: nothing bumps a merc's stat
-0x148 (`FUN_00597e20`'s default branch isn't read), a merc's plain
-arrow still ends on the first unit (its hit is not `skill_missile_hits`),
-and `pierce_idx`
-counts d2d's commands, not game.exe's packets.
+tests/game/test_merc_pierce.cpp). A merc's plain arrow takes its
+charges at the bow (`seed_pierce`) and spends them the same way
+(`plain_missile_hits`), passing the unit it struck last (LastCollide) and,
+as the skill path does, any unit on its `struck` list.
+
+`FUN_00597e20(game, monster, client)` sends one client a monster's mode
+change (`FUN_00598220` calls it for each client while unit +0xc4 bit 0 is
+set; `FUN_00571f90` when a client is given the unit). Its default branch,
+for mode 1 (NU), sends the stop (`FUN_0053bb70`) and adds 1 to the
+monster's stat 0x148. So a merc's pierce_idx goes up by one for each
+client told of each turn to NU. d2d: `merc_pierce_idx`, one a player
+near it at each turn to NU. ponytail: a client given the unit anew while
+it stands in NU isn't counted, and `pierce_idx` counts d2d's commands,
+not game.exe's packets.
 
 ## Server hit function 20 helper — FUN_005ab2a0 (area callback)
 
@@ -648,6 +657,12 @@ reference to it that I found). ECX game, EDX the missile unit.
   (short at +0x24) >= 0, the skill (`FUN_0064a280` id, `FUN_0064a210`
   level, from the missile's data block) must be in the skills table, and
   the owner (`FUN_00552fd0`) must exist. Otherwise it returns 1.
+  `FUN_00552fd0` (fastcall: ECX game, EDX unit) returns 0 for a null unit
+  or one whose `+0xc8` bit 0x400 (shr 0xa, and 1) is clear; else
+  `FUN_00552f60(game, type = unit +0x94, id = unit +0x98)`, the unit of
+  that type and id: the head at `game + [0x6e10e0 + type x 4] + (id & 0x7f)
+  x 4` (type 5 at `game + 0x1b20`, above 5 none), then `+0xe4` links until
+  `+0xc` is the id, 0 when none (`ret 4`).
 - Radius: the missile row's sHitPar1 (+0x4c) when >= 1, else
   `FUN_00646ca0(owner, skill +0x64 (aurarange), id, level)`; at least 1 only
   on the calc path (a result below 1 becomes 1).
@@ -657,25 +672,44 @@ reference to it that I found). ECX game, EDX the missile unit.
   ".\MISSILES\MissMode.cpp", 0xec3)` walks the units in range and makes one
   sub-missile each (FUN_005ab2a0) until the count is served. Returns **3**
   (damage, end).
+- FUN_005ab370 hands the walk the owner in EDX (0x5ab4cf), and the walk
+  uses that unit three ways: its rooms are the owner's room
+  (`FUN_00620bb0` at 0x56b815) and that room's near list
+  (`FUN_00619790`), walked in the list's order (EBX at 0x56b8cd), each
+  room's units from its `+0x74` head along `+0xe8` (newest first), with
+  `FUN_0056b770`'s per-room reach test, which lets every room by
+  (bugs.md); it is `FUN_0056b3e0`'s caster (ECX at 0x56b95c), so
+  the filter's line (0x200, in the default 0xa783) runs from the owner
+  while the reach is measured from the missile's x, y; and it is skipped.
 - The walker skips only the unit handed to it in EDX, which here is the
   owner (a pointer comparison at 0x56b8e0); the callback has no test for
   the unit the missile struck. FUN_005ab370's stack argument (the unit
   struck, `ret 4`) is never read. The walk's flag 1 also skips a monster
-  whose MonStats flag 0x1b is set (`FUN_00457490`).
+  whose MonStats flag 0x1b is set (`FUN_00457490`, called at 0x56b97e with
+  EDX 0x1b): the `noaura` column (the loader `FUN_00651210` gives it bit
+  0x1b of record +0xc at 0x651994).
 
-Proven: `tools/emu/hit_fury.py` runs FUN_005ab370, the walk FUN_0056b7e0
-and the callback FUN_005ab2a0 for real over a room of the owner, the unit
-struck, another monster and one out of reach (row 206, sHitPar1 0 / 4,
-sHitPar2 0..3, aurafilter 0 / 0xa583, four calc pairs): the struck unit
-gets the first sub-missile, the owner none, the filter handed on is the
-aurafilter, else 0xa783.
+Proven: `tools/emu/hit_fury.py` runs FUN_005ab370, the owner's lookup
+FUN_00552fd0 / FUN_00552f60, the walk FUN_0056b7e0 and the callback
+FUN_005ab2a0 for real over a room of the owner, the unit struck, another
+monster and one out of reach (row 206, sHitPar1 0 / 4, sHitPar2 0..3,
+aurafilter 0 / 0xa583, four calc pairs): the struck unit gets the first
+sub-missile, the owner none, the filter handed on is the aurafilter, else
+0xa783, and the walk's room and the filter's caster are the owner on every
+case. With the missile's bit 0x400 clear, or set with an id no unit has, it
+returns 1 and walks nothing.
 
 Re-check (in tools/emu): `uv run python hit_fury.py`, `uv run python disasm.py 56b7e0`.
 
 d2d: matches. `Fight::burst` case 20 no longer skips `missile.target`
 and tests each monster with the aurafilter, else 0xa783 (`filter_takes`,
-aura_filter.hpp); `test_lightning_fury` checks it against the oracle's
-cases. ponytail: the MonStats flag 0x1b skip isn't read.
+aura_filter.hpp), its line from the owner (the hero, or its merc for a
+merc's missile); with no owner (`hero_of` finds none) nothing is sent.
+It walks the monsters in the owner's room and its near list
+(`near_rooms`, `room_of`), each room's newest first (`rules::room_order`).
+`test_lightning_fury` checks it against the oracle's cases, and a wall
+between the owner and a monster the missile sees stops the bolt, and a
+monster in reach of the bolt but in no room near the owner's gets none.
 
 ## Server hit function 21 — FUN_005ab500 (Battle Cry)
 
@@ -691,6 +725,20 @@ states count at `PTR_DAT_00744304 + 0xc4`):
 2. the length `FUN_00646ca0(owner, skill +0x60 (auralen), id, level)`;
 3. `put_state` (`FUN_005c6cc0`'s caller chain, `d2d_states_put_state`)
    and, when it takes, `FUN_005c6cc0(skill, id, level)` (the aurastats).
+
+`FUN_005c6cc0` (ECX the unit, EDX the stat list; stack: skill row or 0, id,
+level) does nothing for a null unit or list, or with no row and an id outside
+the skills count. For each of the six slots (stat ids as shorts at row
+`+0x54`, calc offsets at `+0x68`) whose stat id is `0 <= id <` the stat-table
+count (`+0xbd4`) with a non-null stat row (`+0xbcc`, rows of `0x144`) it
+evaluates `FUN_00646ca0(unit, calc, id, level)` (the passed id, even with a row
+given), and for a nonzero value adds it with `FUN_006270b0(list, stat, value,
+0)`; stat 68 (0x44) also sets 69 (0x45) to it through `FUN_00627150`.
+It ends with `FUN_00623f50(unit, ".\SKILLS\SkillDruid.cpp", 0xf8)` on every
+non-rejected call. Run with those four callees hooked and their arguments
+logged, 11 cases (row given and from the table, bad ids, null unit / list, a
+zero value, a null stat row): `tools/emu/skills_combat_helpers.py`. The callees
+and d2d are not compared.
 
 Returns **0** when the filter passed, else 1.
 

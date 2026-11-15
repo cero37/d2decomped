@@ -56,6 +56,14 @@ foreach(test_source ${d2d_test_sources})
     list(APPEND d2d_cpp_tests ${name})
 endforeach()
 
+# `test_load_gold --load-gold` on a case file that cannot be opened must exit nonzero and say so
+# (an oracle diff of two empty files would otherwise pass). PASS_REGULAR_EXPRESSION ignores the
+# exit code, so expect_fail.cmake checks both; its "SKIP:" line is the skip (the test's exit 77).
+add_test(NAME test_load_gold_missing_cases
+    COMMAND ${CMAKE_COMMAND} -DCMD=$<TARGET_FILE:test_load_gold> -DARGS=--load-gold|${CMAKE_CURRENT_BINARY_DIR}/no-such-cases.tsv
+        -DPATTERN=cannot\ open -DSKIP_CODE=${d2d_skip_code} -P ${CMAKE_CURRENT_SOURCE_DIR}/expect_fail.cmake)
+set_tests_properties(test_load_gold_missing_cases PROPERTIES SKIP_REGULAR_EXPRESSION "SKIP:")
+
 # End-to-end: headless d2d driven over devctl (SDL dummy driver).
 # Python3_EXECUTABLE rather than `python3`: Windows installs it as python.exe.
 find_package(Python3 COMPONENTS Interpreter)
@@ -102,11 +110,21 @@ endif()
 
 # Optional game-data inputs, handed to the tests that use them (they skip
 # those parts when unset): -DD2_PATCH_INSTALLER=.../LODPatch_114d.exe,
-# -DD2_SAVES_DIR=<dir of real .d2s saves>, -DD2_GAME_EXE=.../game.exe.
+# -DD2_SAVES_DIR=<dir of real .d2s saves>, -DD2_GAME_EXE=.../game.exe,
+# -DD2_MPQ_DIR=<dir with d2data.mpq> (default: the ~/Workspace/private/diablo2
+# most tests fall back to, so the ones that read only D2_MPQ_DIR run too).
+set(d2d_default_mpq_dir "$ENV{D2_MPQ_DIR}")
+if (NOT d2d_default_mpq_dir AND EXISTS "$ENV{HOME}/Workspace/private/diablo2/d2data.mpq")
+    set(d2d_default_mpq_dir "$ENV{HOME}/Workspace/private/diablo2")
+endif()
+set(D2_MPQ_DIR "${d2d_default_mpq_dir}" CACHE PATH "Diablo II install dir with d2data.mpq for the data tests")
 set(D2_PATCH_INSTALLER "$ENV{D2_PATCH_INSTALLER}" CACHE FILEPATH "LODPatch_114d.exe for the 1.14d tables")
 set(D2_GAME_EXE "$ENV{D2_GAME_EXE}" CACHE FILEPATH "game.exe 1.14d (1.14.3.71) for test_exe_tables")
 set(D2_SAVES_DIR "$ENV{D2_SAVES_DIR}" CACHE PATH "Real .d2s saves for parser checks")
 set(d2d_test_env "")
+if (D2_MPQ_DIR)
+    list(APPEND d2d_test_env "D2_MPQ_DIR=${D2_MPQ_DIR}")
+endif()
 if (D2_PATCH_INSTALLER)
     list(APPEND d2d_test_env "D2_PATCH_INSTALLER=${D2_PATCH_INSTALLER}")
 endif()
@@ -118,6 +136,7 @@ if (D2_SAVES_DIR)
 endif()
 if (d2d_test_env)
     set_tests_properties(${d2d_cpp_tests} PROPERTIES ENVIRONMENT "${d2d_test_env}")
+    set_tests_properties(test_load_gold_missing_cases PROPERTIES ENVIRONMENT "${d2d_test_env}")   # loads the tables before the cases file
     if (TARGET d2d AND Python3_Interpreter_FOUND)
         set_tests_properties(smoke_d2d coop_d2d coop_lobby_d2d keyboard_bindings_d2d pad_identify_classic_d2d pad_identify_d2d pad_controls_ux_d2d pad_portal_d2d pad_seed_d2d pad_skill_use_d2d pad_use_d2d touch_controls_d2d touch_corpse_d2d ${d2d_quest_tests} PROPERTIES ENVIRONMENT "${d2d_test_env}")
     endif()

@@ -95,10 +95,13 @@ dead, +0xac freed, +0xb0 prisoner ids (3 × 5), +0x108 cage emptied,
   (`FUN_00620870`, then `+2`), in the room near the player's that holds it
   (`FUN_00463740`, 0x5889ef), made there by `FUN_00555230` (0x588a13)
   with no collision test: an object's make (jump table 0x5554e8 entry 2,
-  0x5553aa -> `FUN_0054f5d0`) returns the unit whatever stands there, and
-  `FUN_00555230` is null only when `FUN_00620290` is, which never fails
-  (it allocates). So the fallbacks after it (the door's own x, 0x588a3b;
-  `FUN_00545340(2, 0x8000, .., 100)`, 0x588a65) never run (stubs.md).
+  0x5553aa -> `FUN_0054f5d0`) returns the unit whatever stands there.
+  `FUN_00555230` checks `FUN_00620290` for null. The latter clears its
+  allocation before returning; with a null pool-allocation result injected,
+  that clear faults instead of returning null (`units.md`, "Unit allocation").
+  Real pool exhaustion is not tested. The subsequent fallback spots are the
+  door's own x (0x588a3b) and `FUN_00545340(2, 0x8000, .., 100)`'s free
+  spot (0x588a65); their failure-path reachability remains unverified.
 - The portal's opener: every cage up and made = dead + freed: ≥ 12 freed
   → log 3, bits 13, 1 and 5 / 6 / 7 (15 / 14 / 12..13); else bit 14. Not
   all: bit 4, log 2.
@@ -147,6 +150,21 @@ second scroll.
 - Anya 20136 with bit 1: a rare class item at the player's level
   (0x735f6c / 0x735efc / 0x735f34 by difficulty, {codes, count} per class,
   rand(count) on the quest seed), bit 9 (done with 8), bit 10.
+
+- **Anya's walk home**: once thawed, `Q33_AnyaTimerCallback`
+  (`FUN_0058a730`) re-arms itself every 25 frames and drives her anim
+  mode step by step — Neutral → Walk; while Walk and in Harrogath it
+  counts ticks until `bAnyaCanRun` (> 5 ticks) then plays GetHit; while
+  Walk elsewhere it waits for `bAnyaReachable`; GetHit → Attack1 — the
+  idle/"walking home" animation chain rather than real pathing.
+  `Q33_SendQuestStatePacket` (`FUN_00589070`) sends S->C **0x5D**
+  quest-state (quest id 0x21, alert 0x20) to a unit's client; it's the
+  AI-sub-clear callback fired when the frozen-Anya monster (classId
+  0x20f) is killed. `Q33_KillAnyaMonsterTimer` (`FUN_00589540`) is a
+  quest timer that finds that same corpse monster by its stored GUID
+  (`nAnyaCorpseGUID`) and runs `A5Q3_KillMonsterInstantly` on it — the
+  cleanup once the rescued-Anya NPC has taken over from the
+  frozen-monster placeholder.
 
 The coordinate getter `FUN_0058a7d0` looks up record 0x21 and copies data
 +0xb8 / +0xbc to its output only when the record exists, +9 and data +0xb2
@@ -206,6 +224,41 @@ open, +0x4c altar mode.
   shut); mode 0 opens, mode 2 leads to 128.
 - Town congratulations: bits 5..9 (20167 / 20165 / 20166 / 20168 / 20164).
 
+- **Arming the arena** (`Q35_PrepareAncientsForBattle`, `FUN_0058bf40`):
+  finds the three altar statues by their stored GUIDs
+  (`anStatueObjectGUID`), clears each statue's room portal flag, fires
+  their shatter animation (mode 3) 20 frames out, zeroes their mode
+  field and `nSpawnedAncientCount` / `nAncientsAlive`; returns 0 (no
+  battle) if any statue is missing. Called from
+  `Q35_ResetAncientsArena` — this is the reset path the existing "Heard"
+  bullet above only names in passing.
+- **Finding a live Ancient** (`Q35_FindAncientByClassId`,
+  `FUN_0058d030`): walks the tracked GUID list (`anAncientMonsterGUID`,
+  up to `nSpawnedAncientCount`) for a live monster of the given
+  classId — the Ancient monster classes (Talic 0x21c / Madawc 0x21d /
+  Korlic 0x21e, `monsters.md`), not the statue object classIds
+  (0x1da/0x1db/0x1dc) used below to pick which one to spawn.
+- **Killing and removing one** (`Q35_KillAndRemoveAncient`,
+  `FUN_0058bec0`, **frontier**): finds the Ancient by GUID, clears its
+  uninterruptable state if set, runs its `Dead` skill and lifecycle
+  transition, then deletes it from the room's DRLG allocation and
+  removes its collision/room links. Used by the arena reset
+  (`Q35_ResetAncientsArena`, the caller `get_xrefs` shows) to clear a
+  still-alive Ancient before respawning the fight.
+- **The altar statues themselves** (`Q35_SetStatueAnimMode`,
+  `FUN_0058d0c0`, called by each statue's own InitFn below): applies
+  the saved per-statue mode — classId 0x1da (Korlic) from
+  `anStatueMode[1]`, 0x1db (Talic) from `anStatueMode[0]`, 0x1dc
+  (Madawc) from `anStatueMode[2]`. `Objects_InitFn65_AncientStatue2`
+  (`FUN_0058d110`, slot 0), `Objects_InitFn63_AncientStatue3`
+  (`FUN_0058d150`, slot 1) and `Objects_InitFn64_AncientStatue1`
+  (`FUN_0058d190`, slot 2) each record their own object's GUID into
+  `anStatueObjectGUID[n]` and call `Q35_SetStatueAnimMode`; a
+  `pInitArg->pObject == NULL` writes `-1` into that slot instead of
+  skipping it. `Objects_InitFn72_AncientsAltar` (`FUN_0058d240`)
+  records the altar object's own GUID (`nAltarGUID`) and applies
+  `nAltarObjectMode` the same way. None write a `QuestRecord` bit.
+
 The object initialization helper `FUN_0058d280` looks up record 0x23; if
 present it sets the supplied object's mode to 2 when data +0x4a is nonzero,
 or 0 otherwise. With no record it does nothing. `tools/emu/quest_rite_object.py`
@@ -229,8 +282,9 @@ those helpers are not established by this check.
   (Decrepify) in Sk1mode at the target unless he's in its aurastate
   (+0x80) or the target in its auratargetstate (+0x82), on seed(100) <
   aip1 (`LAB_005ef4fc`); else stands 10.
-- BaalToStairs (MonAI 138, `FUN_005ef620`): object 563 within 25, walked
-  at; within aip1 gone in (`FUN_0058e600`: +0x86, log 3).
+- BaalToStairs (MonAI 138, `FUN_005ef620`): object 563 within 25 inclusive
+  (`FUN_005ef5e0`: `tools/emu/ai_baal_portal_probe.py`, traced against
+  stock 1.14d), walked at; within aip1 gone in (`FUN_0058e600`: +0x86, log 3).
 - BaalTaunt (MonAI 136, `FUN_005ef710`; monster 545, a MonPreset of act 5):
   a target in mode 1 (a player or monster standing) counts up +0x14; past
   aip2 (10) it's 0 again and Skill1 Baal Taunt (284) goes at it in A1
@@ -248,6 +302,19 @@ those helpers are not established by this check.
   8 even ways of 0x6e2510 / 0x6e24d0 at Param1 << 7 and the odd ones at
   Param2 << 7 (`FUN_0059fa30` flags 0x17: that velocity as is, × 75 / 100).
 - Object 563 (OperateFn 70): on 131 with +0x86 to 132; else to 131.
+- **Sending the quest-special packet to everyone**
+  (`Q36_SendQuestSpecialPacketCallback`, `FUN_0058e180`): a thin
+  per-player `IteratePlayerOrMonsterUnits` wrapper around
+  `Q36_SendQuestSpecialPacket` (S->C 0x50), used wherever this quest
+  needs to push its special state to every player at once rather than
+  one.
+- **Two Worldstone-area objects**: `Objects_InitFn75_BaalsPortal`
+  (`FUN_0058e670`) tags its object with the quest's own barricade-coord
+  field (`nField_0x94`) then sets that field to 2, a one-shot init
+  guard; `Objects_InitFn77_LastPortal` (`FUN_0058e710`) does the same
+  with `nField_0x9C`, which pairs with object 565's OperateFn 72 ("The
+  last portal" below) — that handler only runs once this field reads
+  2, i.e. once its own InitFn has placed the portal.
 - Baal's death (`FUN_0058df20`): log 4; the Chamber's players without bits
   0 / 1 bits 13 and 0 and the next difficulty (`FUN_0058dd30`), the rest
   14; gold for the killer; state 5; missile 625 (baalfx control, 650

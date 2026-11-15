@@ -30,14 +30,11 @@ Ranked by Seen, then by how much play it touches.
 | 9 | Unique monster mods still untraced: the act bosses' deaths (the thief is traced: never applied, monsters.md) | trace | maybe | PLAN.md phase 6, monster-ai.md |
 | 13 | Quests keep one player's lists | build | no | Single player is fine; matters once d2d hosts. Left: quests-act2.md's "one player" ponytails. The Den's clear now reaches the killer's party (quests.md "A monster dies") |
 | 14 | Seed stand-ins: d2d's rng where game.exe rolls a unit's or the game's own seed (same odds, different rolls) | exact | no | ~32 notes, act1-gaps.md. Matters once machines share a game |
-| 37 | The get-hit oracles `hit_absorb.py` and `hit_render.py` were cited but never committed: absorb and get-hit frames are cited, not re-checkable (`hit_rule.py` is in) | trace | no | combat.md, combat.hpp `absorb_blows`, `test_combat --get-hit-frames` |
-| 40 | One click on the ground re-plans after a short path while it moves; game.exe's walk to a spot ends there | exact | maybe | collision.md "A walk to a spot just ends"; world/tick.cpp "Short of the target with a step made" |
-| 41 | `follow_path` tests the end of a step short of its next point, its own subtile too, and not a point it reaches; game.exe tests only a new subtile and every one crossed (FUN_00650150 from LAB_006501c0), so with a blocker come onto its footprint d2d's unit can't make a short step inside its subtile and game.exe's can | exact | hardly | collision.md "A walk's stop"; ai.cpp `follow_path` |
-| 47 | A walk to a warp has no two-walk limit (FUN_00548a50, FUN_00580c20): it re-plans while it steps | exact | hardly | collision.md "The server's pending interact"; world/tick.cpp, world/travel.cpp `use_warp` |
 | 48 | `use_warp` takes a warp mid-walk at reach; a single click in game.exe tests when the walk ends (LAB_00580e73), up to 4 subtiles later | exact | hardly | collision.md "The server's pending interact"; world/travel.cpp `use_warp` |
 | 49 | A held button over a warp forgets it after a stop; game.exe clicks again after a stop (LAB_00461fb7; FUN_00462930 stops a held frame while it walks), and refuses warp clicks inside that time | exact | hardly | collision.md "The server's pending interact"; world/commands.cpp `walk_to` |
 | 50 | A held button re-aims each tick, and a joined game sends C->S 0x01 / 0x03 each drawn frame the aim moves to a new subtile (`NetGame::send` drops a repeat within 200 ms, as FUN_00478350); game.exe's walking player sends every 7 client frames, 280 ms (FUN_004623c0) | exact | hardly | collision.md "What a held frame sends"; town/input.cpp, netgame.cpp `move_to` |
 | 51 | A click nearer than 3 subtiles (held 4, a run 5) walks only that far; game.exe's spot goes out to that distance (FUN_004623c0) | exact | hardly | collision.md "What a held frame sends"; world/commands.cpp `walk_to` |
+| 52 | No `/players N`: spawns scale with the real players only. game.exe's chat box sets a count of 1..8 in single player and when hosting (FUN_0047c420, FUN_00535780), and monster life, experience and NoDrop use it when it's larger (FUN_00535790) | build | yes | chat-commands.md; town/update.cpp's Enter; the `players.size()` / `players_in` callers |
 
 ## Sounds
 
@@ -75,8 +72,6 @@ Known differences in the ones it draws, and what's left to check:
 |---|---|---|---|---|
 | 25 | Timings from the COF, where AnimData.d2 is game.exe's | exact | maybe | world_view.hpp:140, fight.hpp:498, fight.hpp:729 |
 | 27 | Kind 8's visible state overlays aren't rotated after 50 ticks; active states draw together | exact | maybe | states.md, town.hpp `StateClock`; Radius is stamped and LoopWaitTime applies only to kind 6 |
-| 28 | A joined monster's act lasts 600 ms, not its animation | exact | maybe | town/net.cpp `net_overlay`; balloon starts and rate now traced (quests.md) |
-| 29 | COF draw effect 6 (the max-component table) is the greater of each RGB channel; the PL2 table is still unread | build | maybe | cof-draw-order.md "Draw effects", deviations.md approximation 9 |
 | 30 | Palette blends (additive / multiply missiles, blended shadows, rain) done in RGB, not through the PL2 tables | exact | slightly | deviations.md approximation 1 |
 | 31 | Static lights' shadows (type 2) are read each frame; game.exe caches them (FUN_004750f0), so a later change to the map doesn't re-shade them | exact | hardly | lighting.md, deviations.md approximation 5 |
 | 32 | Light Quality always high; unit shadows darken once; lit tiles per pixel, not per 32-pixel block | exact | hardly | deviations.md approximations 2–4 |

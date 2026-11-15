@@ -313,7 +313,10 @@ d2d matches both, and the one-poison-at-a-time rule.
   `FUN_0057c1e0` (0x57c214 on) scales each damage field of the record
   (table 0x732980's 12 rows, those with +0x20 set) above 0 by it
   (`FUN_00483360`, × pct / 100) before the absorb events and the
-  reduction.
+  reduction. +0x20 is set on rows 0-4 (physical +0x08, fire +0x10,
+  lightning +0x1c, cold +0x24, magic +0x20), 8 (poison damage +0x28) and
+  9-11 (+0x38, +0x3c, +0x40); not on 5-7 (cold length +0x30, freeze
+  length +0x34, poison length +0x2c), read from game.exe's bytes.
 - Deadly strike (stat 141), critical strike (stat 337) and mastery crit
   (`macr`) are **separate** rolls against rand(100); any one doubles the
   physical damage.
@@ -336,6 +339,16 @@ FUN_005c9480, do 23 FUN_005c9c10) before FUN_0056e740 registers them again. So
 on each record the state cast last takes first: Energy Shield cast after Bone /
 Cyclone Armor takes its percent before the armor's pool sees the field; the
 armor cast after the shield goes first (as d2d always did).
+
+FUN_005c0b50 (`SUNITEVENT_RemoveEventsByQueueAndOwner`, game, unit,
+queueNo, ownerKey) is driven directly over random event lists: a node
+whose queue and owner both match is unlinked and freed through
+`FreeServerMemory` when it isn't mid-execution (flag bit 0), or left
+linked with "free pending" (bit 1) set when it is; a non-matching node
+is untouched. 3000 cases plus `--mutation-check` (3 ways: keeping an
+executing match linked and unmarked, ignoring the owner key, freeing a
+non-matching node) pass against game.exe 1.14d. Oracle
+`tools/emu/unit_event_remove.py`.
 
 The same `+0x90` list is a general queued-event list, not only absorb
 events (its nodes carry a queue number, an owner key and a skill, read by
@@ -407,8 +420,14 @@ works record by record too: `FUN_0057c1e0` raises state event 0xb
 total +0x4c, and Bone Armor (`FUN_005c6370`) takes from that record's
 physical field, Cyclone Armor (`FUN_005c87a0`) from its fire, cold, then
 lightning, the pool carrying to the next record; the get-hit then reads what
-is left, an element emptied no longer marks. d2d: `rules::absorb_blows`
-(its oracle, `hit_absorb.py`, was never committed: cited, not re-checkable).
+is left, an element emptied no longer marks. `FUN_0057ce30` reads the
+fields in 256ths, so an element with under a point left still marks. d2d:
+`rules::absorb_blows`. Its oracle, `tools/emu/hit_absorb.py`, runs
+`FUN_0057c1e0` on each record of a frame with either armor's handler, then
+`FUN_0057ce30`, against `test_combat --get-hit-absorb` (each record's total
+and mark, the pool after the frame): no difference on 100,000 records each
+for seeds 1 and 7. It has no reduction and no resistance on the defender
+(`monster_damage.py` and `cyclone_armor.py` have those).
 
 ## Approximations still in the port (marked `ponytail:` in code)
 
@@ -466,6 +485,37 @@ is left, an element emptied no longer marks. d2d: `rules::absorb_blows`
   `... game cases.tsv > game.tsv`, `<build>/tests/test_combat --get-hit-length < cases.tsv > after.tsv`,
   `... compare game.tsv after.tsv cases.tsv` (0 differ). `tools/emu/hit_len_harness.cpp`
   is the old d2d's lines, for the same `compare` (the before).
+- **A player's block** (mode 9) takes the same end event with its own rate
+  (`FUN_00623f50`'s block branch, 0x62403d..0x624084): AnimData speed x (50 +
+  `FUN_00621740(unit, row 3)`: stat 102, FBR, through 120 v / (120 + v) + 50
+  with the state 0x65, Holy Shield, `FUN_00639df0`) / 100, at least 1. So a
+  Paladin's sword block (PABL1HS, 3 frames at 256) holds 6 ticks at 0 FBR and
+  3 at 86 FBR (13 / 32 / 86 are the breakpoints), 3 and 2 ticks with Holy
+  Shield. Ported: `rules::block_rate` / `block_ticks` (the player's
+  `set_pmode`), checked by `tools/emu/block_len.py` (the block branch and
+  `FUN_005539b0` run natively on every class x main-hand weapon x FBR 0..300 x
+  Holy Shield off / on) against `test_hit_recovery --block-length`
+  (`tools/emu/README.md` has the commands). Not ported: a monster's or the
+  merc's block, nor the block throttle.
+- **A big hit inside a get-hit or block starts no new get-hit** (`FUN_0057edd0(unit, new mode)`,
+  called first by `FUN_005809d0`, the server's player mode switch, from the
+  hit's flag 4 at 0x57d383; on 0 nothing is set and no end event moves).
+  For new mode 4 and 9 the current-mode table (0x57eea8) refuses DT, GH, BL
+  and DD unconditionally, KK unless an end event is queued, S1 for the
+  Amazon, S3 for the Druid; it allows the other modes, **including the
+  knockback (0x13, `cmp eax, 0x12; ja` at 0x57ee0b)**. d2d draws the
+  knockback as GH with `knock` set, so `Fight::hurt_side` refuses only a
+  real get-hit (GH without a `knock`) and a get-hit during a slide ends the
+  slide. One hit is a knockback OR a get-hit (the flag chain at LAB_0057d364),
+  so a hit that started a knock in the same call starts no get-hit. Checked
+  by `tools/emu/mode_switch.py` (modes 0..19) against
+  `test_hit_recovery --hit-modes`. Not changed: a knocking hit inside a
+  get-hit. `FUN_00580a70`, the knockback's switch (flag 8), calls
+  `FUN_0057edd0` too (0x580adc, new mode 0x13, above 0x11, so the same
+  current-mode table), and game.exe refuses it from GH; d2d still starts the
+  knockback there, which restarts the hold (not checked against a differential
+  for new mode 0x13; follow-up). Not modelled: the `unit + 0x60` branch (a
+  player holding a cursor item refuses mode 4 from modes 0..20: run, not modelled).
 - **Drawn frame** (the client): `FUN_004b1280` on the monster mode table's
   get-hit row (0x7252e0 + 3 x 12, [0, 1, 2]; `FUN_004af400`) tests "over"
   (`FUN_006217c0`: +0x44 + rate >= +0x48) and, not over, steps (`FUN_00623e00`:
@@ -475,9 +525,35 @@ is left, an element emptied no longer marks. d2d: `rules::absorb_blows`
   17 ticks). A player's `FUN_00463390` (row 4 of 0x711e00, [0, 1, 2]) steps
   the same way and, re-testing after the step, ends the mode a tick before
   the server's event. Ported for monsters and the merc: `rules::get_hit_frame`
-  (`Unit::get_hit_rate` in the renderer), checked by the oracle `hit_render.py` (never committed: todo.md #37)
-  (the PR's; game.exe's step and draw run natively) against `test_combat --get-hit-frames`. Not ported: the player's own frames
+  (`Unit::get_hit_rate` in the renderer), checked by the oracle `tools/emu/hit_render.py`
+  (game.exe's step and draw run natively on hit_len.py's cases and its rate and ticks) against
+  `test_combat --get-hit-frames`: no difference on the 55,089 monster cases of `hit_len.py gen 100000 7`. Not ported: the player's own frames
   (prate, a stretch over the hold); a joined game's merc has no FHR on the wire.
+
+## A player's attack swing: the start frame and the strike tick (FUN_00623b10, FUN_005539b0)
+
+V (`tools/emu/swing_start.py`, game.exe's functions run natively, 11,270 cells of `test_swing_start --swing-start`).
+
+- `FUN_005539b0` files a mode's events from `start = FUN_00623b10(unit) << 8`: it walks the animation at the unit's rate (+0x4c) and
+  files the action event (an AnimData flag byte, 1, 2 or 4) on the tick its frame is reached and the end event (type 1) when the
+  position reaches frames x 256. In closed form, from the tick the mode starts: strike `max(1, ceil(256 (flag - start) / rate))`, end
+  `max(1, ceil(256 (frames - start) / rate))` (`rules::frame_tick`, `attack_ticks`, `attack_action_tick`). The strike is that tick
+  itself; it is not the flag frame scaled by the rounded swing length.
+- `FUN_00623b10` is 0 for a monster and for a player mode other than A1 and A2 (S3 and S4 only for a Barbarian or Assassin (`FUN_006235a0`, a class test),
+  whose table entries are 0 anyway). For A1 and A2 it takes the weapon in hand (`FUN_00623990`: slot 4, else slot 5, a weapon that is not broken and whose requirements are met,
+  `FUN_0063c9b0` -> `FUN_0062a4e0`), its class key (`FUN_00629fe0`: weapons.txt `wclass`
+  through the 8-entry map at 0x7446a0: bow 1, 1hs 2, 1ht 3, stf 4, 2hs 5, 2ht 6, xbw 7, ht1 12; nothing in hand 0; a key the map lacks also 0) and reads the
+  dword at `0x6e8e60 + 4 (row x 7 + player class)`. Only an Amazon and a Sorceress are not 0: 1 barehanded, 2 with a 1hs, 1ht, stf, 2hs
+  or 2ht weapon, 0 with a bow, crossbow or claws (`rules::attack_start_frame`, `kAttackStart`; `swing_start.py table` prints it).
+- d2d played the whole animation (no start frame) and scaled the action frame by the rounded swing length: an Amazon or Sorceress
+  swing was 1 to 3 ticks too long (815 of 840 cells with a start frame), its strike 1 to 4 ticks late; the other classes' swing length
+  was right but its strike one tick late in 1,068 of 8,120 cells (1,176 of the 10,430 cells without a start frame).
+- d2d applies the start frame to a plain swing and to a skill whose `anim` is A1 (Power Strike, Charged Strike, Lightning Strike, Fend,
+  the bow skills; `Fight::set_pmode`), as game.exe does. A skill whose `anim` is TH (a throw: d2d plays the A1 record) gets the strike rule
+  only, start 0, as the game's TH mode has; its record is still d2d's A1. Jab and Impale (`anim` SQ, `start_sequence`) keep their length.
+- The end event's floor in game.exe is 2 ticks (`frame + max(n, 1) + 1`), not 1: the two differ only when one tick covers the whole rest of the
+  animation (rate >= 256 (frames - start)), which no player record reaches; d2d's closed form gives the same for the real records.
+- U: which frames the client draws for a swing that starts in; d2d keeps drawing the whole animation over the shorter swing.
 
 ## Cold, freeze and poison lengths (SUnitDmg.cpp)
 
@@ -727,6 +803,18 @@ flag.
   of its own found for this pairing; not flagged as a difference since
   the two pieces it combines are already ported separately and the
   combiner adds no logic.
+
+`FUN_0056e170(skill, level)` (ECX the caster, EDX the damage record) does
+nothing for an id outside `0 <= id < count` or a null row. Otherwise it
+takes FUN_00647bc0 (the minimum, by its use below) and FUN_00647d00 (the
+maximum), both called as (unit, skill, level, 0); then
+FUN_0045c3e0 on the caster's seed (`+0x20`) with bound `max - min` (so
+the roll is `0..max-min-1`: the maximum itself never comes up; a bound under 1
+gives 0 and leaves the seed alone); and adds `min + roll` to the record's `+8`.
+The decompile hides the bound argument (it is EDX at the call; seen in the
+disassembly, `0056e1c1`). Run with FUN_00647bc0 / FUN_00647d00 hooked (logged,
+scripted results) and the real seed draw, 36 cases:
+`tools/emu/skills_combat_helpers.py`. Their formulas and d2d are not compared.
 
 d2d: no function of its own for the +0xac list; nothing in `ai.cpp` or
 `fight.hpp` was found keeping a per-(caster, target) record list, so this

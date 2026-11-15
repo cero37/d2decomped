@@ -148,7 +148,7 @@ struct View {
     };
     std::optional<MercSheet> merc_sheet;
     // pettype: its skill's Skills.txt pettype (PetType.txt row); life: percent.
-    struct Pet { Npc npc; UnitState unit; std::string_view mode; std::string_view pettype; int life = 100; int flash_overlay = -1; std::uint32_t flash_at = 0; };
+    struct Pet { Npc npc; UnitState unit; std::string_view mode; std::string_view pettype; int life = 100; int flash_overlay = -1; std::uint32_t flash_at = 0; int fhr = 0; };   // fhr: a party merc's (its items', merc_gear), for its get-hit
     std::vector<Pet> pets;                 // the player's summons on this level
     std::vector<Pet> party_pets;           // the other players' mercs ("hireable") and summons on it (local co-op; life unused)
     std::vector<Monster> monsters;         // the level's
@@ -235,6 +235,7 @@ struct World {
         float target_x = 0, target_y = 0;      // where the player is walking to
         bool  running = false;                 // run / walk (game.exe's 0x53 / 0x54)
         int   take_warp = -1;                  // the warp of `level` the player is walking to
+        bool  walk_pending = false;            // a walk to an item or warp may be issued once more when it ends (unit +0x150, FUN_00548a50)
         const Level* on_level = nullptr;       // split levels (World::split_levels): the level they're on
         bool  own_screen = false;              // a LAN joiner: drawn on its own machine, so it travels alone; the host's screen's party (pad partners) goes together
         int   interact_npc = -1;               // the object / NPC being walked to
@@ -259,6 +260,9 @@ struct World {
         // player was last out of town: FUN_004b66b0 clears the record's +0x15
         // as it greets, FUN_004b3e10 sets all again as the player leaves town.
         std::vector<int> greeted;
+        // The NPCs S->C 0x91 named at the last arrival in a town (rules::NpcReturns::due): a talk
+        // record's +0x12, its next menu greeting the return line (FUN_004b3510, FUN_004b66b0).
+        std::vector<int> returning;
         // When the Countess's death (unit event 0x25) held the player's
         // complete_tower line (FUN_004dcd40, its fifth argument 0): her
         // treasure's end (0x5c) plays it within 60 s (World::tower_treasure).
@@ -573,6 +577,8 @@ struct World {
     std::array<bool, d2d::rules::kQuestFlagCount> closed_at_join{};  // quests the first join closed (the game's flag 15, FUN_00546270)
     // The quest flags of the difficulty played.
     d2d::rules::QuestBits& quests();
+    // Its congratulations bits (the save's +0x2E5: rules::NpcReturns).
+    std::uint64_t& congrats();
     // Each act's quests at the World's quest hooks (world/quests/actN.cpp),
     // called act by act; a new act adds its file and a call at each hook.
     // The quest log's states (World::view).
@@ -720,6 +726,7 @@ struct World {
     d2d::d2s::Header save_header();
     const std::vector<d2d::d2s::Item>* saved_corpse();   // the corpse's items a save keeps
     void set_act(int act);
+    void owe_returns(const Level& town);
     void show_palace();
 
     // Operating a shrine (FUN_00583c70: its Shrines.txt effect) or a chest

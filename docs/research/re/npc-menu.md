@@ -101,6 +101,13 @@ selectable): baselines 0x15 and 0x150 down (`FUN_004b8100`).
 `FUN_004b8370(window, 1)` sets menu mode 1: the hovered line draws in
 colour 3, without focus16. `FUN_004b7c00` hangs the list box on the
 window; `FUN_004b8100` draws it after the box.
+The line under the mouse (`FUN_004b7180`, kept at +0x44 and +0x48 by
+`FUN_004b7200` on a move, -1 off every line): a selectable line (+0x174)
+whose x + 0xf < mouse x < x + width − 0xf and baseline − 0xb < mouse y <
+baseline + 4, edges out, the first. Only that band counts, whatever the
+line's height, so "cancel" (0x13b high) is taken near its baseline, below
+the list box (box bottom H / 2 + 0x78, cancel's band from H / 2 + 0x82).
+d2d: `NpcMenuState::line_at`, `tests/test_npc_menu_hover.cpp`.
 
 **The list box** (D2Win's ListBoxImplementation, vtable 0x6daaec,
 `FUN_004bf650`; the hire window's `FUN_004bf8f0((W − 490) / 2, H / 2 −
@@ -138,6 +145,16 @@ and the defaults.
   `FUN_004bee90` adds one a draw). With a callback every key it gets is
   the box's (the event's +0x18 = 1, +0x1c = 0, `FUN_00420290`). Oracle:
   `tools/emu/hire_list_enter.py` (`rules::list_enter`).
+  Those keys are characters: the menu's handler table (0x7273e4, rows
+  {type, message, handler}) has `FUN_004b7a90` on {0, 0x102} (WM_CHAR).
+  It walks the menu's widgets (+0xb08) and calls each one's vtable +0x18
+  (the list box's wrapper `FUN_004bedb0` -> `FUN_004bebc0`), stopping at
+  the first that returns non-zero; with none, character 0xd goes to
+  `FUN_004b79d0` and 0x1b to `FUN_004b76d0`. Key-downs have their own
+  rows (type 3): 0x26 `FUN_004b7870`, 0x28 `FUN_004b78f0`, 0x27
+  `FUN_004b7770`, 0x25 `FUN_004b77f0`, 0xd `FUN_004b79d0`, 0x1b
+  `FUN_004b76d0`. So the box never sees a key-down. Not traced: whether
+  this table's WM_CHAR row runs before the chat box's when both are up.
 
 - The scroll bar (`FUN_004bee90`, `UI\menu	extslid`, `FUN_004be020`;
   each cel by its bottom-left through `FUN_004f6480`): the up arrow (frame

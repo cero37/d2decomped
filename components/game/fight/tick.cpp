@@ -254,7 +254,7 @@ auto Fight::player_foe(std::uint32_t now_ms) -> Foe {
 auto Fight::merc_foe(std::uint32_t now_ms) -> Foe {
         if (now_ms >= actor->curses[1].until) actor->curses[1] = {};   // merc_fighter reads one still on
         for (auto& state : actor->merc_potion_states) if (now_ms >= state.until) state = {};
-        Foe foe{ actor->merc ? actor->merc->unit.x : 0, actor->merc ? actor->merc->unit.y : 0, actor->merc_st.level, actor->merc && actor->merc->mode != "DT",
+        Foe foe{ actor->merc ? float(actor->merc->unit.x) : 0.f, actor->merc ? float(actor->merc->unit.y) : 0.f, actor->merc_st.level, actor->merc && actor->merc->mode != "DT",
                  actor->merc && actor->merc->unit.walking, merc_fighter() };
         foe.fighter.prime_evil_pct = 200;                // a hireling under a prime evil's blow (FUN_0057c060)
         foe.pet = true;                                  // the merc: its MonStats class's size
@@ -297,6 +297,21 @@ auto Fight::on_foe_states(Foe& foe, std::size_t which, std::uint32_t now_ms) con
 
 auto Fight::zealots_spare() const -> bool {
         return d2d::rules::quest::bit(actor->character.header.quests[std::size_t(std::clamp(actor->character.header.active_difficulty(), 0, 2))], 0x15, 0);
+    }
+
+auto Fight::plain_missile_hits(Missile& missile, std::size_t monster_index, std::uint32_t now_ms) -> bool {
+        auto blow = d2d::rules::player_blow(d2d::rules::simple_fighter(missile.min, missile.max, missile.attack_rating), target_of(monster_index), missile.level, rng);
+        if (missile.info) blow.hit_class = missile.info->hit_class;   // an arrow's, not hand to hand's (as a skill's missile, Missiles.txt HitClass)
+        land(monster_index, blow, false, now_ms, merc_foe_id());
+        monster_return_fire(monster_index, missile, true, now_ms);
+        missile.last_hit = int(monster_index);
+        missile.struck->push_back(int(monster_index));
+        // FUN_005adf10 -> FUN_005ada80: a charge left flies on, one fewer, while the merc has skill_pierce or item_pierce.
+        if (missile.info && missile.info->pierce && missile.pierce > 0 && pierce_armed(true)) {
+            --missile.pierce;
+            return false;
+        }
+        return true;
     }
 
 auto Fight::near_players(float x, float y) const -> bool {
@@ -479,11 +494,9 @@ auto Fight::world(bool in_moor, std::uint32_t now_ms, float elapsed, const Crowd
                         if (missile.info && (missile.info->next_hit || missile.info->last_unit_rule()) && missile.last_hit_ms == now_ms) return false;
                         continue;
                     }
-                    auto blow = d2d::rules::player_blow(d2d::rules::simple_fighter(missile.min, missile.max, missile.attack_rating), target_of(i), missile.level, rng);
-                    if (missile.info) blow.hit_class = missile.info->hit_class;   // an arrow's, not hand to hand's (as a skill's missile, Missiles.txt HitClass)
-                    land(i, blow, false, now_ms, merc_foe_id());   // a plain missile: the merc's arrow
-                    monster_return_fire(i, missile, true, now_ms);
-                    return true;
+                    // A Pierce arrow keeps its struck list, as a skill's Pierce row does (missiles.md); LastCollide passes the last one by.
+                    if (std::ranges::contains(*missile.struck, int(i)) || (missile.info && missile.info->last_collide && missile.last_hit == int(i))) continue;
+                    return plain_missile_hits(missile, i, now_ms);
                 }
                 return false;
             }, [&](int owner) { const int index = monster_index(owner); return index >= 0 && monsters[std::size_t(index)].alive(); },
@@ -582,7 +595,7 @@ auto Fight::hurt_side(std::span<Foe> side, std::uint32_t now_ms) -> void {
         // FUN_0057cb00's size test (rules::get_hit) once per landed blow, as game.exe tests one damage
         // record at a time (FUN_0057c6c0 then FUN_0057cee0 per hit): the divisor by that blow's hit class
         // (16 for every Act 1 melee class and any blow with an element), 37.5 % from that share of max
-        // life, 75 % from twice it, sure from four times; every blow rolls, a get-hit restarts.
+        // life, 75 % from twice it, sure from four times; every blow rolls; a hit inside a get-hit starts no new one (FUN_0057edd0).
         // What the unit's states absorbed (Bone Armor, Cyclone Armor, Energy Shield: absorb) is off the
         // blows already: an armor's from each blow's own part (rules::absorb_blows).
         // The merc's life carries the 256ths as a monster's (hurt).
@@ -657,13 +670,15 @@ auto Fight::hurt_side(std::span<Foe> side, std::uint32_t now_ms) -> void {
             }
             if (actor->pmode != kModeGH || now_ms >= actor->pmode_until) actor->knock.reset();   // done, or cut short
         }
+        bool knocked_now = false;   // this call started a knock: game.exe's flag chain is knockback OR get-hit per hit (LAB_0057d364)
         if (foe.knocked_from && !attack_mode(actor->pmode) && actor->pmode != kModeBL) {
             const auto [from_x, from_y] = *foe.knocked_from;
             const float dx = actor->player.x - from_x, dy = actor->player.y - from_y, distance = std::max(std::hypot(dx, dy), 0.01f);
             if (const float next_x = actor->player.x + dx / distance, next_y = actor->player.y + dy / distance; !level->unit_blocked(next_x, next_y, actor->player.shape)) {
-                actor->knock = std::array{ actor->player.x, actor->player.y, next_x, next_y };
+                actor->knock = std::array{ float(actor->player.x), float(actor->player.y), next_x, next_y };
                 set_pmode(kModeGH, now_ms);
                 actor->pmode_until = now_ms + d2d::game::knock_ms(std::hypot(next_x - (*actor->knock)[0], next_y - (*actor->knock)[1]));
+                knocked_now = true;
             }
         }
         for (std::size_t k = 0; k < 2; ++k)
@@ -708,11 +723,18 @@ auto Fight::hurt_side(std::span<Foe> side, std::uint32_t now_ms) -> void {
         // absorbed to nothing (FUN_0057cee0: state 21 skips FUN_0057cb00's
         // too-small test; result flag 4 is the hit landing, FUN_0057ec10,
         // before any damage). That's all a stun does to a player: no input
-        // is refused.
+        // is refused. A hit inside a get-hit or block starts no new one,
+        // stunned or not (FUN_0057edd0 refuses mode 4 from modes 4 and 9).
         // Else the size test per landed blow (rules::struck_big).
         // ponytail: a blow's damage is its whole points; the rolls take d2d's rng, not the player's own seed.
         const bool big = d2d::rules::struck_big(foe.blows, actor->character.stats.get(kMaxLife), rng);
-        if (!died && (big || (foe.hits > 0 && now_ms < actor->stunned)) && !attack_mode(actor->pmode) && actor->pmode != kModeBL) set_pmode(kModeGH, now_ms);
+        // A real get-hit refuses another (FUN_0057edd0: GH from GH); a knockback slide is drawn as GH but is game.exe's
+        // mode 0x13, which allows it (0x57ee0b), and the get-hit then ends the slide.
+        const bool get_hit_running = actor->pmode == kModeGH && !actor->knock;
+        if (!died && (big || (foe.hits > 0 && now_ms < actor->stunned)) && !attack_mode(actor->pmode) && actor->pmode != kModeBL && !get_hit_running && !knocked_now) {
+            actor->knock.reset();
+            set_pmode(kModeGH, now_ms);
+        }
         // Too small for mode 4 (FUN_0057cb00 returns 1): the server only sets
         // flag 0x8000. The client still plays the struck sounds, command 0x13
         // calling FUN_004cc5b0 with mode 0x13 (LAB_00461439). A miss or a block

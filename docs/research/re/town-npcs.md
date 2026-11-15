@@ -133,6 +133,55 @@ AI control +0x20 is a circular list of commands, found by type
    It returns what the action did: 0 when already there.
 6. Nothing done: stand 8.
 
+`tools/emu/ai_town_path_actions.py` compares these five path actions with
+`npc_think` over 170 cases, holding point selection fixed and hooking movement,
+mode availability and command allocation. It compares movement and command
+fields, not pathfinding or the action return value. From the worktree root,
+with `GAME_EXE` pointing to stock 1.14d:
+
+```sh
+mkdir -p build/ai-town-path
+uv run --no-sync --project tools/emu python tools/emu/ai_town_path_actions.py --cpp > build/ai-town-path/cases.cpp
+c++ -std=c++20 -Icomponents -Icomponents/d2s -Icomponents/txt build/ai-town-path/cases.cpp -o build/ai-town-path/cases
+build/ai-town-path/cases > build/ai-town-path/cases.txt
+uv run --no-sync --project tools/emu python tools/emu/ai_town_path_actions.py --cases build/ai-town-path/cases.txt --exe "$GAME_EXE"
+```
+
+`tools/emu/ai_town_path_dispatch.py` uses the same cases to run FUN_005e7080
+and its selected actions. The cases have one path point and use the same
+seed, which selects that point; paths with no point and the no-selection
+branch are not checked. After generating the cases above:
+
+```sh
+uv run --no-sync --project tools/emu python tools/emu/ai_town_path_dispatch.py --cases build/ai-town-path/cases.txt --exe "$GAME_EXE"
+```
+
+`tools/emu/ai_town_return_home.py` compares the existing-home branch of
+FUN_005e6860 with `npc_heed` at 65 horizontal distances, including the
+16-subtile boundary. The no-home branch and two-dimensional distances are
+not checked; distance and command allocation are hooked.
+
+```sh
+mkdir -p build/ai-town-home
+uv run --no-sync --project tools/emu python tools/emu/ai_town_return_home.py --cpp > build/ai-town-home/cases.cpp
+c++ -std=c++20 -Icomponents -Icomponents/d2s -Icomponents/txt build/ai-town-home/cases.cpp -o build/ai-town-home/cases
+build/ai-town-home/cases > build/ai-town-home/cases.txt
+uv run --no-sync --project tools/emu python tools/emu/ai_town_return_home.py --cases build/ai-town-home/cases.txt --exe "$GAME_EXE"
+```
+
+`tools/emu/ai_town_linger.py` compares the active-linger branch of
+FUN_005e6ae0 with `npc_think` over 85 horizontal distances and remaining
+counts. Command lookup, distance and movement are hooked; later branches of
+the function are not checked.
+
+```sh
+mkdir -p build/ai-town-linger
+uv run --no-sync --project tools/emu python tools/emu/ai_town_linger.py --cpp > build/ai-town-linger/cases.cpp
+c++ -std=c++20 -Icomponents -Icomponents/d2s -Icomponents/txt build/ai-town-linger/cases.cpp -o build/ai-town-linger/cases
+build/ai-town-linger/cases > build/ai-town-linger/cases.txt
+uv run --no-sync --project tools/emu python tools/emu/ai_town_linger.py --cases build/ai-town-linger/cases.txt --exe "$GAME_EXE"
+```
+
 So an NPC picks a random point of its path two thinks in three, walks
 there and lingers 12 (or 20) thinks of 10 frames, walking back when pushed
 over 3 off; a point with action 4 / 5 ends with S1 / S2 there, facing its

@@ -198,7 +198,10 @@ state comes on (FUN_004d9b20, S→C state packets), +0x28 offsound as it goes
 Per class (0x72a008 → 11 dwords): hit, death, impossible, needmana, needkey,
 cantcarry, cantuseyet, not_in_town, chat_a, the first quest line
 (act1_complete_andariel), the first footstep (light / medium / heavy walk
-dirt). FUN_004cc410 plays hit on GH / KB and death on DT, after the impact;
+dirt). The row pointer FUN_004ca3e0 (`UNITSND_GetBaseSoundId`) returns for
+each class, and the row's hit / death / step dwords, match `kPlayerVoice`
+for all 7 classes (oracle `tools/emu/unit_snd_tables.py`). FUN_004cc410
+plays hit on GH / KB and death on DT, after the impact;
 the hit (modes 4 / 0x13) not while one of the player's speech lines plays
 (FUN_004b9e90 → FUN_004b9700: a playing instance, state 1, rows 0xb76..0x1230,
 the unit in its list +0x28). FUN_004cb9c0's 0x13..0x18 (below) take the same
@@ -405,6 +408,18 @@ Object 0x3d's loops are by mode at 0x728338. The 13 objects sharing record
 0x729328 play only going to a later mode. Dumped whole into
 `components/rules/object_sounds.hpp`.
 
+FUN_004cb380 (`UNITSND_GetModeChangeSound`) and FUN_004cb3e0
+(`UNITSND_GetSpecialSoundByMode`) are each driven over every row of
+0x7295f8 (`GetSndUnitClassId` hooked to hand back the row's own id) and
+checked, mode by mode, against a model of their branches alone (the row's
+own data, not a transcribed copy): a null row returns 0; the shared record
+blocks on `prevMode > newMode`; the special-sound slots (row + 0x20..0x2c)
+fall back from the first pair to the second, 8 meaning "any mode", and
+class 0x3d reads 0x728338 instead. `--mutation-check` plants four defects
+(swapped special-sound slots, the shared check dropped, the "any mode"
+sentinel changed, class 0x3d treated like any other) and requires each to
+be caught. Oracle `tools/emu/unit_snd_tables.py`.
+
 One object calls on its own: the Gibbet (26, Cain caged in Tristram). FUN_004cb460's
 object branch plays 0xe57 `cain_act1_help` on it while it's in mode 0, when the
 player is under 0x14 off by FUN_006416d0 (the subtile deltas less both half
@@ -471,9 +486,28 @@ MonStats' count marks its record. FUN_004b32f0 clears +0x11 / +0x12 at a
 game's start. The host sends 0x91 from FUN_00545100 (in FUN_00537340, the
 level change, for acts 1, 2, 3, 5: the town NPC lists 0x7318b0 (6),
 0x7318c8 (11), 0x7318f4 (7), 0x731910 (7)), listing those for which
-FUN_00572470 says so: a per-class callback from the table 0x732738
-({class, fn}, `DAT_00732734` rows) run on the player's quest record.
-Those callbacks aren't followed.
+FUN_00572470 says so: the player's congratulations bit for the class
+(pcdata +0x60 + difficulty × 4, its second bitfield: the save's +0x2E5,
+FUN_00572530), by the table 0x732738 ({class, bit}, `DAT_00732734` = 35
+rows; a class not in it takes bit 0), LSB first (masks 0x6ce268). Nothing
+is sent when none is set. The bits are set a whole town at a time by
+FUN_00544fa0 (FUN_00572420 per class), on the first trip out of an act by
+its end: Warriv (FUN_005467e0, quest 7 bit 0 clear) the camp's (list 0),
+Meshif (quest 15 bit 0 clear) Lut Gholein's (1), the hellgate
+(FUN_00546ac0, from the Durance's third level, word 0x17 bit 0 clear)
+Kurast's (2). Tyrael's portal (FUN_005b5880, OperateFn 73) sets word
+0x1c itself and marks none; FUN_005467e0's Tyrael branch (word 0x1c bit
+0 clear) would mark Lut Gholein's again but can't run (bugs.md #116).
+Harrogath's list (4) is never marked. The return line's C→S 0x4d {u16 class} (FUN_004785b0(0x4d))
+clears the bit (handler FUN_0054c690 → FUN_005724c0, FUN_00410b50).
+FUN_00537340's callers are FUN_005380d0 (the room change, when the
+client's last room +0x1b4 was on another level) and FUN_0053aec0 (a warp
+to another act), so 0x91 comes on every arrival in a town from another
+level, within an act too. A game's start sends none: FUN_005394a0 calls
+FUN_005381f0 (0x539577), which sets +0x1b4 to the start room before
+FUN_005380d0 first runs. d2d: `rules::NpcReturns` (town_npcs.hpp),
+`Player::returning`, set on each arrival in a town (`World::owe_returns`);
+`tests/game/test_npc_returns.cpp`.
 
 ## Distance (FUN_004b9a00, FUN_004ba020, FUN_004dfc20)
 

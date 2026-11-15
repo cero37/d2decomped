@@ -254,7 +254,7 @@ struct Fight {
         // the last skill's do plus its delay.
         std::uint32_t burning = 0, skill_delay = 0;
         // The player's stun (state 21, FUN_0057aae0: a monster's Smite) runs out.
-        // It stops nothing; every hit while it runs is a get-hit (FUN_0057cee0).
+        // It stops nothing; a hit while it runs is a get-hit (FUN_0057cee0), unless one is already running (FUN_0057edd0).
         std::uint32_t stunned = 0;
         std::vector<std::pair<int, std::uint32_t>> strafe;   // Strafe's arrows to come: target, when
         int channel = -1, last_frame = -1;     // Inferno's skill while its cast lasts
@@ -281,6 +281,9 @@ struct Fight {
         std::uint32_t pierce_idx = 0;
         float cast_x = 0, cast_y = 0;          // where a missile skill was sent
         int aura = 0;                          // the aura on (Town: the right skill when it's one)
+        // State 0x55 (nomanaregen): on while the player's Prayer pays for a
+        // pulse that heals (prayer_pulse); a right skill picked clears it.
+        bool no_mana_regen = false;
         // The player's summons (skills.md "Summons"): a Monster of the skill's
         // summon row on the player's side, the skill that raised it, and the
         // monster it's after.
@@ -304,6 +307,7 @@ struct Fight {
             int hits = 0;                              // a Raven's attacks left (0: no count)
             bool idle = false, mirror = false;         // Decoy stands; a Shadow Warrior swings the owner's blow
             bool chase = false;                        // walking at its target (FUN_005ded40)
+            bool to_owner = false;                     // walking at its owner (PetFollow)
             std::array<int, 3> ctrl{};                 // its AI control's +0x14 / +0x18 / +0x1c (rules::PetBrain)
             int cast = -1;                             // the skill its attack mode does (a traced think's), -1 a swing
             float cast_x = 0, cast_y = 0;              // a skill at a spot (a wolf's Teleport)
@@ -382,8 +386,9 @@ struct Fight {
         // the skill (and level) its attack mode carries (-1: a plain blow).
         std::array<int, 6> merc_ids{}, merc_levels{};
         int   merc_growth = 0, merc_aura = -1, merc_skill = -1, merc_skill_level = 0;
-        // Stat 0x148 (FUN_0059f940's seed for a merc's Pierce missiles).
-        // ponytail: nothing bumps it (FUN_00597e20's default branch isn't read).
+        // Stat 0x148 (FUN_0059f940's seed for a merc's Pierce missiles): FUN_00597e20 adds 1 as
+        // it sends a client the merc's turn to NU (mode 1), so 1 for each player it's near.
+        // ponytail: a client given the unit anew while it's in NU (FUN_00571f90) adds 1 too; not counted.
         std::uint32_t merc_pierce_idx = 0;
         // An SQ skill's sequence while it plays (Jab: MonSeq seq_act2guardjab,
         // its MonStats Sk*mode), and the sequence frames already past.
@@ -547,6 +552,9 @@ struct Fight {
     // speed; a cast takes cast_ticks (FCR), get-hit and block recover
     // faster with FHR / FBR (rules::speed_frames on the base frame count).
     void set_pmode(int mode, std::uint32_t now_ms);
+    // ms from the mode's start to its action frame: an attack's is the tick FUN_005539b0 files it on (attack_action_tick), any other mode's the
+    // action frame scaled by prate.
+    [[nodiscard]] std::uint32_t action_at() const;
     // Impact and the class cry (FUN_004cc410). A hit too small for mode 4 still
     // plays them: the client's command 0x13 calls FUN_004cc5b0 with mode 0x13,
     // and that slot is the same struck handler. It does not change pmode.
@@ -704,8 +712,10 @@ struct Fight {
     // physical, within half its aurarange), Poison Explosion (63,
     // FUN_005c5e60: srvmissilea's cloud on a corpse), Teleport (27,
     // FUN_005ca360: to the point, where it's open; not in town).
-    // ponytail: Static Field hits only monsters, with no line-of-sight test
-    // (aurafilter 0x8783: FUN_0056b3e0, 0x200), Mind Blast's
+    // Static Field's walk takes its aurafilter (0x8783) from the caster: a
+    // clear line (0x200), out of town.
+    // ponytail: Static Field hits only monsters (0x8783's 0x1 takes an
+    // enemy player: FUN_0056b3e0 type 0), Mind Blast's
     // conversion (Param3 / 4 through FUN_005d7680) and the knockback
     // guards aren't applied; Corpse Explosion takes its corpse's life from
     // the MonStats roll, not FUN_006538a0's.
@@ -856,10 +866,15 @@ struct Fight {
     // subtiles of its holder, at the holder's level and calc env.
     struct AuraOn { const d2d::rules::Skill* skill = nullptr; int level = 0; d2d::rules::CalcEnv env; };
     [[nodiscard]] std::vector<AuraOn> friendly_auras(float x, float y) const;
-    // The enemy auras (do 66, Holy Freeze's 81) over (x, y) cells the same
-    // way: the player's and the merc's (an Act 2 merc's Holy Freeze).
-    [[nodiscard]] std::vector<AuraOn> enemy_auras(float x, float y) const;
-    [[nodiscard]] std::vector<AuraOn> auras_at(float x, float y, bool enemy) const;
+    // The enemy auras (do 66, Holy Freeze's 81) over the monster the same
+    // way: the player's and the merc's (an Act 2 merc's Holy Freeze), each
+    // only when its aurafilter takes the monster from its holder's spot
+    // (FUN_0056b7e0 runs the aura's callback, its state and aurastats, only
+    // on a unit FUN_0056b3e0 takes): none behind a wall for 0x200, none in
+    // town, Holy Freeze's slow not on a prime evil.
+    [[nodiscard]] std::vector<AuraOn> enemy_auras(const Monster& monster) const;
+    // `taker`: for an enemy aura, the monster its filter must take.
+    [[nodiscard]] std::vector<AuraOn> auras_at(float x, float y, bool enemy, const Monster* taker = nullptr) const;
     // An enemy aura's pulse (do 66 / 81 with an EType): its element at every
     // live monster within its aurarange of (x, y), struck by `striker`.
     void enemy_pulse(const d2d::rules::Skill& skill, int lvl, const d2d::rules::CalcEnv& env, float x, float y, const std::array<int, 4>& pierce, int striker, std::uint32_t now_ms);
@@ -871,7 +886,8 @@ struct Fight {
         const d2d::d2s::Item *weapon = nullptr, *shield = nullptr;
         std::int64_t item_def = 0, per_level = 0;
     };
-    [[nodiscard]] MercGear merc_gear() const;
+    [[nodiscard]] MercGear merc_gear(const Hero& hero) const;   // any player's merc (a party member's FHR)
+    [[nodiscard]] MercGear merc_gear() const { return merc_gear(*actor); }
     // Its maximum life with its gear.
     [[nodiscard]] int merc_max_life() const;
 
@@ -1053,6 +1069,10 @@ struct Fight {
     // ponytail: a wall or the end of its range doesn't set it off; a row
     // with no Skill uses no physical columns (MinDamage..) or synergy.
     bool skill_missile_hits(Missile& missile, std::size_t monster_index, std::uint32_t now_ms);
+    // A missile with no skill on monster i: the merc's plain arrow, its bow's
+    // blow. A LastCollide row passes the unit it struck last (FUN_005a8730);
+    // a Pierce row with a charge left flies on, as skill_missile_hits'.
+    bool plain_missile_hits(Missile& missile, std::size_t monster_index, std::uint32_t now_ms);
     // A skill missile's damage on monster i: with a weapon share (the
     // skill's SrcDam, or a row with no Skill its SrcDamage) the weapon's
     // blow at that share, attack rating rolled; else a sure hit (ToHit rows
@@ -1104,13 +1124,12 @@ struct Fight {
     // -> FUN_0056b3e0, aura_takes: Sanctuary undead only, Holy Freeze no
     // prime evil) with the skill's element (FUN_0056e0c0, the mastery in;
     // Holy Fire, Holy Shock, Holy Freeze's cold) — its aurastats ride the
-    // target state (+0x82) and target_of applies them while the monster is
-    // in range.
-    // ponytail: perdelay taken as ticks (its reader isn't traced); the
-    // aurafilter's unit-flag, town and sight bits aren't read
-    // (aura_filter.hpp); Sanctuary and Redemption's own callbacks aren't
-    // built; Sanctuary's mana (FUN_005cf3a0, FUN_00644b10) isn't asked or
-    // drawn.
+    // target state (+0x82) and target_of (and monster_states, Holy Freeze's
+    // slow) applies them while the monster is in range and its aurafilter
+    // takes it (enemy_auras).
+    // ponytail: perdelay taken as ticks (its reader isn't traced);
+    // Sanctuary and Redemption's own callbacks aren't built; Sanctuary's
+    // mana (FUN_005cf3a0, FUN_00644b10) isn't asked or drawn.
     void aura_pulse(std::uint32_t now_ms);
     // A friendly aura's life (Prayer, aurastat hitpoints) on a pulse: every
     // perdelay frames, on the player and the merc within its aurarange.
@@ -1118,15 +1137,23 @@ struct Fight {
     // FUN_00644b10 cost in mana (Prayer: (16 + 3 x (lvl - 1)) << 4, 256ths)
     // or heals nothing, and takes the cost off it (FUN_0056c110) when it
     // healed someone; the merc's costs nothing.
-    // ponytail: the state it sets then (0x55 nomanaregen, FUN_00639db0) and
-    // clears on a pulse that heals no one isn't kept, so mana still regens.
+    // A player's pulse with a cost sets state 0x55 (nomanaregen,
+    // FUN_00639db0) when it healed, else clears it (Hero::no_mana_regen).
     void prayer_pulse(const d2d::rules::Skill& skill, int lvl, const d2d::rules::CalcEnv& env, float from_x, float from_y, bool player_cast = false);
     // Whether the skill's aurafilter takes the monster (aura_filter.hpp). A
     // monster here is no side of the player's, so a friendly aura's never
-    // does (0x12003 needs an ally: FUN_00554de0).
-    [[nodiscard]] bool aura_takes(const d2d::rules::Skill& skill, const Monster& monster) const;
-    // Whether a FUN_0056b3e0 filter takes the monster (aura_filter.hpp).
-    [[nodiscard]] bool filter_takes(std::uint32_t filter, const Monster& monster) const;
+    // does (0x12003 needs an ally: FUN_00554de0). (from_x, from_y): the
+    // walk's own unit, where the line (0x200) starts.
+    [[nodiscard]] bool aura_takes(const d2d::rules::Skill& skill, const Monster& monster, float from_x, float from_y) const;
+    // Whether FUN_0056b7e0's walk with a FUN_0056b3e0 filter, centred on a
+    // unit at (from_x, from_y), takes the monster (aura_filter.hpp): its
+    // mode (DD a corpse, any other without life dying), MonStats npc, unit
+    // flags 4 and 8 as `targetable` (flags 0xe), the level a town, and a
+    // clear line, mask 4, when the filter asks.
+    // 0x20000 (in melee, FUN_00622c40) and 0x80000 (not in state 0x56) aren't
+    // filled in: none of 1.14d's 357 Skills.txt rows has either in its
+    // aurafilter, nor do the two filters written out here (0xa783, 0x8783).
+    [[nodiscard]] bool filter_takes(std::uint32_t filter, const Monster& monster, float from_x, float from_y) const;
     // The player's aura over the monster: in range and taken by its filter,
     // so its auratargetstate shows (Conviction's; never Might's).
     [[nodiscard]] bool in_aura(const Monster& monster);

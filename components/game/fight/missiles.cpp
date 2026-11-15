@@ -353,26 +353,7 @@ auto Fight::fire(const d2d::rules::Skill& skill, std::uint32_t now_ms, const Cas
                 shot.struck = shared; shot.to.reset();                              // a way, not a point
             }
             if (skill.srvdofunc == ServerDoFunction::kWarCry && !skill.aurastate.empty()) {
-                start_state(skill, lvl, now_ms);
-                // The nova reaching an ally (hit 18, FUN_005ab0b0: FUN_00554de0)
-                // gives it the state too, the caster's auralen and level
-                // (FUN_005d8290, aurastats FUN_005c6cc0): the merc, the pets.
-                // ponytail: an ally within the missile's reach (speed x Range)
-                // when it's cast, not as the nova passes.
-                const float reach = missile_speed(missile_info, lvl) * float(missile_info.range) * 0.04f;
-                const int len = calc(skill, skill.auralen, lvl);
-                const std::uint32_t until = len > 0 ? now_ms + std::uint32_t(len) * 40 : ~0u;
-                if (actor->merc && actor->merc->mode != "DT" && std::hypot(actor->merc->unit.x - actor->player.x, actor->merc->unit.y - actor->player.y) <= reach) {
-                    const int before = merc_max_life();
-                    actor->merc_cry = { skill.id, lvl, until };
-                    actor->merc->hit_points += std::max(merc_max_life() - before, 0);
-                }
-                for (auto& pet : actor->pets)
-                    if (pet.monster.alive() && std::hypot(pet.monster.unit.x - actor->player.x, pet.monster.unit.y - actor->player.y) <= reach) {
-                        std::erase_if(pet.buffs, [&](const SelfState& buff) { return buff.skill == skill.id; });
-                        pet.buffs.push_back({ skill.id, lvl, until });
-                        pet_buffs(pet);
-                    }
+                start_state(skill, lvl, now_ms);   // its allies as the nova reaches them (missile_tick)
             }
         } else if (skill.srvdofunc == ServerDoFunction::kGuidedMissile) {
             auto& missile = send(dx, dy, range);
@@ -502,6 +483,27 @@ auto Fight::missile_tick(std::uint32_t now_ms) -> void {
             if (!skill) continue;
             const int age = int(now_ms - missile.born) / 40;
             const auto& missile_info = *missile.info;
+            // A war cry's nova reaching an ally (hit 18, FUN_005ab0b0: FUN_00554de0)
+            // gives it the state too, the caster's auralen and level
+            // (FUN_005d8290, aurastats FUN_005c6cc0): the merc, the pets.
+            if (missile_info.hit_func == 18 && skill->srvdofunc == ServerDoFunction::kWarCry && !skill->aurastate.empty()) {
+                const auto reached = [&](const Monster& ally) {
+                    return ally.type >= 0 && missile_struck(*level, missile, ally.unit.x, ally.unit.y, game_data->monsters.types[std::size_t(ally.type)].size);
+                };
+                const int len = calc(*skill, skill->auralen, missile.level);
+                const std::uint32_t until = len > 0 ? now_ms + std::uint32_t(len) * 40 : ~0u;
+                if (actor->merc && actor->merc->mode != "DT" && reached(*actor->merc)) {
+                    const int before = merc_max_life();
+                    actor->merc_cry = { skill->id, missile.level, until };
+                    actor->merc->hit_points += std::max(merc_max_life() - before, 0);
+                }
+                for (auto& pet : actor->pets)
+                    if (pet.monster.alive() && reached(pet.monster)) {
+                        std::erase_if(pet.buffs, [&](const SelfState& buff) { return buff.skill == skill->id; });
+                        pet.buffs.push_back({ skill->id, missile.level, until });
+                        pet_buffs(pet);
+                    }
+            }
             if (missile_info.srv_do == 7 && age % std::max(missile_info.param1, 1) == 0) {
                 if (missile.target < 0 && skill->srvstfunc == ServerStartFunction::kNone) {
                     float best = 1e9f;
@@ -938,17 +940,40 @@ auto Fight::burst(Missile& missile, std::uint32_t now_ms, int struck) -> void {
             }
             case 20: {
                 if (!sub) break;
+                // FUN_00552fd0: the missile's owner (its +0xc8 bit 0x400, then FUN_00552f60 on its +0x94
+                // type and +0x98 id); with none FUN_005ab370 returns 1 and nothing is sent.
+                const Hero* owner = hero_of(missile.caster);
+                if (!owner) break;
+                const UnitState& from = missile.by_merc && owner->merc ? owner->merc->unit : owner->player;
                 const int burst_radius = radius(missile_info.hit_par1, skill->aurarange);
                 int count = radius(missile_info.hit_par2, skill->calc[0]);
-                // FUN_005ab370 -> FUN_0056b7e0 -> FUN_005ab2a0: the walk skips only the owner, so the unit
-                // struck gets one too; its filter is the aurafilter, else 0xa783 (tools/emu/hit_fury.py).
-                // ponytail: the walk's skip of MonStats flag 0x1b (FUN_00457490) isn't read.
+                // FUN_005ab370 -> FUN_0056b7e0 -> FUN_005ab2a0: the walk is handed the owner, so it skips only
+                // the owner and the unit struck gets one too, and FUN_0056b3e0's line (0x200, in the default
+                // 0xa783) runs from the owner, the reach from the missile; its filter is the aurafilter, else
+                // 0xa783 (tools/emu/hit_fury.py). Handed 1 as here, the walk passes a monster with MonStats
+                // noaura (flag 0x1b: 0x56b979).
+                // Its rooms are the owner's room and that room's near list (FUN_00620bb0 of the owner at
+                // 0x56b815, FUN_00619790), in the list's order, each room's units newest first (room +0x74,
+                // next +0xe8): a monster in reach of a bolt thrown far, but in no room near the thrower's,
+                // gets none. FUN_0056b770's per-room reach test lets every room by (bugs.md).
+                std::vector<int> rooms;
+                std::vector<d2d::rules::RoomUnit> units;
+                if (level) {
+                    for (const auto& [room_level, near_room] : near_rooms(*game_data, *level, from.x, from.y))
+                        if (room_level == level) rooms.push_back(near_room);
+                    units.reserve(monsters.size());
+                    for (const auto& monster : monsters) units.push_back({ room_of(*level, monster.unit.x, monster.unit.y), monster.targetable() });
+                }
                 const std::uint32_t filter = skill->aura_filter != 0 ? skill->aura_filter : 0xa783;
-                for (std::size_t j = 0; j < monsters.size() && count > 0; ++j)
-                    if (monsters[j].targetable() && filter_takes(filter, monsters[j]) && std::hypot(monsters[j].unit.x - missile.x, monsters[j].unit.y - missile.y) * 5 <= float(burst_radius)) {
-                        sub_at(missile.x, missile.y, monsters[j].unit.x - missile.x, monsters[j].unit.y - missile.y);
+                for (const int index : d2d::rules::room_order(units, rooms)) {
+                    if (count <= 0) break;
+                    const auto& monster = monsters[std::size_t(index)];
+                    if (std::hypot(monster.unit.x - missile.x, monster.unit.y - missile.y) * 5 <= float(burst_radius)
+                        && filter_takes(filter, monster, from.x, from.y) && !game_data->monsters.types[std::size_t(monster.type)].no_aura) {
+                        sub_at(missile.x, missile.y, monster.unit.x - missile.x, monster.unit.y - missile.y);
                         --count;
                     }
+                }
                 break;
             }
             case 22: {
@@ -981,7 +1006,8 @@ auto Fight::prayer_pulse(const d2d::rules::Skill& skill, int lvl, const d2d::rul
         // FUN_005cf010: a player's aura costs FUN_00644b10 (mana_formula, no
         // minmana floor); with less mana its stats stay 0.
         const int cost = player_cast ? d2d::rules::mana_formula(skill, lvl) : 0;
-        if (values[kMana] < cost) return;
+        // Short of it, nothing heals, so the pulse clears state 0x55 (0x5cf262).
+        if (values[kMana] < cost) { actor->no_mana_regen = false; return; }
         const float reach = float(d2d::rules::eval_calc(game_data->skills, skill.aurarange, env, skill.id, lvl));
         int changed = 0;   // FUN_005cedc0's count (+0x40): a unit whose life it moved
         for (std::size_t i = 0; i < skill.aurastat.size(); ++i) {
@@ -998,7 +1024,10 @@ auto Fight::prayer_pulse(const d2d::rules::Skill& skill, int lvl, const d2d::rul
         }
         // Something healed: FUN_0056c110(caster, cost) takes the cost off its
         // mana (there's enough: checked above).
+        // With the cost, state 0x55 (nomanaregen) goes on with it
+        // (FUN_00639db0(caster, 0x55, 1), 0x5cf244), else off (0x5cf265).
         if (cost > 0 && changed > 0) values[kMana] -= cost;
+        if (cost > 0) actor->no_mana_regen = changed > 0;
     }
 
 auto Fight::aura_pulse(std::uint32_t now_ms) -> void {
@@ -1054,26 +1083,39 @@ auto Fight::enemy_pulse(const d2d::rules::Skill& skill, int lvl, const d2d::rule
         // Holy Freeze's callback (FUN_005d07c0) then rolls shatter (state 107) itself on
         // each one's seed, rand % 100 < 20, deadCol or not (the chill's roll came first).
         for (std::size_t i = 0; i < monsters.size(); ++i)
-            if (aura_takes(skill, monsters[i]) && std::hypot(monsters[i].unit.x - x, monsters[i].unit.y - y) * 5 <= reach) {
+            if (std::hypot(monsters[i].unit.x - x, monsters[i].unit.y - y) * 5 <= reach && aura_takes(skill, monsters[i], x, y)) {
                 land(i, d2d::rules::missile_blow(damage, target_of(i), pierce, rng), true, now_ms, striker);
                 if (skill.srvdofunc == ServerDoFunction::kHolyFreeze) monsters[i].shatter = monsters[i].seed.next() % 100 < 20;
             }
     }
 
-auto Fight::aura_takes(const d2d::rules::Skill& skill, const Monster& monster) const -> bool { return filter_takes(skill.aura_filter, monster); }
+auto Fight::aura_takes(const d2d::rules::Skill& skill, const Monster& monster, float from_x, float from_y) const -> bool {
+        return filter_takes(skill.aura_filter, monster, from_x, from_y);
+    }
 
-auto Fight::filter_takes(std::uint32_t filter, const Monster& monster) const -> bool {
+auto Fight::filter_takes(std::uint32_t filter, const Monster& monster, float from_x, float from_y) const -> bool {
         if (monster.type < 0 || std::size_t(monster.type) >= game_data->monsters.types.size()) return false;
         const auto& type_info = game_data->monsters.types[std::size_t(monster.type)];
-        return d2d::rules::aura_filter_takes(filter, { .dead = !monster.alive(), .undead = type_info.undead, .boss = type_info.boss_column,
-                                                                  .prime_evil = type_info.prime_evil, .ally = false });
+        const bool npc = std::size_t(monster.type) < game_data->mon_is_npc.size() && game_data->mon_is_npc[std::size_t(monster.type)];
+        // The line (0x200) only when asked: FUN_0064e260 from the walk's unit to it, mask 4, as in_reach's.
+        auto clear_line = [&] {
+            if ((filter & d2d::rules::aura_filter::kClearLine) == 0 || !level) return true;
+            auto sub = [](float cells) { return int(std::floor(cells * 5)); };
+            const auto wall = [this](int at_x, int at_y) { return level->blocked((float(at_x) + 0.5f) / 5, (float(at_y) + 0.5f) / 5, 0x04); };
+            return !d2d::rules::sight_blocked(sub(from_x), sub(from_y), 0, sub(monster.unit.x), sub(monster.unit.y), 0, wall);
+        };
+        return d2d::rules::aura_walk_takes(filter, { .dead = !monster.alive() && monster.mode == "DD", .dying = !monster.alive() && monster.mode != "DD",
+                                                     .undead = type_info.undead, .boss = type_info.boss_column, .prime_evil = type_info.prime_evil,
+                                                     .ally = false, .npc = npc, .unit_flag_4 = monster.targetable(), .unit_flag_8 = monster.targetable(),
+                                                     .in_town = in_town(level), .clear_line = clear_line() });
     }
 
 auto Fight::in_aura(const Monster& monster) -> bool {
         const auto* skill = game_data->skills.get(actor->aura);
-        if (!skill || !skill->aura || !aura_takes(*skill, monster)) return false;
+        if (!skill || !skill->aura) return false;
         const int radius = d2d::rules::eval_calc(game_data->skills, skill->aurarange, calc_env(), skill->id, skill_level ? skill_level(actor->aura) : 1);
-        return std::hypot(monster.unit.x - actor->player.x, monster.unit.y - actor->player.y) * 5 <= float(radius);
+        return std::hypot(monster.unit.x - actor->player.x, monster.unit.y - actor->player.y) * 5 <= float(radius)
+            && aura_takes(*skill, monster, actor->player.x, actor->player.y);
     }
 
 auto Fight::target_of(std::size_t monster_index) -> d2d::rules::Target {
@@ -1086,7 +1128,7 @@ auto Fight::target_of(std::size_t monster_index) -> d2d::rules::Target {
             if (const auto* skill = effect->skill >= 0 ? game_data->skills.get(effect->skill) : nullptr)
                 apply_target_stats(*skill, effect->level, target, base);
         // The enemy auras over it (the player's, the merc's).
-        for (const auto& aura : enemy_auras(monsters[monster_index].unit.x, monsters[monster_index].unit.y)) apply_target_stats(*aura.skill, aura.level, target, base, &aura.env);
+        for (const auto& aura : enemy_auras(monsters[monster_index])) apply_target_stats(*aura.skill, aura.level, target, base, &aura.env);
         return target;
     }
 

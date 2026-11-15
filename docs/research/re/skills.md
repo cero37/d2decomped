@@ -657,9 +657,14 @@ the walk's end asks again: `FUN_00461250` commands 0x15 / 0x16 ->
 `FUN_00461180` -> `FUN_004610c0`, Attack's entry kept in the slot when it
 fell back. d2d: `Fight::skill_status` / `Fight::ask`, asked at the click
 for a spot or self cast (world/commands.cpp) and in `start_swing` for a
-unit; `tests/game/test_skill_ready.cpp`. Not kept: the fallback's Attack
-at a spot (`FUN_00461700(0)`), and a joined game asks only the weapon (the
-host asks the rest).
+unit; `tests/game/test_skill_ready.cpp`. Attack at a spot, the fallback's
+or a shift click's own (`FUN_00461700(0)`), swings where the player
+stands: its start, srvstfunc 1 `FUN_0056ca40`, sets the animation's first
+frame, takes the state 0x26 branch (`FUN_005c8980`), checks a missile
+weapon's ammo (`FUN_0056c4e0`) and asks for no target; d2d
+`World::apply`'s `attack_spot`. Not kept: the click's pick of an enemy by
+the spot (SearchEnemyXY, `FUN_00467880`), another melee skill at a spot,
+and a joined game asks only the weapon (the host asks the rest).
 
 Skill delay. At the end of a skill's do (`FUN_0056f7f0`, from
 LAB_0056fa93) the skill's delay calc (+0x190, Skills.txt `delay`, in
@@ -874,7 +879,8 @@ frame, `Hero::skill_delay`; startmana's state inferno is `Hero::burning`
   (Charged Bolt 17, Teeth 8, Multiple Shot, Guided Arrow, ...), srvstfunc 4
   arrows (Fire / Cold Arrow), the other hit functions (Glacial Spike 13,
   Holy Bolt 7, Frozen Orb), explosions on walls, the delay, FCR
-  breakpoints, SQ casting (Lightning casts as SC), the missile's light.
+  breakpoints, the missile's light. SQ casting: see "Cast rate" below (a
+  seqtrans SC sequence runs its steps at the cast speed).
 - Part 2: srvstfunc 4 (**FUN_005da8b0**) only checks the ammo
   (FUN_0056c4e0), so the Amazon's arrows and javelins take the same path
   (Fire / Cold / Ice Arrow, Poison Javelin, Lightning Bolt). Do 8
@@ -887,7 +893,8 @@ frame, `Hero::skill_delay`; startmana's state inferno is `Hero::burning`
   Charged Bolt): calc1 missiles at the target, each with FUN_005c9290
   steering it. Do 22 (**FUN_005c9b50** → FUN_0056d400, the novas): 64
   missiles toward the offsets in 0x6e1288 / 0x6e1388, lasting
-  FUN_00663270 (the row's range) + calc1. A row with no Skill (Multiple
+  FUN_00663270 (Vel + VelLev x level / 8, a velocity: see the note below) +
+  calc1. A row with no Skill (Multiple
   Shot's) carries the weapon's damage at its SrcDamage (96).
   Built as `skill_missile` / `fire` (fight.hpp); a nova's missiles share
   their struck list, so a monster takes one hit from it. Not yet: the
@@ -895,6 +902,19 @@ frame, `Hero::skill_delay`; startmana's state inferno is `Hero::burning`
   other do functions
   (Guided Arrow 10, Strafe 12, Chain Lightning 26, Meteor / Blizzard 28,
   Fire Wall, Blaze, Inferno, Bone Spirit, Blessed Hammer, ...).
+
+`FUN_00663270(missile id, level)` reads the Missiles.txt row (table `0x96c794`,
+count `0x96c79c`, rows of `0x1a4`) and answers byte `+0x9a` (Vel) plus byte
+`+0x9b` (VelLev) x level / 8, 0 for an id outside the count or a null row.
+The multiply is a 32-bit signed `imul` and the division truncates toward zero.
+So the value is a velocity (missiles.md puts Vel/VelLev at those offsets;
+monster-ai.md and collision.md already call it velocity), not Range
+(`+0x96`); the "range" wording above is a
+mislabel. `FUN_0056d400` puts a non-zero argument in the maker's params
+[10] with flag 4 (missiles.md "Making it"): the velocity of all 64, in
+place of the row's at the missile's own level.
+Run for real on three synthetic rows (the first with VelLev 0), 43 cases, nothing
+hooked: `tools/emu/skills_combat_helpers.py`. No d2d comparison.
 
 ### Auras (phase 5, part 1)
 - An aura skill's do runs on its pulse: **65** (FUN_005cf010, friendly:
@@ -923,8 +943,14 @@ frame, `Hero::skill_delay`; startmana's state inferno is `Hero::burning`
   FUN_00639db0) and calls FUN_0056c110(ECX caster, EDX cost), which takes
   the cost off stat 8 (state 0x72: FUN_005d2b60 instead); a count of 0
   clears 0x55. So a Paladin's Prayer draws its cost only on a pulse that
-  heals someone, and a merc's Prayer (not a player) costs nothing. d2d:
-  `Fight::prayer_pulse`; 0x55 and Sanctuary's (66) side aren't built.
+  heals someone, and a merc's Prayer (not a player) costs nothing. While
+  0x55 is on, the player's mana a frame (FUN_005806f0, 0x580713) skips
+  the ManaRegen part: manarecovery (26) alone. A right skill set clears
+  it: FUN_005701b0 (0x5701db), for any skill but 5 (Left Hand Swing),
+  from C->S 0x3c (FUN_0054be70, 0x54bee4) and from the weapon switch
+  when its kept right skill is usable (FUN_005616a0, 0x561aa9). d2d:
+  `Fight::prayer_pulse`, `Hero::no_mana_regen`; Sanctuary's (66) side
+  isn't built.
 - FUN_00646d60 holds an aura's passive state off while the aura's state
   (+0x80) is on, so the passive stats hold either way.
 - Operands 49..53 (enma, exma, edma, enms, exms) are the elemental damage
@@ -933,11 +959,11 @@ frame, `Hero::skill_delay`; startmana's state inferno is `Hero::burning`
   aurastats in `update_fighters` (resists added over the panel, to 95),
   `aura_pulse` (Prayer's hitpoints heal; 66 / 81 strike monsters in
   range), `target_of` (the target state's resistances / defense while in
-  range), thorns_percent (131) on melee hits. Not yet: perdelay's reader
-  (taken as ticks), aurafilter's unit-flag, town and sight bits (below),
-  the merc in the aura, Sanctuary / Redemption's callbacks, Holy Freeze's
-  slow (its cold chills), Sanctuary's mana and state 0x55 (above), the
-  aura overlays.
+  range and taken by the aurafilter, as Holy Freeze's slow in
+  `monster_states`: `enemy_auras`), thorns_percent (131) on melee hits. Not yet: perdelay's reader
+  (taken as ticks), the merc in the aura, Sanctuary / Redemption's callbacks, Holy Freeze's
+  slow (its cold chills), Sanctuary's mana and its state 0x55
+  (FUN_005cf3a0), the aura overlays.
 - **aurafilter** (+0x50): dos 65, 66 and 81 pass it to FUN_0056b7e0
   (SkilPal.cpp lines 0x1f6, 0x2ba, 0x6ba), which runs the callback only on
   a unit within range that FUN_0056b3e0 takes (a filter of 0 is 0x583).
@@ -962,11 +988,15 @@ frame, `Hero::skill_delay`; startmana's state inferno is `Hero::burning`
   - Sanctuary 0xe786: undead that aren't bosses;
   - Holy Freeze 0x4a283: no prime evil.
 
-  d2d: `rules::aura_filter_takes` (`Fight::aura_takes`) in `enemy_pulse`
+  d2d: `rules::aura_filter_takes` is FUN_0056b3e0 on a monster, every bit
+  (below); `rules::aura_walk_takes` adds FUN_0056b7e0's own part (0 is
+  0x583, 0x2000 skips town rooms). `Fight::aura_takes` in `enemy_pulse`
   and `in_aura`, so a friendly aura's auratargetstate isn't drawn on a
-  monster. Not read: 0x80 / 0x400 (unit flags +0xc4 & 4 / & 8), 0x100 and
-  FUN_0056b7e0's 0x2000 (town rooms), 0x200 (line of sight,
-  FUN_0064e260), 0x20000 (FUN_00622c40), 0x80000 (state 0x56).
+  monster. `Fight::filter_takes` gives it the monster's mode (DD a corpse,
+  any other without life dying), MonStats npc, `targetable` for unit
+  flags 4 and 8 (flags 0xe), the level a town, and the line from the
+  walk's unit, mask 4 (in_reach's); never in melee (0x20000) nor just hit
+  (0x80000), which no Skills.txt row asks.
   Re-check: `python3 tools/ghidra/fn.py 0056b3e0` (and 0056b7e0, 005cf010,
   005cf3a0, 005d0920); the rows from Skills.txt's aurafilter column.
 - **FUN_0056b3e0 whole: the other unit types and the order** (cited,
@@ -992,15 +1022,19 @@ frame, `Hero::skill_delay`; startmana's state inferno is `Hero::burning`
   set; 0x80000 fails a target in state 0x56; 0x200 passes only when both
   units have a room and `FUN_0064e260` over their two positions
   (`FUN_0045adf0` / `FUN_0045ae20`, mask 4) returns 0 (a missing room
-  fails); no 0x200 → pass. d2d's
-  `aura_filter_takes` agrees on the monster bits it lists, with these
-  differences: it has no player / object / item / missile branches (an aura
-  only ever strikes a `Monster` here), no mode-0 exclusion for a monster
-  (`Fight::aura_takes` passes `dead = !alive()`; game.exe tells mode 0 and
-  0xc apart and passes only 0xc when 0x1000 is set), and 0x10000 does not
-  fail the MonStats +0xd bit 0 monsters. Those two are the DISAGREES (not
-  played out: no aura in the 1.14d rows above sets 0x1000, and which
-  monsters carry +0xd bit 0 is not read here).
+  fails); no 0x200 → pass. MonStats +0xd bit 0 is the **npc** column:
+  FUN_00651210's MonStats column table names "npc" (0x6ec678, the entry at
+  0x0065181c) with bit 8 of the dword at +0xc (inTown bit 0xa, lUndead 0xb,
+  interact 9 in the same table), and FUN_0056b3e0 tests it against the
+  mask byte at 0x6ce268 (1).
+  **Verified for a monster** tested by a caster that isn't a missile:
+  `tools/emu/aura_filter.py` runs FUN_0056b3e0 for real on 200,000 cases
+  (the modes, the unit flags, the npc byte and every bit's order; its
+  predicates hooked) and `test_aura_filter` matches each; the old
+  `aura_filter_takes` got 23,340 wrong (dying taken by 0x1000, npcs taken
+  by 0x10000, the unit-flag, town, melee, state and line bits unread).
+  d2d has no player / object / item / missile branches (an aura only ever
+  strikes a `Monster` here), and no missile caster.
 - A monster's curse or enemy-aura lowering of a resistance whose base is
   100 or more counts a fifth, truncated toward 0 (FUN_005c3540, from the
   callbacks of do 30, 65 and 66): `apply_target_stats` takes the base.
@@ -1017,8 +1051,8 @@ frame, `Hero::skill_delay`; startmana's state inferno is `Hero::burning`
 - **38** (FUN_005d3e80): the skill's physical (FUN_0056e170) and element
   (FUN_0056e0c0) on everything within prgcalc n subtiles of the target
   (FUN_0056b7e0, aurafilter). **36** (FUN_005d4db0): a nova of the
-  count's missile round the target (FUN_0056d400), range FUN_00663270 +
-  calc1. **39** (FUN_005d3f90): prgcalc n² tries at random points within
+  count's missile round the target (FUN_0056d400), FUN_00663270 (Vel +
+  VelLev x level / 8, a velocity) + calc1. **39** (FUN_005d3f90): prgcalc n² tries at random points within
   prgcalc n subtiles of the target, a missile at each that lands on the
   map. **37** and **143** launch the ring below. **40** (FUN_005d5010)
   stands the count's missile at the target (`Fight::prg`). **41**
@@ -1338,7 +1372,10 @@ frame, `Hero::skill_delay`; startmana's state inferno is `Hero::burning`
   at calc1 % (calc2 champion, calc3 unique, calc4 boss). **51**
   (FUN_005d76e0, Mind Blast): physical and stun within aurarange (or
   prgcalc), conversion through FUN_005d7680. **20** (FUN_005c9800 ->
-  FUN_005c96a0, Static Field): calc1 % of life within aurarange. **55**
+  FUN_005c96a0, Static Field): calc1 % of life within aurarange; its walk
+  (FUN_0056b7e0 from 0x005c98dd: the caster in EDX, x = y = 0) takes
+  Skills.txt +0x50 (0x8783), so a monster behind a wall (0x200, mask 4)
+  or in town isn't struck (`Fight::spot`, `filter_takes`). **55**
   (FUN_005c4df0, Corpse Explosion): the corpse's max life (FUN_006538a0) x
   calc1..calc2 %, half fire half physical, within aurarange / 2. **63**
   (FUN_005c5e60, Poison Explosion): srvmissilea clouds on the corpse. **27**
@@ -1506,8 +1543,8 @@ frame, `Hero::skill_delay`; startmana's state inferno is `Hero::burning`
   reaching a unit FUN_00554de0 calls an ally gives it the state too
   (FUN_005d8290: the caster's auralen and level, aurastats FUN_005c6cc0).
   d2d: `merc_cry` (Shout's armor %, Battle Orders' life % on the merc),
-  a pet's buffs (`Pet::bo_life`, its armor %), those within the missile's
-  reach as it's cast.
+  a pet's buffs (`Pet::bo_life`, its armor %), each as a missile of the
+  nova crosses its subtiles (`Fight::missile_tick`, `missile_struck`).
 - **Leap** (start 40, FUN_005d9d50; do 77, FUN_005da370): the point pulled
   back to aurarangecalc subtiles (FUN_005d9a10, FUN_006417f0), a free spot
   (mask 0x1c09, three tries) reached in a line (FUN_00645910, 0x804) within
@@ -1546,9 +1583,12 @@ frame, `Hero::skill_delay`; startmana's state inferno is `Hero::burning`
   After each create, FUN_004efc20(0x118) reads that skill's Param2
   (+0x14c) and FUN_0064a710 stores it plus 1. 37 does that for every
   missile. 143 does it only when the missile row is 0x238. The path
-  callback is FUN_005d40f0 for 37 (range capped at 77, velocity 10, then
-  a straight route) and FUN_005d4680 for 143 (the same cap, then a wobble).
-  d2d: `Fight::prg` aims the row's own velocity straight at the offset.
+  callback is FUN_005d40f0 for 37 (range capped at 77, path type 10 by
+  FUN_00648cf0, then a straight route by FUN_00649970) and FUN_005d4680
+  for 143 (the same cap and type, then a wobble it writes point by point).
+  The 10 is the path type (collision.md "Path types"), not a velocity.
+  d2d: `Fight::prg` caps the range at 77 and aims the row's own velocity
+  straight at the offset, 143 too (no wobble).
   **41** (FUN_005d5080): prgcalc of them toward random points round the
   target. Its offsets are `seed % 0x28 - 0x14` on each axis, and a (0, 0)
   roll is stored as x = 0x14. d2d: `rules::release_spread_offset`
@@ -1677,6 +1717,16 @@ and per-class base frames, not a table. What's stored:
     least one. A sequence is over when its countdown (+0x48) is <= 0
     (`FUN_00621260` sets it to the sequence's step count x 256, 0x62129a):
     ceil(256 x steps / speed) ticks, no minus one (see the Lightning notes).
+  - The sequence's step (`FUN_00623e00`, +0x30 set) moves the position (+0x38,
+    from 0) and takes the countdown down by +0x3c, which the cast branch sets to
+    the same speed as +0x4c; `FUN_00621210` -> `FUN_00663410` reports the
+    events of the steps passed. Lightning / Chain Lightning (sequence 12, 19
+    steps, event 1 on step 7, SC frames) last ceil(256 x 19 / speed) ticks:
+    19/18/17/16/15/14/13/12/11 at FCR 0/7/15/23/35/52/78/117/194 for speed 256,
+    the published Lightning table. Port: `rules::cast_sequence_ticks`,
+    `Fight::set_pmode`'s SC branch (Skills.txt `seqtrans`, record +0x12, as
+    `FUN_006216e0` tests it); `tests/test_cast_sequence.cpp`. The frames are
+    drawn spread over the hold, not step by step.
   - Checked: `tools/emu/cast_rates.py` runs the cast branch and the end test on
     game.exe for FCR 0..400 at AnimData speeds 208 and 256 and the SC frame
     counts below; `test_combat --cast-rates` prints d2d's in the same form and
@@ -1706,8 +1756,8 @@ and per-class base frames, not a table. What's stored:
   | Sorceress | 14 | 0→14 9→13 20→12 37→11 63→10 105→9 200→8 |
 
 - **Port.** Nothing lives as a "breakpoint table": `rules::cast_ticks`
-  (combat.hpp) times a plain cast by FCR, `rules::speed_frames` shortens GH /
-  BL by FHR / FBR. The table above counts `frames_shown` of the older formula, which
+  (combat.hpp) times a plain cast by FCR; a player's GH and BL hold
+  `get_hit_ms` / `rules::block_ticks` (combat.md "Hit recovery: the length"). The table above counts `frames_shown` of the older formula, which
   assumes AnimData speed 256: there it is one more than the ticks a cast takes (the
   end test above). The Druid's SC runs at speed 208, so its row does not hold:
   `cast_ticks(15, 208, 0)` is 18 ticks at 0 FCR, not 14.
@@ -2139,10 +2189,14 @@ cited module, not a quoted assert.
   book (0x16) whose stat reads 0 is added as 1. d2d: `skillbar.hpp`
   `listed` (ListRow -1 off; a ListRow 4 skill when the carried quantity is
   above 0, on inventory, cube, stash, belt, cursor or worn). The SkillDesc
-  `+6` de-duplication is not ported. Neither is flag bit 8 (`FUN_004c6140`
-  sets it when the client grants a skill the local player didn't have), nor
-  the book that comes in with quantity stat 0 (d2d treats a stored 0 as none
-  left).
+  `+6` de-duplication is not ported. Nor is the book that comes in with
+  quantity stat 0 (d2d treats a stored 0 as none left). Flag bit 8 needs no
+  port: `FUN_004c6140` (the skill start, from `FUN_004c6eb0` /
+  `FUN_004c6f40` / `FUN_004c6660`) sets it only on a node it
+  has just added (`FUN_006439b0` found none, `FUN_00647110` made one) for
+  the local player (`FUN_00463dd0`) with no item (owner -1), so the picker
+  never lists a skill the player only started. d2d's start adds no skill:
+  the picker's level comes from the save and the stats alone.
 - **FUN_004aa7e0**(): the picker rebuild. Zeroes `0x7c0300` (0x3c5 bytes),
   sets the 60 ints at `0x7c05d0` to -1, zeroes `0x7c06c0`, then calls
   `FUN_004aa3a0` twice on one side (the asm in the paragraph above).
@@ -2207,6 +2261,12 @@ level <= 0 or a bad id, else FUN_00645b20(level, par1, par2) / (level, par3,
 par4) (diminishing returns); FUN_00644750 answers the signed short `+0x174`
 (reqlevel) plus the unit's own level in the skill, `0x7fffffff` for a bad id.
 FUN_00644750 has no null-unit check, unlike FUN_006447b0.
+`FUN_00645c10(level, id)` is the same shape as FUN_00645b70 / FUN_00645bc0:
+0 for level <= 0, an id outside `0 <= id < count` or a null row, else
+FUN_00645b20(level, dword `+0x158`, dword `+0x15c`) (which Skills.txt
+columns those are was not traced). Run with
+FUN_00645b20 hooked and its arguments logged, 15 cases:
+`tools/emu/skills_combat_helpers.py`. The interpolation and d2d are not compared.
 
 **A unit's skill levels**: FUN_006447b0 (fastcall unit, id) the level `+0x28` of
 FUN_006439b0(unit, id, -1), 0 for none. FUN_00644300 adds FUN_00644180's

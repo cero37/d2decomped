@@ -25,6 +25,7 @@
 #include <rules.hpp>
 #include <skills.hpp>
 #include <sound_ids.hpp>
+#include <town_npcs.hpp>
 
 #include <algorithm>
 #include <array>
@@ -44,6 +45,18 @@
 #include <vector>
 
 namespace d2d::game {
+
+namespace {
+
+// A right skill set (FUN_005701b0, from C->S 0x3c's FUN_0054be70 and the
+// weapon switch): any but skill 5 (Left Hand Swing) clears state 0x55
+// (nomanaregen, 0x5701db), the one Prayer's paid pulses set.
+constexpr int kLeftHandSwing = 5;
+void right_skill_set(Fight::Hero& hero, int skill) {
+    if (skill != kLeftHandSwing) hero.no_mana_regen = false;
+}
+
+}  // namespace
 
 auto World::spill_belt(std::uint32_t now_ms) -> void {
         const auto& layout = game_data->inv_layout[std::size_t(actor->character.header.cls)];
@@ -227,6 +240,7 @@ auto World::deal(const Command& command, std::uint32_t now_ms) -> bool {
                         for (const char* code : { "msf", "vip" }) take_carried(code);
                     }
                     d2d::rules::quest::set(quests(), 15, 0); d2d::rules::quest::set(quests(), 15, 13);
+                    d2d::rules::NpcReturns::mark(congrats(), 1);                   // FUN_00544fa0(1): Lut Gholein's
                     movie = 3;                                                     // S->C 0x61 {3}: Act03start
                 }
                 set_waypoint(waypoint_index(*game_data, d2d::rules::level_ids::kKurastDocks));
@@ -242,7 +256,10 @@ auto World::deal(const Command& command, std::uint32_t now_ms) -> bool {
             if (hc_idx != d2d::rules::monster_ids::kWarriv || !quest::bit(quests(), d2d::rules::AndyQuest::kQuest, 0)) return true;
             const Level* lut_gholein = game_data->level(d2d::rules::level_ids::kLutGholein);
             if (!lut_gholein || lut_gholein->start.first < 0) { d2d::log::warn("Lut Gholein didn't build; the caravan stays"); return true; }
-            if (!quest::bit(quests(), 7, 0)) { d2d::rules::quest::set(quests(), 7, 0); d2d::rules::quest::set(quests(), 7, 13); movie = 2; }   // S->C 0x61 {2}: Act02start
+            if (!quest::bit(quests(), 7, 0)) {                                 // S->C 0x61 {2}: Act02start; FUN_00544fa0(0): the camp's
+                d2d::rules::quest::set(quests(), 7, 0); d2d::rules::quest::set(quests(), 7, 13); movie = 2;
+                d2d::rules::NpcReturns::mark(congrats(), 0);
+            }
             set_waypoint(waypoint_index(*game_data, d2d::rules::level_ids::kLutGholein));
             // The arrival's level change runs the quests' enter hooks: Andariel's
             // (the Rogues get Cain if he's still caged, FUN_00596de0 / FUN_00597310).
@@ -259,16 +276,33 @@ auto World::deal(const Command& command, std::uint32_t now_ms) -> bool {
         // Not the cursor item: no answer (FUN_00578610, 0x579f75). Else S->C
         // 0x58 answers 7, refused (0x579fc6, 0x57a002, 0x57a2e6, 0x57a54a), or
         // 6, done (0x57a1b4, 0x57a488, 0x57a63f): ev::ServiceResult.
-        // ponytail: the new item stays in hand; game.exe puts it back (FUN_00560200) or drops it.
+        // Each service takes the item off the cursor (FUN_0055eea0) and puts
+        // it in the inventory's free spot (FUN_00560200(.., 0, 0, 1, 1, 0),
+        // called in each of FUN_00579d60's three branches), with no room on the ground at the
+        // player (FUN_00555da0 / FUN_00558aa0).
         if (const auto* imbue = std::get_if<cmd::Imbue>(&command)) {
             if (std::size_t(imbue->npc) >= level->npcs.size() || !actor->held || actor->held->id != imbue->item) return true;
             const int service_npc = level->npcs[std::size_t(imbue->npc)].hc_idx;
             const auto answer = [&](bool done) { actor->events.push_back(ev::ServiceResult{ imbue->npc, done }); return true; };
+            const auto put_back = [&] {
+                const auto& layout = game_data->inv_layout[std::size_t(actor->character.header.cls % 7)];
+                std::vector<const d2d::d2s::Item*> stored;
+                for (const auto& other : actor->character.items)
+                    if (other.location == d2d::d2s::item_location::kStored && other.panel == d2d::d2s::item_panel::kInventory) stored.push_back(&other);
+                const auto [width, height] = d2d::rules::item_size(game_data->rules, actor->held->code);
+                if (const auto [column, row] = d2d::rules::free_spot(game_data->rules, stored, layout.cols, layout.rows, width, height, true);
+                    column < 0 || !d2d::rules::put_in_grid(game_data->rules, actor->character.items, actor->held, d2d::d2s::item_panel::kInventory, layout.cols, layout.rows, column, row)) {
+                    loot.enter(level);                       // the player's floor, as cmd::Drop: a respawn changes level without it
+                    loot.place(std::move(*actor->held), actor->player.x, actor->player.y, now_ms);
+                }
+                actor->held.reset();
+            };
             if (service_npc == d2d::rules::SiegeQuest::kLarzuk) {
                 if (!d2d::rules::quest::bit(quests(), d2d::rules::SiegeQuest::kQuest, 1) || !d2d::rules::socketable(item_rules, *actor->held)) return answer(false);
                 actor->held = d2d::rules::socket_item(item_rules, *actor->held);
                 siege.socketed(quests());
                 d2d::log::info("Siege on Harrogath: Larzuk put {} sockets in the {}", actor->held->sockets, actor->held->code);
+                put_back();
                 return answer(true);
             }
             if (service_npc == d2d::rules::BetrayalQuest::kAnya) {
@@ -277,6 +311,7 @@ auto World::deal(const Command& command, std::uint32_t now_ms) -> bool {
                 actor->held->owner = actor->character.header.name;
                 betrayal.personalized(quests());
                 d2d::log::info("Betrayal of Harrogath: Anya personalized the {}", actor->held->code);
+                put_back();
                 return answer(true);
             }
             if (service_npc != d2d::rules::monster_ids::kCharsi) return true;
@@ -286,6 +321,7 @@ auto World::deal(const Command& command, std::uint32_t now_ms) -> bool {
             actor->held = std::move(made);
             tools.imbued(quests());
             d2d::log::info("Tools of the Trade: Charsi imbued the {}", actor->held->code);
+            put_back();
             return answer(true);
         }
         if (const auto* run = std::get_if<cmd::Run>(&command)) { actor->running = run->running; return true; }
@@ -404,14 +440,18 @@ auto World::apply(const Command& command, std::uint32_t now_ms) -> void {
             auto& header = actor->character.header;
             if (header.right_skill == std::uint32_t(kResurrectSkill)) header.right_skill = actor->right_before;   // co-op's Resurrect stays with no set
             header.weapon_set ^= 1;
-            const auto kept = [&](std::uint32_t id, bool left, std::uint32_t current) {
+            // FUN_00647960 on the hands now worn (0x561a1f / 0x561a8e): its status 7 (level 0) or
+            // 2 (the weapon gate, Throw's too: skill_refused) gives way.
+            const auto usable = [&](std::uint32_t id, bool left) {
                 const auto* skill = game_data->skills.get(int(id));
-                return skill && !skill->passive && (!left || skill->leftskill) && skill_level(*game_data, actor->character, int(id), {}) > 0 ? id : current;
+                return skill && !skill->passive && (!left || skill->leftskill) && skill_level(*game_data, actor->character, int(id), {}) > 0
+                    && !skill_refused(*game_data, actor->character, int(id));
             };
             std::swap(header.left_skill, header.left_swap);
             std::swap(header.right_skill, header.right_swap);
-            header.left_skill = kept(header.left_skill, true, header.left_swap);
-            header.right_skill = kept(header.right_skill, false, header.right_swap);
+            header.left_skill = usable(header.left_skill, true) ? header.left_skill : header.left_swap;
+            if (usable(header.right_skill, false)) right_skill_set(*actor, int(header.right_skill));   // FUN_005701b0 at 0x561aa9
+            else header.right_skill = header.right_swap;
             const auto* right = game_data->skills.get(int(header.right_skill));
             actor->aura = right && right->aura ? int(header.right_skill) : 0;
             return;
@@ -420,6 +460,7 @@ auto World::apply(const Command& command, std::uint32_t now_ms) -> void {
             if (select->skill == kResurrectSkill && (select->left || players.size() < 2)) return;   // the right button's, in co-op
             if (select->skill == kResurrectSkill && actor->character.header.right_skill != std::uint32_t(kResurrectSkill)) actor->right_before = actor->character.header.right_skill;
             (select->left ? actor->character.header.left_skill : actor->character.header.right_skill) = std::uint32_t(select->skill);
+            if (!select->left) right_skill_set(*actor, select->skill);   // FUN_005701b0 at 0x54bee4
             if (!select->left) if (const auto* skill = game_data->skills.get(select->skill)) actor->aura = skill->aura ? select->skill : 0;
             return;
         }
@@ -637,6 +678,7 @@ auto World::apply(const Command& command, std::uint32_t now_ms) -> void {
                 return;
             }
             actor->player.path.clear();                                             // a click: a new path (FUN_006503f0 re-plans only a moved unit's)
+            actor->walk_pending = true;                                             // FUN_00548a50 sets it with the walk (LAB_00641f37)
             actor->attack_mon = actor->pick_item = -1;
             actor->take_warp = -1;                                                  // a click on a warp: go through it
             for (std::size_t i = 0; i < level->warps.size(); ++i)
@@ -717,14 +759,37 @@ auto World::apply(const Command& command, std::uint32_t now_ms) -> void {
         // path"); the hover is FUN_00465c60's.
         const auto* target = monster_index >= 0 ? &fight.monsters[std::size_t(monster_index)] : nullptr;
         const bool live = target && target->targetable() && !target->ally_not_interact(*game_data, level->id);
+        // Attack at a spot (the click's FUN_00461700(0) -> C->S 0x05 / 0x08 -> FUN_00549ad0): its start
+        // (srvstfunc 1, FUN_0056ca40) asks for no target, only a bow's ammo, so the player swings where
+        // it stands, turned to the spot; the do (FUN_0056f070) has no unit to hit. A bow's or a thrown
+        // weapon's goes as its missile (cast_missile). Only with no unit named: the client's null target
+        // (the ground, shift); a held click on a converted monster walks (cursor-units.md).
+        // ponytail: the click's own pick of an enemy by the spot (Skills.txt SearchEnemyXY, FUN_00467880)
+        // isn't made, and another melee skill at a spot (Bash with shift) isn't swung: their starts aren't traced.
+        const auto attack_spot = [&] {
+            const auto* attack = game_data->skills.get(0);
+            actor->interact_npc = actor->pick_item = -1;
+            if (attack && fight.missile_skill(*attack)) {
+                if (fight.cast_missile(0, use_skill.x, use_skill.y, now_ms)) actor->player.walking = false;
+                return;
+            }
+            if (actor->pmode >= 0 || fight.dead()) return;
+            actor->attack_mon = -1;
+            actor->attack_skill = 0;
+            actor->attack_charge = {};
+            actor->player.walking = false;
+            actor->player.dir = direction16(use_skill.x - actor->player.x, use_skill.y - actor->player.y);
+            (void)fight.start_swing(now_ms);
+        };
         if (skill && !skill->in_town && !in_moor) {
             if (fight.sound_rng(2)) class_cue("not_in_town_1", now_ms);
             else class_cue("not_in_town_2", now_ms);
-        } else if (!live && fight.ask(use_skill.skill, now_ms) != use_skill.skill) {
+        } else if (const int goes = live ? use_skill.skill : fight.ask(use_skill.skill, now_ms); goes != use_skill.skill) {
             // FUN_004610c0 at the click (FUN_004625b0's calls); at a unit it asks once in reach
             // (FUN_00461c70, or the walk's end: start_swing). FUN_00467880 only picks the target.
-            // ponytail: Attack in its place at a spot (FUN_00461700(0)) isn't swung.
+            // Attack in the skill's place (AttackNoMana) goes at the spot; a refusal swings nothing.
             actor->attack_mon = -1;
+            if (goes == 0 && use_skill.unit < 0) attack_spot();
         } else if (skill && self_cast(*skill)) {                                            // Holy Shield: where the player stands
             if (fight.cast(use_skill.skill, now_ms)) { actor->player.walking = false; actor->interact_npc = -1; }
         } else if (skill && skill->srvdofunc == ServerDoFunction::kWhirlwind && monster_index < 0) {                      // Whirlwind to that point (FUN_005d8f50)
@@ -742,6 +807,8 @@ auto World::apply(const Command& command, std::uint32_t now_ms) -> void {
         } else if (skill && !live && fight.summon_skill(*skill) && in_moor) {        // Raise Skeleton: the corpse there
             actor->interact_npc = actor->pick_item = -1;
             if (fight.cast_summon(use_skill.skill, use_skill.x, use_skill.y, now_ms)) actor->player.walking = false;
+        } else if (skill && !live && use_skill.skill == 0 && use_skill.unit < 0) {
+            attack_spot();
         } else if (live) {                                                   // walk up to it, then attack
             actor->target_x = use_skill.x; actor->target_y = use_skill.y;
             actor->player.walking = true;

@@ -208,6 +208,7 @@ void load_monsters(GameData& game_data, const d2d::mpq::Stack& mpqs) {
         type_info.sound = text("MonSound");
         type_info.usound = text("UMonSound");
         type_info.threat = num(text("threat")); type_info.switch_ai = text("switchai") == "1"; type_info.damage_regen = num(text("damageregen")); type_info.interact = text("interact") == "1";
+        type_info.no_aura = text("noaura") == "1";
         type_info.montype = text("MonType");
         if (const auto found = monprop_rows.find(std::string(text("MonProp"))); found != monprop_rows.end())
             for (int difficulty = 0; difficulty < 3; ++difficulty)
@@ -580,7 +581,7 @@ void load_skills(GameData& game_data, const d2d::mpq::Stack& mpqs) {
         }
         skill_row.auralen = calc("auralencalc"); skill_row.aurarange = calc("aurarangecalc"); skill_row.aura_filter = std::uint32_t(number("aurafilter"));
         skill_row.srvoverlay = text("srvoverlay");
-        skill_row.aurastate = text("aurastate"); skill_row.auratarget = text("auratargetstate"); skill_row.prgdam = number("prgdam"); skill_row.seqnum = number("seqnum");
+        skill_row.aurastate = text("aurastate"); skill_row.auratarget = text("auratargetstate"); skill_row.prgdam = number("prgdam"); skill_row.seqnum = number("seqnum"); skill_row.seqtrans = text("seqtrans");
         for (int i = 0; i < 3; ++i) {
             skill_row.prgfunc[std::size_t(i)] = d2d::rules::ServerDoFunction(number("srvprgfunc" + std::to_string(i + 1)));
             skill_row.prgcalc[std::size_t(i)] = calc("prgcalc" + std::to_string(i + 1));
@@ -1000,6 +1001,7 @@ void load_tables(GameData& game_data, const d2d::mpq::Stack& mpqs) {
                 if (table == &weapons) { base.min_misdam = number("minmisdam"); base.max_misdam = number("maxmisdam"); }
                 base.gem_sockets = number("gemsockets");
                 base.hit_class = table == &weapons ? d2d::rules::sound_ids::hit_class(table->get(row, "hit class")) : 0;
+                if (table == &weapons) base.wclass = std::string(table->get(row, "wclass"));
                 base.auto_prefix = table == &misc ? 0 : number("auto prefix");
                 base.nightmare_upgrade = std::string(table->get(row, "NightmareUpgrade"));
                 base.hell_upgrade = std::string(table->get(row, "HellUpgrade"));
