@@ -15,6 +15,11 @@ playable with buttons or touch. Install it from the
 QR code with FBI. You bring your own Diablo II + Lord of Destruction files. Setup, controls and
 building are in [platform/3ds/README.md](platform/3ds/README.md).
 
+<a href="https://github.com/ratherDashing/d2decomped/releases/download/3ds-nightly/sanctuary-pocket.cia"><img src="https://github.com/ratherDashing/d2decomped/releases/download/3ds-nightly/sanctuary-pocket-qr.png" alt="QR code of the newest Sanctuary Pocket CIA" width="180"></a>
+
+Scan this with FBI (Remote Install > Scan QR Code) to install the newest build, or
+[download the CIA](https://github.com/ratherDashing/d2decomped/releases/download/3ds-nightly/sanctuary-pocket.cia).
+
 Feedback is very welcome: [open an issue](https://github.com/ratherDashing/d2decomped/issues/new/choose)
 with what happened and your `/3ds/d2d/d2d.log`. Everything else in this README is the upstream
 project's, [psi29a/d2decomped](https://github.com/psi29a/d2decomped), which this fork follows.

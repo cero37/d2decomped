@@ -12,6 +12,8 @@ Nintendo, and it contains **no game data**: you supply your own Diablo II + Lord
 
 ## Install
 
+<a href="https://github.com/ratherDashing/d2decomped/releases/download/3ds-nightly/sanctuary-pocket.cia"><img src="https://github.com/ratherDashing/d2decomped/releases/download/3ds-nightly/sanctuary-pocket-qr.png" alt="QR code of the newest CIA" width="180"></a>
+
 1. **Get the CIA.** Scan the QR code on the
    [latest 3ds build](https://github.com/ratherDashing/d2decomped/releases/tag/3ds-nightly) with FBI
    (Remote Install > Scan QR Code), or download `sanctuary-pocket.cia` from there and install it with
