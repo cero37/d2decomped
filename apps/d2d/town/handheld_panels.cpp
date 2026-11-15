@@ -253,8 +253,11 @@ auto Town::handheld_map_labels() -> void {
     // The Den of Evil's last few (five or fewer, as its count says): a red dot each. On the console a player hunted the
     // last two for four minutes and gave up (the hardware log, 2026-11-15).
     if (g_world_only && level && level->id == d2d::rules::DenQuest::kDen) {
+        // Only once the quest log counts them (state 3/4: every room filled): before that the rooms not come up yet
+        // hid the rest, and four dots showed then vanished as six came up (round 20).
+        const int log_state = view.quest_log.size() > 1 ? int(view.quest_log[1]) : 0;
         const auto alive = std::ranges::count_if(view.monsters, [](const auto& monster) { return monster.alive(); });
-        if (alive > 0 && alive <= 5)
+        if ((log_state == 3 || log_state == 4) && alive > 0 && alive <= 5)
             for (const auto& monster : view.monsters)
                 if (monster.alive()) g_map_people.push_back({ monster.unit.x + float(level->world_x), monster.unit.y + float(level->world_y), {}, false, true });
     }
