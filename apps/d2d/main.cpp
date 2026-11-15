@@ -757,6 +757,8 @@ int run_windowed(std::vector<std::uint8_t>& framebuffer,
     // beachball suspect; that beachball was the pan-left float loop.
     bool text_active = false;
     Town town(scene ? &*scene : nullptr, character, g_start_cam_x, g_start_cam_y);
+    // A handheld: a level build out of memory lets every level far behind go first (World::let_far_levels_go).
+    if (std::getenv("D2D_HANDHELD")) d2d::game::g_let_levels_go = [&town] { town.world.let_far_levels_go(std::uint32_t(SDL_GetTicks()), true); };
     town.set_pad_config(g_pad_config);
     town.touch_enabled = g_touch_controls;
     if (g_lan_host_port > 0) {
@@ -1999,6 +2001,7 @@ int run_windowed(std::vector<std::uint8_t>& framebuffer,
                     csu.selected = scene->saves.empty() ? -1 : 0;
                     csu.scroll = 0;
                     g_aim_hero_pick = true;
+                    if (std::getenv("D2D_HANDHELD")) scene->let_levels_go();   // the game's levels: the menus need the memory
                 }
                 // Classic, Diablo dead with bit 13 (DAT_007a0604): leaving plays
                 // ACT04END, then the endgame screen (FUN_0044f360 -> FUN_00482ef0);

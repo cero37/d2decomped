@@ -1442,6 +1442,7 @@ void install_level(const GameData& game_data, int id, std::unique_ptr<Level> lev
             other_level->nearby.push_back({ level.get(), level->world_x - other_level->world_x, level->world_y - other_level->world_y });
         }
     }
+    if (!level) { d2d::log::warn("level {}: not built (it's tried again when next wanted)", id); return; }   // a null kept here was never built again (a level gone back to stayed out of reach)
     game_data.levels[id] = std::move(level);
 }
 
@@ -1476,6 +1477,17 @@ void GameData::want_level(int id) const {
     }));
 }
 
+void GameData::let_levels_go() const {
+    if (builder) {
+        for (auto& [id, job] : builder->jobs) job.wait();
+        builder->jobs.clear();
+    }
+    if (levels.empty()) return;
+    d2d::log::info("memory: the game's {} levels let go", levels.size());
+    town.nearby.clear();
+    levels.clear();
+}
+
 void GameData::poll_levels() const {
     if (!builder) return;
     for (auto job = builder->jobs.begin(); job != builder->jobs.end();)
@@ -1497,6 +1509,7 @@ const Level* GameData::level(int id) const {
         while (job->second.wait_for(std::chrono::milliseconds(100)) != std::future_status::ready) g_level_wait(id);
     auto level = finish_job(job->second, id);                    // built now, or waited for
     if (!level && g_build_out_of_memory && g_free_memory) {     // what can be had again let go, and once more
+        if (g_let_levels_go) g_let_levels_go();                  // the levels far behind first (World::let_far_levels_go)
         g_free_memory();
         try { level = build_level(*this, *builder, id); d2d::log::info("level {}: built after giving memory back", id); }
         catch (const std::exception& error) { d2d::log::warn("level {}: again: {}", id, error.what()); }

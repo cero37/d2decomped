@@ -685,6 +685,9 @@ struct GameData {
     [[nodiscard]] const Level* town_of(int id) const { return level(d2d::rules::level_ids::kActTowns[std::size_t(d2d::rules::level_ids::act_of(id))]); }
     void want_level(int id) const;
     void poll_levels() const;
+    // A game over (a handheld): its levels let go now, not when the next starts (the menus sat at 95% heap and could
+    // not read their pictures back). The town stays.
+    void let_levels_go() const;
     // SuperUniques.txt (without its Expansion row): name, MonStats row of
     // its Class, minions.
     struct SuperUnique { std::string name; int type = -1, min_grp = 0, max_grp = 0; std::vector<int> mods; std::array<std::string, 3> treasure_classes;
@@ -1323,6 +1326,9 @@ inline bool g_build_nearby = true;
 // the Blood Moor, the Cold Plains and a cave the heap reached 96% (the emulator's scripted runs, round 7).
 inline std::atomic<int> g_heap_percent{ 0 };
 inline constexpr int kPrebuildHeapPercent = 75;
+// Set by the game's World (a handheld): every level far behind let go now, for a build that ran out of memory.
+inline std::function<void()> g_let_levels_go;
+inline constexpr int kLetGoHeapPercent = 85;      // World::let_far_levels_go: above it, the level longest behind goes
 // Called every tenth of a second while GameData::level waits for a build (the level's id): a handheld shows Loading.
 inline std::function<void(int)> g_level_wait;
 // Gives back what can be had again (decoded tiles, animations off screen): a build that ran out of memory then tries once more.

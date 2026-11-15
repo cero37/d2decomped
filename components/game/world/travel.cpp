@@ -38,6 +38,69 @@
 
 namespace d2d::game {
 
+// A handheld's memory: every level built was kept, and a long session ran out (a crash in Tristram, 97% heap: the
+// emulator's scripted runs). Above kLetGoHeapPercent, every 2 s, the level the player left longest ago goes, if
+// nothing holds it: not the player's level nor the town nor one next to it, no corpse, body, portal, fire, trap or
+// treasure on it, no item left on its floor. Its monsters, missiles and objects' state go with it; going back
+// builds it again from the map seed (the same rooms) with its monsters and objects new.
+auto World::let_far_levels_go(std::uint32_t now_ms, bool all) -> void {
+    if (!level || !game_data) return;
+    level_seen_ms[level->id] = now_ms;
+    if (g_build_nearby) return;
+    if (!all) {
+        if (g_heap_percent.load(std::memory_order_relaxed) < kLetGoHeapPercent) return;
+        static std::uint32_t tried_at = 0;
+        if (now_ms - tried_at < 2000) return;
+        tried_at = now_ms;
+    }
+  for (bool more = true; more;) {
+    more = false;
+    const auto held = [&](const Level* other) {
+        if (other == level || other == &game_data->town || other == izual_level || other == gidbinn_level) return true;
+        if (other == fight.mon_level || other == loot.ground_level || other == fana.first || other == fight.spawning.room_level) return true;
+        for (const auto& near : level->nearby) if (near.level == other) return true;
+        for (const auto& player : players) {
+            if (player->on_level == other || (player->body && player->body->level == other)) return true;
+            for (const auto& corpse : player->corpses) if (corpse.level == other) return true;
+        }
+        for (const auto& fire : fires) if (fire.level == other) return true;
+        for (const auto& gate : portal) if (gate.level == other) return true;
+        for (const auto& trap : traps) if (trap.level == other) return true;
+        for (const auto& box : treasure) if (box.level == other) return true;
+        if (const auto floor = loot.kept.find(other); floor != loot.kept.end() && !floor->second.empty()) return true;
+        return false;
+    };
+    const Level* oldest = nullptr;
+    int oldest_id = 0;
+    std::uint32_t oldest_ms = 0;
+    for (const auto& [id, built] : game_data->levels) {
+        if (!built || held(built.get())) continue;
+        const auto seen = level_seen_ms.find(id);
+        const std::uint32_t at = seen != level_seen_ms.end() ? seen->second : 0;
+        if (!oldest || std::int32_t(at - oldest_ms) < 0) { oldest = built.get(); oldest_id = id; oldest_ms = at; }
+    }
+    if (!oldest) return;
+    more = all;
+    const std::string name = oldest->name;
+    other_npcs.erase(oldest);
+    objects_inited.erase(oldest);
+    loot.kept.erase(oldest);
+    fight.kept.erase(oldest);
+    fight.kept_missiles.erase(oldest);
+    fight.spawning.levels.erase(oldest);                 // its rooms in play: walked as rooms come up (a use after free there corrupted the heap)
+    std::erase_if(wirt_gold, [&](const auto& entry) { return entry.first.first == oldest; });
+    std::erase_if(fissures, [&](const auto& entry) { return entry.first.first == oldest; });
+    std::erase_if(operated, [&](const auto& entry) { return entry.first.first == oldest; });
+    std::erase_if(doors, [&](const auto& entry) { return entry.first.first == oldest; });
+    if (wanted_near == oldest) wanted_near = nullptr;
+    for (auto& [id, built] : game_data->levels) if (built) std::erase_if(built->nearby, [&](const Level::Near& near) { return near.level == oldest; });
+    std::erase_if(game_data->town.nearby, [&](const Level::Near& near) { return near.level == oldest; });
+    game_data->levels.erase(oldest_id);
+    level_seen_ms.erase(oldest_id);
+    d2d::log::info("memory: {} let go (heap at {}%; built again if it's gone back to)", name, g_heap_percent.load(std::memory_order_relaxed));
+  }
+}
+
 auto World::cross_level() -> void {
         const float world_x = float(level->world_x) + actor->target_x, world_y = float(level->world_y) + actor->target_y;
         // Nothing built ahead (a handheld): the outdoor level the player is walking up to starts building once they are

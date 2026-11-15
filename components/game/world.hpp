@@ -1037,6 +1037,10 @@ struct World {
     // (Fight::world); crossing into the next level or through a warp;
     // potions and regeneration.
     const Level* wanted_near = nullptr;               // whose neighbours were last asked for
+    // A handheld's memory: a level far behind let go when the heap is high (World::let_far_levels_go). The level built
+    // again if it's gone back to; its monsters and objects then start over. When each level was last the player's.
+    std::unordered_map<int, std::uint32_t> level_seen_ms;
+    void let_far_levels_go(std::uint32_t now_ms, bool all = false);   // all: every level that may go, now (a build out of memory)
     d2d::rules::Day day;
     std::uint32_t day_at = 0;                         // when the day last stepped
     void tick(std::span<const Order> orders, std::uint32_t now_ms, std::uint32_t last_ms);

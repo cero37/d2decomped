@@ -236,6 +236,7 @@ auto Town::handheld_sell(int mouse_x, int mouse_y) -> bool {
 
 auto Town::handheld_map_labels() -> void {
     static const Level* made_for = nullptr;
+    static int made_for_id = -1;                       // with its id: a level let go and built again may come back at the same address
     g_map_people.clear();
     if (g_world_only && scene && level)   // each frame: the camp's people walk about; and any level's waypoint
         for (std::size_t i = 0; i < level->npcs.size(); ++i) {
@@ -250,8 +251,9 @@ auto Town::handheld_map_labels() -> void {
             else g_map_people.push_back(std::move(label));
         }
     if (!g_world_only || !scene || !level || !world.game_data) { g_map_labels.clear(); made_for = nullptr; return; }
-    if (made_for == level) return;
+    if (made_for == level && made_for_id == level->id) return;
     made_for = level;
+    made_for_id = level->id;
     g_map_labels.clear();
     const auto name_of = [&](int id) -> std::string {
         const auto found = scene->level_names.find(id);
