@@ -1902,10 +1902,16 @@ int run_windowed(std::vector<std::uint8_t>& framebuffer,
                 town.update(framebuffer, mouse, keys_this_frame, screen, audio, now_ms, last_ms);
                 // A handheld's heap past 80%: the caches give back early, every 3 s, not only once a build has failed
                 // (from the fifth outdoor area each build ran out and some tiles were never read again: the scripted runs).
-                if (static std::uint32_t trimmed_at = 0; d2d::game::g_free_memory && d2d::game::g_heap_percent.load(std::memory_order_relaxed) >= 80 && now_ms - trimmed_at > 3000) {
+                // Lightly: half the decoded tiles' budget and animations idle 5 s (all of both every 3 s made the view
+                // decode its tiles again: stutter, a tester's round 15). The whole lot only once a build has failed.
+                if (static std::uint32_t trimmed_at = 0; scene && d2d::game::g_heap_percent.load(std::memory_order_relaxed) >= 80 && now_ms - trimmed_at > 3000) {
                     trimmed_at = now_ms;
-                    d2d::log::info("memory: heap at {}%, caches trimmed", d2d::game::g_heap_percent.load(std::memory_order_relaxed));
-                    d2d::game::g_free_memory();
+                    const auto before = std::size_t(mallinfo().uordblks);
+                    d2d::dt1::File::trim(d2d::dt1::File::default_budget() / 2);
+                    scene->trim_anims(std::uint32_t(SDL_GetTicks()), 5000);
+                    static int said = 0;
+                    if (said++ % 10 == 0) d2d::log::info("memory: heap at {}%, caches trimmed ({} KiB back; said every tenth time)",
+                                                         d2d::game::g_heap_percent.load(std::memory_order_relaxed), (before - std::min(before, std::size_t(mallinfo().uordblks))) / 1024);
                 }
                 // A handheld arriving in another act's town: the game is saved and entered again
                 // there, as Save and Exit then the same character would, so the act left behind

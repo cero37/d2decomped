@@ -298,6 +298,8 @@ struct Town {
         int slide = 0;                            // the turn, in eighths, now added to the stick's way
         int slide_good = 0;                       // checks the turned walk has got somewhere: at 3, the straight way is tried again
         float slide_dir_x = 0, slide_dir_y = 0;   // the stick's way the turn was found for
+        int steer = 0;                           // a handheld: the look-ahead's turn (in 45 degrees; 0 none) and the side it keeps
+        int steer_side = 0;
     };
     PadPlayer pad;                                // the first player's
     using Send = std::function<void(const Command&)>;

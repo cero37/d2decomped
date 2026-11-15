@@ -268,7 +268,28 @@ auto Town::pad_walk(PadPlayer& player_pad, const UnitState& unit, bool dead, boo
             const std::uint32_t now = std::uint32_t(SDL_GetTicks());
             const float length = std::hypot(step.x, step.y);
             const float dir_x = length > 0 ? step.x / length : 0, dir_y = length > 0 ? step.y / length : 0;
-            if (!player_pad.walking || dir_x * player_pad.slide_dir_x + dir_y * player_pad.slide_dir_y < 0.9f) {
+            // A handheld: look ahead on the walk grid. The way the stick points blocked within a cell, the nearest free way
+            // (45 degrees, then 90) on the side last taken: the hero follows a fence or a cave wall instead of stopping at
+            // it (the stuck turns below went back to the stick's way after a second and hit the wall again: rounds 13, 15).
+            int steer = 0;
+            if (g_world_only && level && length > 0) {
+                const auto clear = [&](float x, float y) { return !level->blocked(unit.x + x * 0.5f, unit.y + y * 0.5f) && !level->blocked(unit.x + x * 1.f, unit.y + y * 1.f); };
+                if (!clear(dir_x, dir_y)) {
+                    const int side = player_pad.steer_side != 0 ? player_pad.steer_side : 1;
+                    for (const int turn : { side, -side, 2 * side, -2 * side }) {
+                        const float angle = float(turn) * 0.785398f, c = std::cos(angle), sn = std::sin(angle);
+                        const float x = dir_x * c - dir_y * sn, y = dir_x * sn + dir_y * c;
+                        if (!clear(x, y)) continue;
+                        steer = turn;
+                        player_pad.steer_side = turn > 0 ? 1 : -1;
+                        step = pad::WorldStep{ x * length, y * length };
+                        break;
+                    }
+                } else player_pad.steer_side = 0;
+            }
+            if (steer != player_pad.steer) { fresh = true; player_pad.steer = steer; }
+            if (steer != 0) { player_pad.slide = 0; player_pad.progress_x = unit.x; player_pad.progress_y = unit.y; player_pad.progress_at = now; }   // steering: the stuck turns wait
+            else if (!player_pad.walking || dir_x * player_pad.slide_dir_x + dir_y * player_pad.slide_dir_y < 0.9f) {
                 player_pad.slide = 0; player_pad.slide_dir_x = dir_x; player_pad.slide_dir_y = dir_y;
                 player_pad.progress_x = unit.x; player_pad.progress_y = unit.y; player_pad.progress_at = now;
             } else if (now - player_pad.progress_at >= 350) {

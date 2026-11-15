@@ -1404,9 +1404,9 @@ std::unique_ptr<Level> build_level(const GameData& game_data, GameData::LevelBui
         for (const auto& archive : level->dt1s) tiles += archive.size();
         for (const auto& cell : level->picks) { ++cells; picks += cell.size(); }
         for (const auto& room : level->room_tiles) room_tiles += room[0].size() + room[1].size();
-        d2d::log::info("  {} memory: heap +{} KiB (racy: the main thread allocates too); {} DT1 files, {} tile records ({} B each); "
+        d2d::log::info("  {} memory: heap {:+} KiB (racy: the main thread allocates too); {} DT1 files, {} tile records ({} B each); "
                        "{} cells, {} picks ({} B each); {} room tiles; walk grid {} KiB; {} lookups",
-                       level->name, (std::size_t(mallinfo().uordblks) - heap_before) / 1024, level->dt1s.size(), tiles, sizeof(d2d::dt1::Tile),
+                       level->name, (std::int64_t(mallinfo().uordblks) - std::int64_t(heap_before)) / 1024, level->dt1s.size(), tiles, sizeof(d2d::dt1::Tile),
                        cells, picks, sizeof(Level::Pick), room_tiles, level->walk.size() * 2 / 1024, level->tile_lookup.size());
     }
     return level;
