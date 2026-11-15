@@ -2005,7 +2005,11 @@ int run_windowed(std::vector<std::uint8_t>& framebuffer,
                     csu.selected = scene->saves.empty() ? -1 : 0;
                     csu.scroll = 0;
                     g_aim_hero_pick = true;
-                    if (std::getenv("D2D_HANDHELD")) scene->let_levels_go();   // the game's levels: the menus need the memory
+                    if (std::getenv("D2D_HANDHELD")) {                       // the game's levels and caches: the menus need the memory
+                        scene->let_levels_go();                              // (the hero list sat at 81-85 MB after a long game: round 10)
+                        if (d2d::game::g_free_memory) d2d::game::g_free_memory();
+                        scene->trim_anims(std::uint32_t(SDL_GetTicks()), 0);
+                    }
                 }
                 // Classic, Diablo dead with bit 13 (DAT_007a0604): leaving plays
                 // ACT04END, then the endgame screen (FUN_0044f360 -> FUN_00482ef0);

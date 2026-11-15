@@ -273,10 +273,12 @@ auto Town::pad_walk(PadPlayer& player_pad, const UnitState& unit, bool dead, boo
             // it (the stuck turns below went back to the stick's way after a second and hit the wall again: rounds 13, 15).
             int steer = 0;
             if (g_world_only && level && length > 0) {
-                const auto clear = [&](float x, float y) { return !level->blocked(unit.x + x * 0.5f, unit.y + y * 0.5f) && !level->blocked(unit.x + x * 1.f, unit.y + y * 1.f); };
+                // Just ahead only: looking a whole cell on saw a post past a gate's opening and turned the walk away from
+                // the way through (the camp's south exit held a tester's hero: the scripted runs, round 10).
+                const auto clear = [&](float x, float y) { return !level->blocked(unit.x + x * 0.4f, unit.y + y * 0.4f); };
                 if (!clear(dir_x, dir_y)) {
                     const int side = player_pad.steer_side != 0 ? player_pad.steer_side : 1;
-                    for (const int turn : { side, -side, 2 * side, -2 * side }) {
+                    for (const int turn : { side, -side, 2 * side, -2 * side, 3 * side, -3 * side }) {   // 135: out of a notch between posts
                         const float angle = float(turn) * 0.785398f, c = std::cos(angle), sn = std::sin(angle);
                         const float x = dir_x * c - dir_y * sn, y = dir_x * sn + dir_y * c;
                         if (!clear(x, y)) continue;
@@ -295,10 +297,10 @@ auto Town::pad_walk(PadPlayer& player_pad, const UnitState& unit, bool dead, boo
             } else if (now - player_pad.progress_at >= 350) {
                 const bool moved = std::hypot(unit.x - player_pad.progress_x, unit.y - player_pad.progress_y) >= 0.4f;
                 if (!moved) {
-                    static constexpr int kTurns[] = { 0, 1, -1, 2, -2 };
+                    static constexpr int kTurns[] = { 0, 1, -1, 2, -2, 3, -3 };
                     int at = 0;
-                    while (at < 5 && kTurns[at] != player_pad.slide) ++at;
-                    player_pad.slide = kTurns[(at + 1) % 5];
+                    while (at < 7 && kTurns[at] != player_pad.slide) ++at;
+                    player_pad.slide = kTurns[(at + 1) % 7];
                     d2d::log::info("pad walk: stuck at {:.1f}, {:.1f}; turning {} degrees", unit.x, unit.y, player_pad.slide * 45);
                     fresh = true;                             // the turned walk goes out fresh
                     player_pad.slide_good = 0;
