@@ -20,6 +20,7 @@
 #include <weather.hpp>
 
 #include <algorithm>
+#include <optional>
 #include <array>
 #include <cmath>
 #include <cstddef>
@@ -438,6 +439,11 @@ void render_world(std::vector<std::uint8_t>& framebuffer,
     std::ranges::sort(order, {}, [](const Unit* unit) { return unit->x + unit->y; });
     std::size_t next_unit = 0;
     const auto& upal0 = scene.act_pal.entries().empty() ? scene.pal : scene.act_pal;
+    // A handheld's hero, as drawn this frame: drawn again at half over everything at the end, so a hero behind a
+    // wagon, a tent or a palisade shows through it (the screen is small and the hero lost there: the emulator play
+    // test). Over the hero's own pixels the half blend changes nothing; over what hides it, it shows a ghost.
+    struct HeroDraw { const Scene::PlayerAnim* anim; d2d::palette::Palette pal; int dir; std::uint32_t at; int x, y; };
+    std::optional<HeroDraw> hero_draw;
     auto draw_units_through = [&](int diag) {
         for (; next_unit < order.size() && diag_of(order[next_unit]) <= diag; ++next_unit) {
             const Unit& unit = *order[next_unit];
@@ -532,7 +538,10 @@ void render_world(std::vector<std::uint8_t>& framebuffer,
                     const bool blank = past_cof(unit, elapsed);
                     if (Scene::g_anim_async && whole && !blank) last_whole[unit.npc] = { unit.anim, elapsed, unit.hold };
                     if (!blank && unit.spirit) draw_composite(framebuffer, *unit.anim, tinted(upal, 205, 230, 255), unit.dir, elapsed, anchor_x, anchor_y, 4);   // half, pale
-                    else if (!blank) draw_composite(framebuffer, *unit.anim, upal, unit.dir, elapsed, anchor_x, anchor_y);
+                    else if (!blank) {
+                        draw_composite(framebuffer, *unit.anim, upal, unit.dir, elapsed, anchor_x, anchor_y);
+                        if (g_world_only && unit.npc == -1 && !unit.object) hero_draw = HeroDraw{ unit.anim, upal, unit.dir, elapsed, anchor_x, anchor_y };
+                    }
                     if (!blank && hovered && unit.name && !unit.name->empty()) bounds = composite_bounds(*unit.anim, unit.dir, elapsed, anchor_x, anchor_y);
                 }
             }
@@ -608,6 +617,7 @@ void render_world(std::vector<std::uint8_t>& framebuffer,
         else if (light) blit_dt1_tile_lit(framebuffer, tile, *light, iso_x - kIsoW / 2, iso_y - (std::abs(tile.height) - kIsoH), roof.cell_x, roof.cell_y, 255, cutout);
         else blit_dt1_tile(framebuffer, tile, pal, iso_x - kIsoW / 2, iso_y - (std::abs(tile.height) - kIsoH), 255, cutout);
     }
+    if (hero_draw) draw_composite(framebuffer, *hero_draw->anim, hero_draw->pal, hero_draw->dir, hero_draw->at, hero_draw->x, hero_draw->y, 4);
 }
 
 bool blit_dcc_frame(std::vector<std::uint8_t>& framebuffer,
