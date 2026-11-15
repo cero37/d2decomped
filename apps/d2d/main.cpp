@@ -1906,8 +1906,10 @@ int run_windowed(std::vector<std::uint8_t>& framebuffer,
                 // (from the fifth outdoor area each build ran out and some tiles were never read again: the scripted runs).
                 // Monsters' frames: 10 MiB, 6 MiB when the heap's past 80% (a fight's ~9 MiB at 6 was let go and read again
                 // every second: 1 fps).
-                if (std::getenv("D2D_HANDHELD") && scene)
-                    scene->cap_anims(std::uint32_t(SDL_GetTicks()), std::size_t(d2d::game::g_heap_percent.load(std::memory_order_relaxed) >= 80 ? 6 : 10) << 20);
+                // Only when the heap's high: a big pack's 11-14 MiB in use, capped at 10, was let go and read again every
+                // second (a pack missing for a frame, 9-13 fps: the scripted runs, round 11).
+                if (std::getenv("D2D_HANDHELD") && scene && d2d::game::g_heap_percent.load(std::memory_order_relaxed) >= 80)
+                    scene->cap_anims(std::uint32_t(SDL_GetTicks()), std::size_t(8) << 20);
                 if (static std::uint32_t reported_at = 0; std::getenv("D2D_HANDHELD") && scene && now_ms - reported_at > 30000) {   // where the heap goes (play tests)
                     reported_at = now_ms;
                     d2d::log::info("memory: heap {}%; {}", d2d::game::g_heap_percent.load(std::memory_order_relaxed), scene->cache_report());

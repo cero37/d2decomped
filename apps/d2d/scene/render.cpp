@@ -147,7 +147,7 @@ void Scene::cap_anims(std::uint32_t now_ms, std::size_t budget) const {
     std::size_t freed = 0;
     for (const auto& [used, anim] : held) {
         if (total - freed <= budget) break;
-        if (now_ms - used < 500) break;                       // drawn just now: kept
+        if (now_ms - used < 4000) break;                      // drawn these 4 s (an attack's frames between swings): kept
         for (std::size_t layer = 0; layer < anim->decoded.size(); ++layer)
             if (!anim->path[layer].empty() && !anim->dropped[layer] && anim->dcc[layer].empty() && anim->decoded[layer].frames_per_direction() > 0) {
                 for (const auto& frame : anim->decoded[layer].frames()) freed += frame.pixels.size();
