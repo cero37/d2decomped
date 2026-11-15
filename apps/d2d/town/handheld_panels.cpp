@@ -232,6 +232,45 @@ auto Town::handheld_sell(int mouse_x, int mouse_y) -> bool {
     return true;
 }
 
+auto Town::handheld_map_labels() -> void {
+    static const Level* made_for = nullptr;
+    if (!g_world_only || !scene || !level || !world.game_data) { g_map_labels.clear(); made_for = nullptr; return; }
+    if (made_for == level) return;
+    made_for = level;
+    g_map_labels.clear();
+    const auto name_of = [&](int id) -> std::string {
+        const auto found = scene->level_names.find(id);
+        if (found == scene->level_names.end()) return {};
+        const auto text = lookup_string(*scene, std::string_view(found->second));
+        return text ? u16_to_latin1(*text) : found->second;
+    };
+    std::vector<int> led_to;
+    for (const auto& warp : level->warps) {
+        if (std::ranges::contains(led_to, warp.destination)) continue;
+        const std::string words = name_of(warp.destination);
+        if (words.empty()) continue;
+        led_to.push_back(warp.destination);
+        g_map_labels.push_back({ warp.x + float(level->world_x), warp.y + float(level->world_y), words });
+    }
+    // The act's levels this one borders (outdoors: walked into across the edge), labelled at the middle of the edge they share.
+    const int left = level->world_x, top = level->world_y, right = left + int(level->ds1.width()), bottom = top + int(level->ds1.height());
+    for (const auto& placed : world.game_data->layout_of(level->id)) {
+        if (placed.level == level->id || std::ranges::contains(led_to, placed.level) || placed.width <= 0) continue;
+        const int p_right = placed.x + placed.width, p_bottom = placed.y + placed.height;
+        float x = -1, y = -1;
+        if ((p_right == left || placed.x == right) && placed.y < bottom && p_bottom > top) {
+            x = float(p_right == left ? left : right); y = float(std::max(top, placed.y) + std::min(bottom, p_bottom)) / 2.f;
+        } else if ((p_bottom == top || placed.y == bottom) && placed.x < right && p_right > left) {
+            y = float(p_bottom == top ? top : bottom); x = float(std::max(left, placed.x) + std::min(right, p_right)) / 2.f;
+        }
+        if (x < 0) continue;
+        const std::string words = name_of(placed.level);
+        if (words.empty()) continue;
+        led_to.push_back(placed.level);
+        g_map_labels.push_back({ x, y, words });
+    }
+}
+
 auto Town::handheld_return_held() -> void {
     namespace d2s = d2d::d2s;
     if (!scene || !held || !g_auto_clicks.empty()) return;

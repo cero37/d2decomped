@@ -279,6 +279,22 @@ void draw_bottom_hud(std::vector<std::uint8_t>& framebuffer, const Scene& scene,
                     for (int e : { d, -d }) { const int px = mx + d, py = my + e / 2; if (px >= x0 && px <= x1 && py >= y0 && py <= y1) canvas.put(px, py, c[0], c[1], c[2]); }
             };
             for (const auto& other : map.marks) mark(other.x, other.y, { std::uint8_t(other.rgb[0]), std::uint8_t(other.rgb[1]), std::uint8_t(other.rgb[2]) });
+            // The ways out: a gold diamond and the place's name; one off the map sits on its edge, toward it.
+            const auto& small_font = scene.font_small;
+            for (const auto& label : g_map_labels) {
+                int mx = int(std::lround((label.x - label.y) * 80 / float(kDivisor))) - scroll_x + 8;
+                int my = int(std::lround((label.x + label.y) * 40 / float(kDivisor))) - scroll_y - 8;
+                const bool off = mx < x0 + 4 || mx > x1 - 4 || my < y0 + 4 || my > y1 - 4;
+                mx = std::clamp(mx, x0 + 4, x1 - 4);
+                my = std::clamp(my, y0 + 4, y1 - 4);
+                for (int d = -3; d <= 3; ++d)
+                    for (int e = -(3 - std::abs(d)); e <= 3 - std::abs(d); ++e) canvas.put(mx + d, my + e, 230, 190, 80);
+                const std::string words = off ? "to " + label.text : label.text;
+                const int width = small_font.measure(words);
+                const int tx = std::clamp(mx - width / 2, x0 + 1, x1 - width - 1);
+                const int ty = my + 6 + 10 <= y1 ? my + 5 : my - 15;
+                small_font.draw_tinted(framebuffer, kScreenWidth, kScreenHeight, pal, tx, ty, words, 240, 210, 120);
+            }
             mark(state.map_x, state.map_y, { 80, 120, 255 });
         }
     }

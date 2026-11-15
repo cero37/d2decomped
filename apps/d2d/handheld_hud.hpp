@@ -55,6 +55,10 @@ struct BottomSkills {
     std::uint32_t now = 0;
 };
 inline BottomSkills g_bottom_skills;
+// The level's ways out, on the second screen's map (Town::handheld_map_labels): where (act cells, as the map's
+// player) and where to. A new player found no way out of the camp (the emulator play test).
+struct MapLabel { float x = 0, y = 0; std::string text; };
+inline std::vector<MapLabel> g_map_labels;
 // Which of the list's nine buttons, or of the ring's `shown` icons, a touch at (x, y) is on; -1 for none.
 int bottom_strip_hit(int x, int y);
 int bottom_wheel_hit(int x, int y, int shown);

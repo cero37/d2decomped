@@ -469,6 +469,9 @@ struct Town {
     bool handheld_stash_move(int mouse_x, int mouse_y);
     // A store open: the bag's thing at (x, y) of the frame sold (the page's Sell button, the pad's Y); false: nothing there.
     bool handheld_sell(int mouse_x, int mouse_y);
+    // The level's ways out for the second screen's map (g_map_labels): its warps, and the edges it shares with the
+    // act's other levels. Made again when the level changes.
+    void handheld_map_labels();
     // A handheld: a thing left on the cursor with the bag shut (no way there to drop or walk) goes back
     // into the bag, which opens for it and shuts again (main.cpp, each frame).
     void handheld_return_held();

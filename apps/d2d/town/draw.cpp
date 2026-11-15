@@ -92,6 +92,7 @@ auto Town::open_menu(int npc) -> void {
 auto Town::draw(std::vector<std::uint8_t>& framebuffer, const Mouse& mouse, std::uint32_t frame_ms) -> void {
     if (g_world_only) pad_family = pad::Family::Nintendo;   // a handheld's buttons carry Nintendo's names (its layout: main.cpp, where d2d.cfg is read)
     present_skill_pad();
+    handheld_map_labels();
     if (g_world_only) {
         g_bottom_whole = game_menu.open || controls.open || npc_menu.npc >= 0 || speech.npc >= 0 || (view.pmode == kModeDD && !view.corpses.empty());
         g_bottom_panels = g_bottom_whole || left_panel_open() || inv_open || tree_open || help.open;   // Help: its own page there, any touch closes it

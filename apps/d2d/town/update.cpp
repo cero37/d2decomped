@@ -94,6 +94,9 @@ auto Town::update(std::vector<std::uint8_t>& framebuffer, const Mouse& frame_mou
             using namespace d2d::d2s;
             const std::int64_t most = std::max<std::int64_t>(character.stats.get(gold_box->mode == 4 ? kGoldBank : kGold), 0);
             const auto amount = [&] { return std::min<std::int64_t>(gold_box->amount.empty() ? 0 : std::stoll(gold_box->amount), most); };
+            // A handheld types the whole amount on the system keyboard at once: what it sends is the amount, not more
+            // digits after the old one (the emulator play test typed 20 and read 201).
+            if (g_world_only && !typed.empty() && std::ranges::any_of(typed, [](char c) { return c >= '0' && c <= '9'; })) gold_box->amount.clear();
             for (const char digit : typed) if (digit >= '0' && digit <= '9' && gold_box->amount.size() < 10) gold_box->amount.push_back(digit);
             bool ok = false, cancel = false;
             for (const auto key : keys_this_frame) {
@@ -350,6 +353,13 @@ auto Town::update(std::vector<std::uint8_t>& framebuffer, const Mouse& frame_mou
                 else if (gold_box) gold_box.reset();                          // then the gold box
                 else if (net_game && net_game->trade.state != 0) { if (net_game->trade.state == 2) net_game->trade_answer(false); else net_game->trade_cancel(); }
                 else if (waypoint.open) waypoint = {};
+                // A handheld on the bag's page with a store or the stash beside it: B goes back to that page first (it shut
+                // the whole window: the emulator play test). The page is the side the cursor is on: it moves across.
+                else if (g_world_only && !held && inv_open && (store.npc >= 0 || stash_open) && frame_mouse.x >= int(kScreenWidth) / 2 && g_auto_clicks.empty()) {
+                    const auto& stash = scene->stash_layout[character.expansion ? 1 : 0];
+                    if (store.npc >= 0) g_auto_clicks = { { 96 + 14, 123 + 14, false } };
+                    else g_auto_clicks = { { stash.grid_x + stash.box_w / 2, stash.grid_y + stash.box_h / 2, false } };
+                }
                 else if (store.npc >= 0) { send(cmd::CloseTrade{}); inv_open = false; } // the store first
                 else if (speech.npc >= 0) { speech = {}; menu_after_speech = -1; }   // then speech
                 else if (npc_menu.npc >= 0) npc_menu = {};          // then the menu

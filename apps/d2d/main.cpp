@@ -1232,10 +1232,18 @@ int run_windowed(std::vector<std::uint8_t>& framebuffer,
                 }
                 return points;
             };
+            // A handheld's game menu (a page of rows on the second screen) takes the d-pad as Up / Down: as a cursor hop it
+            // had no points to hop to, and Save and Exit could not be reached with the buttons (the emulator's scripted runs).
+            if (g_world_only && screen == Screen::InGame && town.game_menu.open && pad_actions.snap_y != 0) {
+                pad_actions.keys.push_back(pad_actions.snap_y > 0 ? pad::Key::Down : pad::Key::Up);
+                pad_actions.snap_x = pad_actions.snap_y = 0;
+            }
             if (pad_actions.snap_x != 0 || pad_actions.snap_y != 0) {
                 // Char select's d-pad steps its roster by key instead.
                 // Char select's d-pad steps its roster by key instead, as Configure Controls' steps its rows.
-                const bool by_key = (screen == Screen::CharSelect && !csu.confirm_delete && !csu.pick_difficulty) || (screen == Screen::InGame && town.controls.open);
+                // ... but a handheld's page of heroes goes by its rows too: by key, its New, Delete, Play and Back could not be
+                // reached with the buttons (the emulator's scripted runs).
+                const bool by_key = (screen == Screen::CharSelect && !csu.confirm_delete && !csu.pick_difficulty && !g_menu_page.active) || (screen == Screen::InGame && town.controls.open);
                 // A handheld's front page: the d-pad goes by the page's own rows (as they lie on the second screen), not by where
                 // the frame has their buttons, so every row can be reached and the next one down is the next one down.
                 if (g_menu_page.active && !g_world_only && !by_key && screen != Screen::InGame) {

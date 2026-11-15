@@ -36,6 +36,9 @@ auto Town::fill_handheld_page(MenuPage& page) const -> void {
             page.notes.push_back(std::move(words));
         }
         if (!hardcore && view.header.active_difficulty() > 0) page.notes.push_back(string_id(*scene, 0x13e7));   // "You have lost experience"
+        // Where the things went: the game leaves them on the body and says nothing (a new player read the weapon and
+        // shield as gone: the emulator play test).
+        if (!hardcore) page.notes.push_back("Your body keeps what you wore and carried. Go back to it and press A on it (Pick up corpse) to take it all back.");
         MenuPage::Row row;
         row.text = hardcore ? "Leave the Game" : "Continue";
         row.detail = hardcore ? "Touch here, or press A" : "Touch here, or press A, to rise in town";
