@@ -741,7 +741,7 @@ auto Town::handheld_fit_panel(const Mouse& mouse) -> bool {
                 const auto& ware = store.tabs[std::size_t(store.tab)][std::size_t(stock)];   // an index of the tab
                 const int cost = d2d::rules::item_price(scene->rules, ware, store.npc_id, false, store.header, store.reduced);
                 const bool afford = cost >= 0 && cost <= gold_now;
-                const std::string words = cost < 0 ? std::string("Buy") : afford ? std::format("Buy for {}", cost) : std::format("Need {} gold", cost);
+                const std::string words = cost < 0 ? std::string("Buy") : afford ? std::format("Buy for {}", cost) : std::format("Need {}", cost);
                 page.box(side, 194, kW - 2, 214, afford, !afford);
                 page.text(page.fit(words, kW - 2 - side - 6), words, (side + kW - 2) / 2, 204, afford ? kWhite : kDimInk, 0);
                 if (afford) { BottomMap::Spot spot{ side, 194, kW - 2, 214, mouse.x, mouse.y }; spot.buy = true; map.spots.push_back(spot); }

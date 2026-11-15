@@ -31,6 +31,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <bitset>
 #include <cmath>
 #include <cstddef>
@@ -1317,6 +1318,11 @@ void want_nearby(const GameData& game_data, const Level& level);
 // when it's gone to, GameData::level waiting for it (a stall behind a Loading screen, not hitches while
 // playing, and no memory spent on places a portal never goes).
 inline bool g_build_nearby = true;
+// The heap in use, in percent of all of it (a handheld's present loop sets it about once a second; 0: unknown). The
+// walk-up build (World::cross_level) holds back above kPrebuildHeapPercent: built levels are kept, and with the camp,
+// the Blood Moor, the Cold Plains and a cave the heap reached 96% (the emulator's scripted runs, round 7).
+inline std::atomic<int> g_heap_percent{ 0 };
+inline constexpr int kPrebuildHeapPercent = 75;
 // Called every tenth of a second while GameData::level waits for a build (the level's id): a handheld shows Loading.
 inline std::function<void(int)> g_level_wait;
 // Gives back what can be had again (decoded tiles, animations off screen): a build that ran out of memory then tries once more.

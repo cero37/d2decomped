@@ -9,6 +9,7 @@
 #include <3ds.h>
 
 #include "handheld_hud.hpp"
+#include <gamedata/gamedata.hpp>
 #include "handheld_prof.hpp"
 #include "tile_blit.hpp"
 
@@ -178,6 +179,10 @@ void handheld_present(const std::vector<std::uint8_t>& frame, int frame_w, int f
         last = osGetTime();
     }
     ++frames;
+    if (frames % 30 == 0) {                                  // the heap's share in use, for the walk-up builds (gamedata.hpp)
+        const struct mallinfo heap = mallinfo();
+        if (const u64 size = envGetHeapSize(); size > 0) d2d::game::g_heap_percent.store(int(u64(heap.uordblks) * 100 / size), std::memory_order_relaxed);
+    }
     // Hitches: frames that took long from the last one's present (what is seen as a stutter).
     static u64 frame_from = 0;
     static unsigned over50 = 0, over100 = 0, over250 = 0;
