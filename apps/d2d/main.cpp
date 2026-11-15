@@ -1239,7 +1239,10 @@ int run_windowed(std::vector<std::uint8_t>& framebuffer,
             // A handheld's game menu (a page of rows on the second screen) takes the d-pad as Up / Down: as a cursor hop it
             // had no points to hop to, and Save and Exit could not be reached with the buttons (the emulator's scripted runs).
             if (g_world_only && screen == Screen::InGame && town.game_menu.open && pad_actions.snap_y != 0) {
-                pad_actions.keys.push_back(pad_actions.snap_y > 0 ? pad::Key::Down : pad::Key::Up);
+                // ... once: the dialog context's d-pad sends the key itself, and a second step skipped every other row
+                // (two Ups went round the four rows back to Return to Game: the emulator play test).
+                const auto key = pad_actions.snap_y > 0 ? pad::Key::Down : pad::Key::Up;
+                if (!std::ranges::contains(pad_actions.keys, key)) pad_actions.keys.push_back(key);
                 pad_actions.snap_x = pad_actions.snap_y = 0;
             }
             if (pad_actions.snap_x != 0 || pad_actions.snap_y != 0) {
@@ -1258,8 +1261,9 @@ int run_windowed(std::vector<std::uint8_t>& framebuffer,
                         if (candidate.dim) continue;
                         centres.push_back({ (candidate.left + candidate.right) / 2, (candidate.top + candidate.bottom) / 2 });
                         rows.push_back(&candidate);
-                        if (candidate.on || (!at && candidate.x == mouse.x && candidate.y == mouse.y)) at = &candidate;
+                        if (candidate.x == mouse.x && candidate.y == mouse.y) at = &candidate;     // the row the cursor is on first
                     }
+                    if (!at) for (std::size_t k = 0; k < rows.size(); ++k) if (rows[k]->on) { at = rows[k]; break; }
                     if (!at && !rows.empty()) at = rows.front();
                     if (at)
                         if (const int pick = pad::snap_pick((at->left + at->right) / 2, (at->top + at->bottom) / 2, pad_actions.snap_x, pad_actions.snap_y, centres); pick >= 0) {
@@ -1649,7 +1653,7 @@ int run_windowed(std::vector<std::uint8_t>& framebuffer,
                     if (slot >= 0 && csu.scroll + slot < count) {
                         // A second press on the same character within
                         // 500 ms plays it, like OK (FUN_0043a9d0).
-                        play = csu.selected == csu.scroll + slot && now_ms - csu.last_click_ms < 500;
+                        play = csu.selected == csu.scroll + slot && (now_ms - csu.last_click_ms < 500 || g_menu_page.active);   // a handheld's page: a touch on the pick plays it
                         csu.selected = csu.scroll + slot;
                         csu.last_click_ms = now_ms;
                     }
@@ -1952,6 +1956,11 @@ int run_windowed(std::vector<std::uint8_t>& framebuffer,
                 character.ok_btn.do_switch = character.selected >= 0 && d2d::d2s::valid_character_name(character.name);
                 update_button(character.cancel_btn, mouse, screen, quit);
                 update_button(character.ok_btn,     mouse, screen, quit);
+                // The pad's Start (Return) is the screen's Start / OK (a handheld player pressed Start there and nothing
+                // happened: the emulator play test).
+                if (screen == Screen::CharCreate && character.ok_btn.do_switch
+                    && std::ranges::any_of(keys_this_frame, [](SDL_Keycode key) { return key == SDLK_RETURN || key == SDLK_KP_ENTER; }))
+                    screen = character.ok_btn.goto_screen;
                 if (!character.cancel_btn.hovered && !character.ok_btn.hovered && scene) {
                     const int previous = character.selected;
                     handle_charcreate_click(character, *scene, mouse, now_ms);
@@ -2091,10 +2100,12 @@ int run_windowed(std::vector<std::uint8_t>& framebuffer,
                         for (int slot = 0; slot < 8 && csu.scroll + slot < count; ++slot) {
                             const int index = csu.scroll + slot;
                             const auto& header = scene->saves[std::size_t(index)];
-                            const bool picked = index == csu.selected;
-                            const int x = picked ? csu.ok_btn.x + csu.ok_btn.width / 2 : kSlotX[slot % 2] + kSlotW / 2;
-                            const int y = picked ? csu.ok_btn.y + csu.ok_btn.height / 2 : kSlotY[slot / 2] + kSlotH / 2;
-                            page.add(char_title(header) + header.name, x, y, picked, false, false, level_class_line(*scene, header));
+                            // Lit: the row the cursor is on (the d-pad's); the pick keeps gold words. A row is the click on its own
+                            // slot, so the lit row is what A plays (the pick's row stood for Play and stayed lit wherever the
+                            // d-pad went: the emulator play test). A touch on the pick plays it (the press below).
+                            const int x = kSlotX[slot % 2] + kSlotW / 2, y = kSlotY[slot / 2] + kSlotH / 2;
+                            page.add(char_title(header) + header.name, x, y, mouse.x == x && mouse.y == y, false, false, level_class_line(*scene, header));
+                            page.rows.back().picked = index == csu.selected;
                         }
                         if (charselect_max_scroll(count) > 0) {
                             page.add("Up", kScrollX + 6, kScrollUpTop + kScrollArrow / 2, false, true);
