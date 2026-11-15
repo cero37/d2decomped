@@ -23,9 +23,10 @@ Nintendo, and it contains **no game data**: you supply your own Diablo II + Lord
    |---|---|
    | `D2DATA.MPQ`, `D2CHAR.MPQ`, `D2SFX.MPQ`, `D2SPEECH.MPQ` | Diablo II |
    | `D2Exp.mpq`, `D2xTalk.mpq` | Lord of Destruction |
-   | `LODPatch_114d.exe` | Blizzard's 1.14d patch installer |
+   | `LODPatch_114d.exe` | Blizzard's 1.14d patch installer: only if your files are older than 1.14d (from the CDs) |
 
-   The music archives aren't needed.
+   The music archives aren't needed. If a file is missing, the game lists what it can't find
+   instead of starting.
 3. **Sound** needs the 3DS's DSP firmware at `/3ds/dspfirm.cdc` (dump it once with DSP1). Without it
    the game runs silent.
 

@@ -13,6 +13,9 @@
 #include <vector>
 #include <cstdlib>
 #include <sys/stat.h>
+#include <algorithm>
+#include <cctype>
+#include <dirent.h>
 
 int d2d_main(int argc, char** argv);
 void logs_3ds_start();
@@ -23,7 +26,9 @@ extern "C" void (*__system_retAddr)(void);   // libctru: what its exit calls las
 
 // The game is far bigger than libctru's defaults allow for.
 extern "C" {
-u32 __stacksize__ = 1024 * 1024;
+// The main thread: 2 MiB. Upstream main() and load_scene take ~1.1 MB of stack (their Android note); at 1 MiB
+// the merged build overflowed at boot (an undefined instruction at PC 0, SP past the stack).
+u32 __stacksize__ = 2 * 1024 * 1024;
 // libctru would set 32 MiB aside as linear (physically contiguous) memory.
 // Only sound buffers and the GPU need that; the game's heap needs the rest.
 u32 __ctru_linear_heap_size = 8 * 1024 * 1024;
@@ -120,6 +125,35 @@ int main(int, char**) {
         while (aptMainLoop()) { hidScanInput(); if (hidKeysDown() & KEY_START) break; gfxFlushBuffers(); gfxSwapBuffers(); gspWaitForVBlank(); }
         gfxExit();
         return 0;
+    }
+    // The player's own game files: without them say which, on the screen, instead of an engine error. By the
+    // folder's listing, any case: an emulator's SD card is a case-sensitive host folder (D2Exp.mpq).
+    {
+        static constexpr const char* kNeeded[] = { "d2data.mpq", "d2char.mpq", "d2sfx.mpq", "d2speech.mpq", "d2exp.mpq", "d2xtalk.mpq" };   // (LODPatch_114d.exe only for files older than 1.14d)
+        std::vector<std::string> present;
+        if (DIR* dir = opendir("sdmc:/3ds/d2d/data")) {
+            while (const dirent* entry = readdir(dir)) {
+                std::string name = entry->d_name;
+                for (auto& letter : name) letter = char(std::tolower(static_cast<unsigned char>(letter)));
+                present.push_back(std::move(name));
+            }
+            closedir(dir);
+        }
+        std::string missing;
+        for (const char* name : kNeeded)
+            if (std::find(present.begin(), present.end(), name) == present.end()) {
+                std::string upper = name;
+                for (auto& letter : upper) letter = char(std::toupper(static_cast<unsigned char>(letter)));
+                missing += "   " + upper + "\n";
+            }
+        if (!missing.empty()) {
+            gfxInitDefault();
+            consoleInit(GFX_BOTTOM, nullptr);
+            std::printf("\n Sanctuary Pocket needs your own\n Diablo II + Lord of Destruction files\n in /3ds/d2d/data/ on the SD card.\n\n Missing:\n%s\n See platform/3ds/README.md on\n github.com/ratherDashing/d2decomped\n\n START to exit.\n", missing.c_str());
+            while (aptMainLoop()) { hidScanInput(); if (hidKeysDown() & KEY_START) break; gfxFlushBuffers(); gfxSwapBuffers(); gspWaitForVBlank(); }
+            gfxExit();
+            return 0;
+        }
     }
     logs_3ds_start();            // the earlier runs' logs kept (and uploaded when a server is named: logs_3ds.cpp)
     setenv("D2D_USER_DIR", "sdmc:/3ds/d2d", 1);
