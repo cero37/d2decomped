@@ -10,6 +10,7 @@
 #include <string>
 #include <string_view>
 #include <atomic>
+#include <ranges>
 #include <vector>
 
 namespace d2d::d2s { struct Stats; struct Item; }
@@ -157,7 +158,9 @@ struct BottomMap {
         return false;
     }
     [[nodiscard]] bool to_page(int frame_x, int frame_y, int& page_x, int& page_y) const {
-        for (const auto& piece : pieces) {
+        // The last piece first: a page's grid goes in last, and a body slot's box in the frame can reach over it (the
+        // bag's three right columns showed the cursor in column 7, and the d-pad could not get past it: the emulator play test).
+        for (const auto& piece : pieces | std::views::reverse) {
             if (frame_x < piece.src_x || frame_y < piece.src_y || frame_x >= piece.src_x + piece.src_w || frame_y >= piece.src_y + piece.src_h) continue;
             page_x = piece.dst_x + int(float(frame_x - piece.src_x) * piece.scale);
             page_y = piece.dst_y + int(float(frame_y - piece.src_y) * piece.scale);

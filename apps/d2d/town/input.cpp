@@ -936,11 +936,18 @@ namespace d2d::client {
 auto Town::note_belt(int column) -> void {
     if (!g_world_only || !scene) return;
     const auto drunk = std::ranges::find_if(character.items, [&](const d2d::d2s::Item& item) { return item.location == d2d::d2s::item_location::kBelt && item.column == column; });
-    if (drunk == character.items.end()) return;
+    if (drunk == character.items.end()) {
+        int in_belt = 0;
+        for (const auto& item : character.items) in_belt += item.location == d2d::d2s::item_location::kBelt;
+        d2d::log::info("belt note: nothing in column {} ({} belt items; view {})", column, in_belt,
+                       std::ranges::count_if(view.items, [](const d2d::d2s::Item& item) { return item.location == d2d::d2s::item_location::kBelt; }));
+        return;
+    }
     const auto info = scene->rules.item_info.find(drunk->code);
     const auto text = info != scene->rules.item_info.end() && !info->second.namestr.empty() ? lookup_string(*scene, std::string_view(info->second.namestr)) : std::nullopt;
     belt_note = "Used " + (text ? u16_to_latin1(*text) : drunk->code);
     belt_note_at = std::max<std::uint32_t>(1, std::uint32_t(SDL_GetTicks()));
+    d2d::log::info("belt note: {}", belt_note);
 }
 
 }  // namespace d2d::client

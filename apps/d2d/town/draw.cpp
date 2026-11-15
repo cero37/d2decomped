@@ -179,6 +179,10 @@ auto Town::draw(std::vector<std::uint8_t>& framebuffer, const Mouse& mouse, std:
     g_keep_panels = !never_keep && g_world_only && kept && g_bottom_panels && speech.npc < 0 && !help.open && !game_menu.open && !controls.open
                  && mouse.x == kept_x && mouse.y == kept_y && !mouse.down && ticks - g_last_event_ms > 150 && ticks - kept_at < 1000;
     g_hover_capture = g_world_only && g_bottom_panels ? &handheld_hovers : nullptr;
+    if (g_world_only && g_bottom_panels) {                  // where a panel's cursor goes, for the play tests (it would not leave column 7)
+        static int said_x = -1, said_y = -1;
+        if (mouse.x != said_x || mouse.y != said_y) { d2d::log::info("panel cursor: {}, {}", mouse.x, mouse.y); said_x = mouse.x; said_y = mouse.y; }
+    }
     if (g_world_only && scene && store.npc >= 0) {
         const auto& bag = scene->inv_layout[std::size_t(std::max(character.character_class, 0))];
         const auto in = [&](int left, int top, int width, int height) { return mouse.x >= left && mouse.x < left + width && mouse.y >= top && mouse.y < top + height; };
@@ -307,7 +311,11 @@ auto Town::draw(std::vector<std::uint8_t>& framebuffer, const Mouse& mouse, std:
         // The hover text the frame would have drawn: on the page, inside the screen.
         // The skill tree just opened: its hover (the skill the cursor starts on) covered the whole page, tabs and all,
         // till B (the emulator play test). It waits for the cursor to move.
-        if (tree_open && !tree_was_open) { tree_open_x = mouse.x; tree_open_y = mouse.y; }
+        // ... where it settles: the page puts the cursor on its first skill a frame or two after it opens (by touch the
+        // tooltip came up at once: the emulator's scripted runs).
+        static int tree_frames = 0;
+        tree_frames = tree_open ? (tree_was_open ? tree_frames + 1 : 0) : 0;
+        if (tree_open && tree_frames < 4) { tree_open_x = mouse.x; tree_open_y = mouse.y; }
         tree_was_open = tree_open;
         const bool tree_resting = tree_open && mouse.x == tree_open_x && mouse.y == tree_open_y;
         if (!g_keep_panels && !handheld_hovers.empty() && scene && g_bottom_panels && !g_bottom_whole && !tree_resting) {
@@ -660,7 +668,11 @@ auto Town::draw_view(std::vector<std::uint8_t>& framebuffer, std::vector<std::ui
             }
         }
         // A belt slot just used (the D-pad): what went, over the prompt's line, for a second and a half.
-        if (g_world_only && wide && !belt_note.empty() && belt_note_at && std::uint32_t(SDL_GetTicks()) - belt_note_at < (belt_note.starts_with("View:") ? 3000u : 1500u)) {
+        if (static std::uint32_t told = 0; belt_note_at != told) {   // the play tests: is it drawn, and when (the scripted runs never saw it)
+            told = belt_note_at;
+            d2d::log::info("belt note draw: '{}' {} ms after it was set, wide {}, world only {}", belt_note, std::uint32_t(SDL_GetTicks()) - belt_note_at, wide != nullptr, g_world_only);
+        }
+        if (g_world_only && wide && !belt_note.empty() && belt_note_at && std::uint32_t(SDL_GetTicks()) - belt_note_at < (belt_note.starts_with("View:") ? 3000u : 2500u)) {
             const auto& pal = scene->act_pal.entries().empty() ? scene->pal : scene->act_pal;
             const auto& font = g_handheld_zoom > 0 && scene->font24.line_height() > 0 ? scene->font24 : scene->font;
             const int width = fb_width(*wide), line = font.line_height();

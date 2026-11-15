@@ -487,6 +487,12 @@ auto Town::handheld_fit_panel(const Mouse& mouse) -> bool {
                 x += widths[column] + gap;
             }
             const int grid_w = lay.cols * lay.box_w, grid_h = lay.rows * lay.box_h;
+            if (static bool said = false; !said) {
+                said = true;
+                std::string boxes;
+                for (int which = body::kFirst; which <= body::kLast; ++which) boxes += std::format(" {}:{},{} {}x{}", which, slot(which)[0], slot(which)[1], slot(which)[2], slot(which)[3]);
+                d2d::log::info("bag page: grid {},{} {}x{} cells {}x{};{}", lay.grid_x, lay.grid_y, lay.cols, lay.rows, lay.box_w, lay.box_h, boxes);
+            }
             map.pieces.push_back(part(lay.grid_x, lay.grid_y, grid_w, grid_h, (kW - grid_w) / 2, kH - grid_h - 1, 1.f, true));
             for (const auto& piece : map.pieces) page.piece(ui_buffer, piece);
             // Between them: the gold carried, and how to leave.

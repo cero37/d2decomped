@@ -1336,8 +1336,16 @@ int run_windowed(std::vector<std::uint8_t>& framebuffer,
                     // The speech's own clock (Town::now_ms, SDL ticks less the start): raw ticks put an Up's start in the
                     // future, the offset wrapped round, and the words ran to the end and closed (the emulator's scripted runs).
                     const std::uint32_t now_ticks = town.now_ms;
-                    if (down && !down_was) town.speech.start_ms -= line_ms;
-                    if (up && !up_was) town.speech.start_ms = std::int32_t(now_ticks - (town.speech.start_ms + line_ms)) > 0 ? town.speech.start_ms + line_ms : now_ticks;
+                    // Two lines a press, and the words hold still 2.5 s after it: one line back was undone by the scroll
+                    // before it could be read (Up "read on": the emulator's scripted runs).
+                    static std::uint32_t hold_until = 0, held_at = 0;
+                    if (std::int32_t(hold_until - now_ticks) > 0 && held_at != 0) town.speech.start_ms += now_ticks - held_at;   // the clock stands
+                    held_at = now_ticks;
+                    if (down && !down_was) { town.speech.start_ms -= 2 * line_ms; hold_until = now_ticks + 2500; }
+                    if (up && !up_was) {
+                        town.speech.start_ms = std::int32_t(now_ticks - (town.speech.start_ms + 2 * line_ms)) > 0 ? town.speech.start_ms + 2 * line_ms : now_ticks;
+                        hold_until = now_ticks + 2500;
+                    }
                 }
                 up_was = up; down_was = down;
             }
