@@ -109,12 +109,43 @@ BottomMap::Piece part(int src_x, int src_y, int src_w, int src_h, int dst_x, int
 // Hover text on a handheld's panel: the lines in a box inside (left, top, width, height) of the frame, clear
 // of the cursor at (avoid_x, avoid_y) where it can be. Font16 while that fits, font8 past it; lines too many
 // even for that are left off the end.
-void draw_handheld_hover(std::vector<std::uint8_t>& framebuffer, const Scene& scene, const std::vector<TextLine>& lines,
+namespace {
+// The lines with any wider than `room` broken at spaces (a two-colour line keeps its colours: the part past the
+// split stays in the tail's). A skill's long lines ran off both edges of the page (the emulator play test).
+std::vector<TextLine> wrap_hover(const std::vector<TextLine>& lines, const d2d::font::Font& font, int room) {
+    std::vector<TextLine> out;
+    for (const auto& line : lines) {
+        if (font.measure(line.text) <= room || line.split < line.text.size()) { out.push_back(line); continue; }
+        std::string rest = line.text;
+        while (!rest.empty()) {
+            std::size_t cut = rest.size();
+            while (cut > 0 && font.measure(rest.substr(0, cut)) > room) {
+                const auto space = rest.rfind(' ', cut - 1);
+                cut = space == std::string::npos || space == 0 ? cut - 1 : space;
+            }
+            if (cut == 0) cut = 1;
+            TextLine piece = line;
+            piece.text = rest.substr(0, cut);
+            piece.split = std::string::npos;
+            out.push_back(piece);
+            rest.erase(0, cut);
+            while (!rest.empty() && rest.front() == ' ') rest.erase(0, 1);
+        }
+    }
+    return out;
+}
+}  // namespace
+
+void draw_handheld_hover(std::vector<std::uint8_t>& framebuffer, const Scene& scene, const std::vector<TextLine>& given,
                          int left, int top, int width, int height, int avoid_x, int avoid_y) {
-    if (lines.empty() || width < 16 || height < 16) return;
+    if (given.empty() || width < 16 || height < 16) return;
     const auto& pal = scene.act_pal.entries().empty() ? scene.pal : scene.act_pal;
+    // Font16 for a short text that fits as it is; a long one (a skill's, an item's many lines) in font8, so it covers
+    // less of the page it describes.
+    const auto big_lines = wrap_hover(given, scene.font, width - 8);
+    const bool big = int(big_lines.size()) <= 6 && int(big_lines.size()) * 16 <= height - 6;
+    const auto lines = big ? big_lines : wrap_hover(given, scene.font_small, width - 8);
     const auto widest = [&](const d2d::font::Font& font) { int most = 0; for (const auto& line : lines) most = std::max(most, font.measure(line.text)); return most; };
-    const bool big = widest(scene.font) <= width - 8 && int(lines.size()) * 16 <= height - 6;
     const auto& font = big ? scene.font : scene.font_small;
     const int pitch = big ? 16 : 12, lift = big ? 0 : 2;
     const int shown = std::min(int(lines.size()), (height - 6) / pitch);
