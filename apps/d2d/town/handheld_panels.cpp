@@ -498,6 +498,7 @@ auto Town::handheld_fit_panel(const Mouse& mouse) -> bool {
                     turn(right - 84, line_y - 8, right, line_y + 8, "To the store", 96 + 14, 123 + 14);
                     // Sell the thing the cursor is on, for its price, in one touch (or the pad's Y): no mode to turn on first.
                     const d2d::d2s::Item* for_sale = held ? &*held : bag_at(mouse.x, mouse.y);
+                    const bool bag_empty = std::ranges::none_of(character.items, [](const d2d::d2s::Item& item) { return item.location == d2d::d2s::item_location::kStored && item.panel == d2d::d2s::item_panel::kInventory; });
                     const int sell_left = (kW - grid_w) / 2 + small.measure(gold_words) + 12, sell_right = right - 84 - 4;
                     if (for_sale && sell_right - sell_left > 40) {
                         const std::string words = std::format("Sell for {}", d2d::rules::item_price(scene->rules, *for_sale, store.npc_id, true, store.header));
@@ -506,7 +507,7 @@ auto Town::handheld_fit_panel(const Mouse& mouse) -> bool {
                         BottomMap::Spot spot{ sell_left, line_y - 8, sell_right, line_y + 8, mouse.x, mouse.y };
                         spot.sell = true;
                         map.spots.push_back(spot);
-                    } else page.text(small, "Pick a thing to sell", (sell_left + sell_right) / 2, line_y, kDimInk, 0);
+                    } else page.text(small, bag_empty ? "Nothing to sell" : "Pick a thing to sell", (sell_left + sell_right) / 2, line_y, kDimInk, 0);
                 }
                 else if (stash_open) turn(right - 96, line_y - 8, right, line_y + 8, "Stash page", stash.grid_x + stash.box_w / 2, stash.grid_y + stash.box_h / 2);
                 else turn(right - 96, line_y - 8, right, line_y + 8, "To the hireling", torso[0] + torso[2] / 2, torso[1] + torso[3] / 2);

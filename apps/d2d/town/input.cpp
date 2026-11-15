@@ -205,7 +205,22 @@ auto Town::pad_act(PadPlayer& player_pad, const UnitState& unit, bool dead, bool
         // A fresh press acts on what the prompt names (contextual_pick: the same pick, made as the frame was drawn), not
         // on a pick made again now: the facing can have turned since, and A then talked to someone the prompt didn't name.
         const bool prompt_pick = left && move.attack && &player_pad == &pad && contextual_pick.kind != PadPick::kNone;
-        const PadPick pick = prompt_pick ? contextual_pick : pad_pick(player_pad, unit, left && move.attack, pad_aim(skill, move.aim || move.active));
+        PadPick pick = prompt_pick ? contextual_pick : pad_pick(player_pad, unit, left && move.attack, pad_aim(skill, move.aim || move.active));
+        // A foe in reach on any side beats the facing's pick: a held A swung at an empty tile while three Fallen hit from
+        // beside (12 s, no kills), and a press used a shrine mid-fight (the emulator play test).
+        if (left && pick.kind != PadPick::kMonster && !(level && d2d::rules::level_ids::is_town(level->id))) {
+            const Monster* nearest = nullptr;
+            float best = 3.5f;
+            for (const auto& foe : view.monsters) {
+                if (!foe.alive() || foe.ally_not_interact(*scene, level ? level->id : 0)) continue;
+                if (const float distance = std::hypot(foe.unit.x - hero_x, foe.unit.y - hero_y); distance < best) { best = distance; nearest = &foe; }
+            }
+            if (nearest) {
+                pick = { PadPick::kMonster, nearest->id, nearest->unit.x, nearest->unit.y };
+                const float length = std::max(best, 0.01f);
+                player_pad.face_x = (nearest->unit.x - hero_x) / length; player_pad.face_y = (nearest->unit.y - hero_y) / length;
+            }
+        }
         if (pick.kind == PadPick::kMonster) {
             player_pad.target = pick.id;
             out(cmd::UseSkill{ skill, pick.x, pick.y, pick.id, left, item });

@@ -1186,6 +1186,10 @@ int run_windowed(std::vector<std::uint8_t>& framebuffer,
             if (pad_focus && pad_focus->key != pad_focus_key) { mouse.x = pad_focus->x; mouse.y = pad_focus->y; }
             pad_focus_key = pad_focus ? pad_focus->key : 0;
             if (screen != Screen::CharSelect || pad_actions.cursor_dx != 0 || pad_actions.cursor_dy != 0 || pad_actions.focus_step != 0) roster_navigation = false;
+            // A handheld's page of heroes: the d-pad goes by the page's rows alone (below). Its arrow keys also stepped the
+            // roster, so with New lit, A played the hero the list had moved to (the emulator's scripted runs).
+            if (screen == Screen::CharSelect && g_menu_page.active && !csu.confirm_delete && !csu.pick_difficulty)
+                std::erase_if(pad_actions.keys, [](pad::Key key) { return key == pad::Key::Up || key == pad::Key::Down || key == pad::Key::Left || key == pad::Key::Right; });
             if (screen == Screen::CharSelect && !csu.confirm_delete && !csu.pick_difficulty)
                 for (const auto key : pad_actions.keys)
                     if (key == pad::Key::Up || key == pad::Key::Down || key == pad::Key::Left || key == pad::Key::Right) roster_navigation = true;

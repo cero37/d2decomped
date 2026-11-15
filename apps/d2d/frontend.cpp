@@ -7,6 +7,7 @@
 #include "ui.hpp"
 #include "world_view.hpp"
 
+#include <cstdlib>
 #include <d2s.hpp>
 #include <font.hpp>
 #include <text_box.hpp>
@@ -401,7 +402,7 @@ void handle_charcreate_click(CharCreateUI& create_ui,
     create_ui.hovered = class_under(create_ui, scene, mouse);
     // A handheld's page always has its cursor on a row, lit: the lit class is the one chosen, so Start never sits
     // grey under a class that looks picked (the emulator play test: Amazon lit, Start grey until it was touched).
-    if (g_world_only && create_ui.hovered >= 0 && create_ui.hovered != create_ui.selected) {
+    if (std::getenv("D2D_HANDHELD") && create_ui.hovered >= 0 && create_ui.hovered != create_ui.selected) {
         if (create_ui.selected >= 0) {
             auto& prev = create_ui.classes[std::size_t(create_ui.selected)];
             prev.state = ClassState::Deselecting;
