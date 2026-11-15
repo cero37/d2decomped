@@ -40,6 +40,18 @@ namespace d2d::game {
 
 auto World::cross_level() -> void {
         const float world_x = float(level->world_x) + actor->target_x, world_y = float(level->world_y) + actor->target_y;
+        // Nothing built ahead (a handheld): the outdoor level the player is walking up to starts building once they are
+        // within 10 cells of it, so most of its build is done by the time they cross (it froze the Blood Moor's first
+        // entry for 4.7 s behind the Loading screen: the emulator play test). One level, the one near, not the act.
+        if (!g_build_nearby) {
+            const float here_x = float(level->world_x) + actor->player.x, here_y = float(level->world_y) + actor->player.y;
+            for (const auto& placement : game_data->layout_of(level->id)) {
+                if (placement.level == level->id || game_data->built(placement.level)) continue;
+                const float out_x = std::max({ float(placement.x) - here_x, 0.f, here_x - float(placement.x + placement.width) });
+                const float out_y = std::max({ float(placement.y) - here_y, 0.f, here_y - float(placement.y + placement.height) });
+                if (out_x < 10.f && out_y < 10.f) game_data->want_level(placement.level);
+            }
+        }
         bool known = level->inside(actor->target_x, actor->target_y);
         for (const auto& neighbour : level->nearby) known = known || neighbour.level->inside(actor->target_x - float(neighbour.dx), actor->target_y - float(neighbour.dy));
         if (!known)
