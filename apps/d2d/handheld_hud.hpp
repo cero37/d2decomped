@@ -62,6 +62,10 @@ struct MapLabel { float x = 0, y = 0; std::string text; bool waypoint = false; b
 inline std::vector<MapLabel> g_map_labels;
 // The camp's people, on the same map (a play tester spent 35 moves looking for Akara): where each stands now, and the name.
 inline std::vector<MapLabel> g_map_people;
+// Where each name was drawn on the map last frame (bottom-screen pixels) and the place it names (act cells): a tap on
+// one walks the hero there (Town::start_map_walk). Every tester got stuck on the camp's walls looking for its exit.
+struct MapTarget { int left = 0, top = 0, right = 0, bottom = 0; float x = 0, y = 0; std::string text; bool exit = false; };
+inline std::vector<MapTarget> g_map_targets;
 // Which of the list's nine buttons, or of the ring's `shown` icons, a touch at (x, y) is on; -1 for none.
 int bottom_strip_hit(int x, int y);
 int bottom_wheel_hit(int x, int y, int shown);

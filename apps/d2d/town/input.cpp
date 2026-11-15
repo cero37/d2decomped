@@ -48,6 +48,7 @@
 #include <array>
 #include <cctype>
 #include <cmath>
+#include <deque>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
@@ -284,6 +285,7 @@ auto Town::pad_act(PadPlayer& player_pad, const UnitState& unit, bool dead, bool
     }
 
 auto Town::pad_walk(PadPlayer& player_pad, const UnitState& unit, bool dead, bool field, const Send& out) -> void {
+        if (&player_pad == &pad && drive_map_walk(unit, dead, field, out)) return;   // a name tapped on the map, walked to
         const bool walk = field && player_pad.move.active && !dead;
         if (walk) {
             auto step = pad::world_step(player_pad.move.x, player_pad.move.y, kIsoW, kIsoH, 6.f);
@@ -995,6 +997,167 @@ auto Town::note_belt(int column) -> void {
     belt_note = "Used " + (text ? u16_to_latin1(*text) : drunk->code);
     belt_note_at = std::max<std::uint32_t>(1, std::uint32_t(SDL_GetTicks()));
     d2d::log::info("belt note: {}", belt_note);
+}
+
+// A name tapped on the handheld's map: a route there over this level's walk grid, in half cells (8 ways, a diagonal only
+// past two open sides), to the open cell nearest the name. An exit on the level's edge is walked on through.
+auto Town::start_map_walk(float act_x, float act_y, const std::string& name, bool exit) -> bool {
+    map_walk = {};
+    if (!level || !scene) return false;
+    const auto& hero = focused().player;
+    constexpr float kStep = 0.5f;
+    const float width = float(level->ds1.width()), height = float(level->ds1.height());
+    const int columns = int(width / kStep), rows = int(height / kStep);
+    if (columns <= 0 || rows <= 0) return false;
+    const float goal_x = act_x - float(level->world_x), goal_y = act_y - float(level->world_y);
+    const auto open = [&](int column, int row) {
+        return column >= 0 && row >= 0 && column < columns && row < rows
+            && !level->unit_blocked((float(column) + 0.5f) * kStep, (float(row) + 0.5f) * kStep);
+    };
+    const int start_column = std::clamp(int(hero.x / kStep), 0, columns - 1), start_row = std::clamp(int(hero.y / kStep), 0, rows - 1);
+    std::vector<int> from(std::size_t(columns) * std::size_t(rows), -1);
+    std::deque<int> queue;
+    const int start = start_row * columns + start_column;
+    from[std::size_t(start)] = start;
+    queue.push_back(start);
+    int best = start;
+    float best_apart = std::hypot((float(start_column) + 0.5f) * kStep - goal_x, (float(start_row) + 0.5f) * kStep - goal_y);
+    while (!queue.empty()) {
+        const int at = queue.front();
+        queue.pop_front();
+        const int column = at % columns, row = at / columns;
+        if (const float apart = std::hypot((float(column) + 0.5f) * kStep - goal_x, (float(row) + 0.5f) * kStep - goal_y); apart < best_apart - 0.01f) {
+            best = at;
+            best_apart = apart;
+        }
+        for (int dy = -1; dy <= 1; ++dy)
+            for (int dx = -1; dx <= 1; ++dx) {
+                if (!dx && !dy) continue;
+                const int c = column + dx, r = row + dy;
+                if (!open(c, r) || (dx && dy && (!open(column + dx, row) || !open(column, row + dy)))) continue;
+                const int index = r * columns + c;
+                if (from[std::size_t(index)] >= 0) continue;
+                from[std::size_t(index)] = at;
+                queue.push_back(index);
+            }
+    }
+    for (int at = best; at != start; at = from[std::size_t(at)])
+        map_walk.path.emplace_back((float(at % columns) + 0.5f) * kStep, (float(at / columns) + 0.5f) * kStep);
+    std::ranges::reverse(map_walk.path);
+    // An exit on the edge: on through it, straight out of the level.
+    const bool on_edge = goal_x <= 1.f || goal_y <= 1.f || goal_x >= width - 1.f || goal_y >= height - 1.f;
+    map_walk.cross = exit && on_edge && best_apart < 6.f;
+    if (map_walk.cross) {
+        map_walk.out_x = goal_x <= 1.f ? -4.f : goal_x >= width - 1.f ? width + 4.f : goal_x;
+        map_walk.out_y = goal_y <= 1.f ? -4.f : goal_y >= height - 1.f ? height + 4.f : goal_y;
+    }
+    map_walk.level_id = level->id;
+    map_walk.name = name;
+    map_walk.exit = exit;
+    map_walk.goal_x = act_x;
+    map_walk.goal_y = act_y;
+    map_walk.started = map_walk.progress_at = std::uint32_t(SDL_GetTicks());
+    map_walk.progress_x = hero.x;
+    map_walk.progress_y = hero.y;
+    d2d::log::info("map walk: to {} ({:.1f}, {:.1f}): {} steps, ends {:.1f} cells from it{}", name, goal_x, goal_y, map_walk.path.size(), best_apart,
+                   map_walk.cross ? ", then across" : "");
+    if (map_walk.path.empty() && !map_walk.cross) { map_walk = {}; return false; }
+    belt_note = "Walking to " + name + "  (Circle Pad: stop)";
+    belt_note_at = std::max<std::uint32_t>(1, std::uint32_t(SDL_GetTicks()));
+    return true;
+}
+
+// Each frame while a map walk is on: a point of its route a little ahead, as a held mouse would. The stick, a death,
+// another level or a panel ends it; stuck 2 s it plans again once, then gives up and says so.
+auto Town::drive_map_walk(const UnitState& unit, bool dead, bool field, const Send& out) -> bool {
+    if (map_walk.level_id < 0) return false;
+    const auto stop = [&](const char* why) {
+        d2d::log::info("map walk: to {} ended ({})", map_walk.name, why);
+        map_walk = {};
+        out(cmd::Move{ unit.x, unit.y, true });
+        return false;
+    };
+    if (!level || level->id != map_walk.level_id) {      // across: arrived
+        d2d::log::info("map walk: to {} ended (into the next area)", map_walk.name);
+        map_walk = {};
+        return false;
+    }
+    if (dead || !field || pad.move.active) { map_walk = {}; return false; }   // the stick's own walk takes over
+    const std::uint32_t now = std::uint32_t(SDL_GetTicks());
+    // Where along the route the hero is: the nearest point of the next 16 (a straight walk cuts its corners), then on
+    // past any it stands at.
+    if (map_walk.next < map_walk.path.size()) {
+        std::size_t nearest = map_walk.next;
+        float nearest_apart = 1e9f;
+        for (std::size_t at = map_walk.next; at < std::min(map_walk.path.size(), map_walk.next + 16); ++at)
+            if (const float apart = std::hypot(map_walk.path[at].first - unit.x, map_walk.path[at].second - unit.y); apart < nearest_apart) { nearest = at; nearest_apart = apart; }
+        map_walk.next = nearest;
+    }
+    while (map_walk.next < map_walk.path.size()
+           && std::hypot(map_walk.path[map_walk.next].first - unit.x, map_walk.path[map_walk.next].second - unit.y) < 0.7f) ++map_walk.next;
+    if (map_walk.next >= map_walk.path.size() && !map_walk.cross) {
+        // A cave mouth, stairs or a door named on the map: in through it, as A on it does (the prompt names it only when
+        // the hero faces it, and a tester arrived facing away: one tap means going there).
+        if (map_walk.exit) {
+            const float goal_x = map_walk.goal_x - float(level->world_x), goal_y = map_walk.goal_y - float(level->world_y);
+            for (const auto& warp : level->warps)
+                if (std::hypot(warp.x - goal_x, warp.y - goal_y) < 3.f) {
+                    const auto [click_x, click_y] = d2d::game::World::warp_click(warp);
+                    d2d::log::info("map walk: to {}: in through it", map_walk.name);
+                    map_walk = {};
+                    pad.walking = false;                  // else the next frame's centred stick sends a stop, and the hero stays out
+                    out(cmd::Move{ click_x, click_y, true });
+                    return false;
+                }
+        }
+        return stop("there");
+    }
+    if (now - map_walk.progress_at >= 2000) {
+        if (std::hypot(unit.x - map_walk.progress_x, unit.y - map_walk.progress_y) < 0.5f) {
+            const auto& point = map_walk.path[std::min(map_walk.next, map_walk.path.size() - 1)];
+            d2d::log::info("map walk: no headway at {:.1f}, {:.1f}; step {} of {} at {:.1f}, {:.1f}; mode {}", unit.x, unit.y, map_walk.next, map_walk.path.size(), point.first, point.second, unit.mode);
+            if (map_walk.replans >= 1) {
+                belt_note = "Can't find a way to " + map_walk.name;
+                belt_note_at = std::max<std::uint32_t>(1, now);
+                return stop("stuck");
+            }
+            const std::string name = map_walk.name;
+            const float goal_x = map_walk.goal_x, goal_y = map_walk.goal_y;
+            const bool exit = map_walk.exit;
+            if (!start_map_walk(goal_x, goal_y, name, exit)) return false;
+            map_walk.replans = 1;
+            return true;
+        }
+        map_walk.progress_at = now;
+        map_walk.progress_x = unit.x;
+        map_walk.progress_y = unit.y;
+    }
+    // The farthest point of the route the hero can walk to straight (up to 12 ahead): a fresh walk only when that moves
+    // on, or the one aimed at is near. A fresh walk every half cell restarted the walk each frame: a crawl (2 cells in 4 s).
+    const auto straight = [&](float to_x, float to_y) {
+        const float apart = std::hypot(to_x - unit.x, to_y - unit.y);
+        for (float t = 0.25f; t < apart; t += 0.25f)
+            if (level->unit_blocked(unit.x + (to_x - unit.x) * t / apart, unit.y + (to_y - unit.y) * t / apart)) return false;
+        return true;
+    };
+    int aim = -2;
+    if (map_walk.next < map_walk.path.size()) {
+        aim = int(map_walk.next);
+        for (std::size_t ahead = map_walk.next + 1; ahead < std::min(map_walk.path.size(), map_walk.next + 12); ++ahead)
+            if (straight(map_walk.path[ahead].first, map_walk.path[ahead].second)) aim = int(ahead);
+    }
+    const float x = aim >= 0 ? map_walk.path[std::size_t(aim)].first : map_walk.out_x;
+    const float y = aim >= 0 ? map_walk.path[std::size_t(aim)].second : map_walk.out_y;
+    const bool near_aimed = map_walk.aimed >= 0 && std::size_t(map_walk.aimed) < map_walk.path.size()
+        && std::hypot(map_walk.path[std::size_t(map_walk.aimed)].first - unit.x, map_walk.path[std::size_t(map_walk.aimed)].second - unit.y) < 1.2f;
+    const bool fresh = map_walk.aimed == -1 || (aim == -2) != (map_walk.aimed == -2) || (aim >= 0 && (aim - map_walk.aimed >= 4 || near_aimed));
+    if (pad.run_sent != 1) { out(cmd::Run{ true }); pad.run_sent = 1; }
+    if (fresh) {
+        out(cmd::Move{ x, y, true });
+        map_walk.aimed = aim;
+    }
+    pad.walking = true;
+    return true;
 }
 
 }  // namespace d2d::client

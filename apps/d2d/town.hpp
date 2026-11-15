@@ -453,6 +453,23 @@ struct Town {
     [[nodiscard]] static int say_sound(int cls, int phrase);                         // Say 1..7, Retreat (0..7)
     void clear_screen();
     [[nodiscard]] bool pad_field_or_free() const;
+    // A handheld: a name tapped on the map, walked to along a route over the level's walk grid (start_map_walk); the
+    // stick takes over at once. `cross`: an edge to the next area, walked on through it at the end.
+    struct MapWalk {
+        int level_id = -1;
+        std::vector<std::pair<float, float>> path;   // level cells
+        std::size_t next = 0;
+        bool cross = false, exit = false;            // exit: a way out named on the map (a warp is gone in through)
+        float out_x = 0, out_y = 0;                  // past the edge, for a crossing
+        std::uint32_t started = 0, progress_at = 0;
+        float progress_x = 0, progress_y = 0;
+        int replans = 0, aimed = -1;
+        float goal_x = 0, goal_y = 0;                // act cells, for a replan
+        std::string name;
+    };
+    MapWalk map_walk;
+    bool start_map_walk(float act_x, float act_y, const std::string& name, bool exit);
+    bool drive_map_walk(const UnitState& unit, bool dead, bool field, const Send& out);
     std::string belt_note;                        // a handheld: "Used Minor Healing Potion", shown on the top screen a moment
     std::uint32_t belt_note_at = 0;               // SDL_GetTicks when it went
     int level_seen = 0;                           // a handheld: the hero's level last frame, for the level-up note

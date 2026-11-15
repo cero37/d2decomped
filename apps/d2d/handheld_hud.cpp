@@ -293,6 +293,7 @@ void draw_bottom_hud(std::vector<std::uint8_t>& framebuffer, const Scene& scene,
                 for (const auto& p : placed) if (l < p[2] && r > p[0] && t < p[3] && b > p[1]) return true;
                 return false;
             };
+            g_map_targets.clear();
             for (const auto& label : g_map_labels) {
                 int mx = int(std::lround((label.x - label.y) * 80 / float(kDivisor))) - scroll_x + 8;
                 int my = int(std::lround((label.x + label.y) * 40 / float(kDivisor))) - scroll_y - 8;
@@ -312,6 +313,7 @@ void draw_bottom_hud(std::vector<std::uint8_t>& framebuffer, const Scene& scene,
                     if (!clashes(tx - 2, candidate, tx + width + 2, candidate + 11)) { ty = candidate; break; }
                 }
                 placed.push_back({ tx - 2, ty, tx + width + 2, ty + 11 });
+                g_map_targets.push_back({ std::min(tx - 2, mx - 5), std::min(ty, my - 5), std::max(tx + width + 2, mx + 5), std::max(ty + 11, my + 5), label.x, label.y, label.text, true });
                 small_font.draw_tinted(framebuffer, kScreenWidth, kScreenHeight, pal, tx, ty, words, 240, 210, 120);
             }
             // The camp's people: a pale dot and the name, on the map only (one off it isn't shown), clear of the other names.
@@ -339,6 +341,7 @@ void draw_bottom_hud(std::vector<std::uint8_t>& framebuffer, const Scene& scene,
                 }
                 if (ty < 0) continue;                                // no free line near: the dot alone
                 placed.push_back({ tx - 2, ty, tx + width + 2, ty + 11 });
+                g_map_targets.push_back({ std::min(tx - 2, mx - 4), std::min(ty, my - 4), std::max(tx + width + 2, mx + 4), std::max(ty + 11, my + 4), person.x, person.y, person.text, false });
                 small_font.draw_tinted(framebuffer, kScreenWidth, kScreenHeight, pal, tx, ty, person.text, 170, 220, 255);
             }
             mark(state.map_x, state.map_y, { 80, 120, 255 });

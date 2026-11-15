@@ -45,7 +45,8 @@ Saves go to `/3ds/d2d/save/`, and the game's log to `/3ds/d2d/d2d.log` (the two 
 | D-pad | Drink from the belt (Up, Down, Left, Right = its four columns) |
 | START | Character, items, skills, map, quests, options |
 | SELECT | Put skills on the buttons |
-| Touch | Panels, items, stores and menus; tap the map to zoom the view |
+| Touch | Panels, items, stores and menus |
+| Tap a name on the map | Walk there: an exit (on into the next area), a person or a waypoint; the Circle Pad stops it. Tap elsewhere on the map to zoom the view |
 
 ## Feedback
 

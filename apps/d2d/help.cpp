@@ -138,7 +138,7 @@ void HelpScreen::draw_handheld(std::vector<std::uint8_t>& framebuffer, const Sce
         { "START", "Character, items, skills, map" },
         { "SELECT", "Put skills on the buttons" },
         { "Touch", "Panels, items and menus" },
-        { "Tap the map", "Zoom the view" },
+        { "Tap a map name", "Walk there (else: zoom)" },
     } };
     const int pitch = (kPageH - 30 - 20) / int(kRows.size());
     for (std::size_t row = 0; row < kRows.size(); ++row) {

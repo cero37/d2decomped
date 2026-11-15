@@ -9,5 +9,5 @@ out=$root/build-3ds
 docker run --rm -u "$(id -u):$(id -g)" -v "$root:$root" -v "$tools:/tools:ro" -w "$root/platform/3ds/cia" ubuntu:24.04 sh -c "
   /tools/bannertool makebanner -i banner.png -a banner.wav -o $out/banner.bnr >/dev/null &&
   /tools/bannertool makesmdh -s 'Sanctuary Pocket' -l 'An unofficial Diablo II engine port — bring your own game files' -p 'd2decomped contributors' -i icon.png -o $out/icon.icn >/dev/null &&
-  /tools/makerom -f cia -o $out/d2d.cia -elf $out/d2d.elf -rsf d2d.rsf -target t -exefslogo -icon $out/icon.icn -banner $out/banner.bnr"
+  /tools/makerom -f cia -o $out/d2d.cia -elf $out/d2d.elf -rsf d2d.rsf -target t -exefslogo -icon $out/icon.icn -banner $out/banner.bnr -major 0 -minor 0 -micro 1"
 ls -la "$out/d2d.cia"

@@ -139,11 +139,18 @@ auto Town::draw(std::vector<std::uint8_t>& framebuffer, const Mouse& mouse, std:
                 send(cmd::UseBelt{ belt });
                 g_bottom_skills.belt_fired[std::size_t(belt)] = frame_ms ? frame_ms : 1;
             } else if (y < 22 && pad_field()) skill_strip = 0;
+            else if (y < 166 && pad_field() && [&] {
+                // A name on the map: walk there (6 px of slack round it, for a finger).
+                for (const auto& target : g_map_targets)
+                    if (x >= target.left - 6 && x <= target.right + 6 && y >= target.top - 6 && y <= target.bottom + 6)
+                        return start_map_walk(target.x, target.y, target.text, target.exit);
+                return false;
+            }()) {}
             else if (y < 166) {
                 g_handheld_zoom = (g_handheld_zoom + 1) % 3;
                 // Say so: a play tester's tap on the map zoomed the world in and they found no way back.
                 static constexpr std::array<const char*, 3> kZoom = { "View: close", "View: normal", "View: far" };
-                belt_note = std::string(kZoom[std::size_t(std::clamp(g_handheld_zoom, 0, 2))]) + "  (touch the map again to change)";
+                belt_note = std::string(kZoom[std::size_t(std::clamp(g_handheld_zoom, 0, 2))]) + "  (touch the map again; a name: walk there)";
                 belt_note_at = std::max<std::uint32_t>(1, std::uint32_t(SDL_GetTicks()));
             }
         }

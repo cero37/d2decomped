@@ -82,7 +82,7 @@ jobs:
         run: |
           mkdir out
           makerom/makerom -f cia -o out/sanctuary-pocket.cia -elf in/build-3ds/d2d-stripped.elf -rsf in/platform/3ds/cia/d2d.rsf \
-            -target t -exefslogo -icon in/build-3ds/icon.icn -banner in/build-3ds/banner.bnr
+            -target t -exefslogo -icon in/build-3ds/icon.icn -banner in/build-3ds/banner.bnr -major 0 -minor 0 -micro 1
           cp in/build-3ds/d2d.3dsx out/sanctuary-pocket.3dsx
       - uses: actions/upload-artifact@v4
         with:

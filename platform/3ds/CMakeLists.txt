@@ -32,10 +32,10 @@ list(APPEND CMAKE_MODULE_PATH "${D2D_ROOT}/cmake")
 set(D2D_CHECK_HEADERS OFF CACHE BOOL "" FORCE)
 include(HeaderCheck)
 
-set(D2D_VERSION "3ds-dev")
+set(D2D_VERSION "0.0.1-alpha")   # Sanctuary Pocket; the CIA says 0.0.1 (make-cia.sh, the 3ds workflow)
 find_package(Git QUIET)
 if(GIT_FOUND)
-    execute_process(COMMAND ${GIT_EXECUTABLE} describe --always --dirty --abbrev=7 WORKING_DIRECTORY ${D2D_ROOT}
+    execute_process(COMMAND ${GIT_EXECUTABLE} describe --always --dirty --abbrev=7 --match "3ds-v*" WORKING_DIRECTORY ${D2D_ROOT}
         OUTPUT_VARIABLE git_hash OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
 endif()
 if(NOT git_hash)
