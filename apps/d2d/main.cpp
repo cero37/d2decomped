@@ -2022,6 +2022,23 @@ int run_windowed(std::vector<std::uint8_t>& framebuffer,
                 if (!second) {}
                 else if (town.held && !town.use_item.placed()) draw_held(*second, *scene, *town.held, at_x, at_y);
                 else if (pad_in_use && words_page) {}
+                else if (!pad_cursor_hidden && g_bottom_map.on) {
+                    // A fitted page (the bag, a store, the stash): a gold ring with a dot, not the game's gauntlet, which
+                    // players read as a glove held in the hand (the emulator play tests, rounds 4 and 5).
+                    const int width = fb_width(*second), height = int(second->size() / 4 / std::size_t(std::max(width, 1)));
+                    const auto put = [&](int x, int y, std::uint8_t r, std::uint8_t g, std::uint8_t b) {
+                        if (x < 0 || y < 0 || x >= width || y >= height) return;
+                        auto* pixel = second->data() + (std::size_t(y) * std::size_t(width) + std::size_t(x)) * 4;
+                        pixel[0] = r; pixel[1] = g; pixel[2] = b;
+                    };
+                    for (int dy = -7; dy <= 7; ++dy)
+                        for (int dx = -7; dx <= 7; ++dx) {
+                            const int reach = dx * dx + dy * dy;
+                            if (reach >= 30 && reach <= 49) put(at_x + dx, at_y + dy, 255, 220, 110);          // the ring
+                            else if ((reach >= 20 && reach < 30) || (reach > 49 && reach <= 60)) put(at_x + dx, at_y + dy, 20, 14, 6);   // its dark edge
+                            else if (reach <= 2) put(at_x + dx, at_y + dy, 255, 240, 180);                    // the dot
+                        }
+                }
                 else if (!pad_cursor_hidden && scene->cursor.frames_per_direction() >= 8) {
                     const auto& frame = scene->cursor.frame(0, mouse.down ? 7 : 0);
                     blit_sprite(*second, frame, pal, at_x + frame.offset_x, at_y + frame.offset_y - int(frame.height) + 1);
