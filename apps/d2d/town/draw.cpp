@@ -162,7 +162,7 @@ auto Town::draw(std::vector<std::uint8_t>& framebuffer, const Mouse& mouse, std:
     // A handheld with a panel up: hover text is kept for the panel's page, not drawn where the frame has it.
     handheld_hovers.clear();
     // A panel's page that nothing has touched keeps last frame's pixels: no input for 150 ms, the cursor
-    // where it was, the page drawn under a quarter second ago (gold picked up, a delay counting: it catches
+    // where it was, the page drawn under a second ago (not a quarter: at 5 fps a store page redrew every other frame; gold picked up, a delay counting: it catches
     // up then). An NPC's words run on their own clock: drawn each frame.
     static std::vector<std::uint8_t> kept_page;
     static std::uint64_t kept_at = 0;
@@ -171,9 +171,23 @@ auto Town::draw(std::vector<std::uint8_t>& framebuffer, const Mouse& mouse, std:
     const std::uint64_t ticks = SDL_GetTicks();
     static const bool never_keep = std::getenv("D2D_NO_KEEP") != nullptr;   // A/B: every frame drawn
     g_keep_panels = !never_keep && g_world_only && kept && g_bottom_panels && speech.npc < 0 && !help.open && !game_menu.open && !controls.open
-                 && mouse.x == kept_x && mouse.y == kept_y && !mouse.down && ticks - g_last_event_ms > 150 && ticks - kept_at < 250;
+                 && mouse.x == kept_x && mouse.y == kept_y && !mouse.down && ticks - g_last_event_ms > 150 && ticks - kept_at < 1000;
     g_hover_capture = g_world_only && g_bottom_panels ? &handheld_hovers : nullptr;
+    if (g_world_only && scene && store.npc >= 0) {
+        const auto& bag = scene->inv_layout[std::size_t(std::max(character.character_class, 0))];
+        const auto in = [&](int left, int top, int width, int height) { return mouse.x >= left && mouse.x < left + width && mouse.y >= top && mouse.y < top + height; };
+        bool in_bag = in(bag.grid_x, bag.grid_y, bag.cols * bag.box_w, bag.rows * bag.box_h);
+        for (const auto& box : bag.slots) in_bag = in_bag || (box[2] > 0 && in(box[0], box[1], box[2], box[3]));
+        g_skip_bag_panel = (in(96, 123, 290, 290) || !inv_open) && !held;    // a held item's outline can lie over both
+        g_skip_store_panel = in_bag && !held;
+        static int last_skip = -1;
+        if (const int skip = int(g_skip_bag_panel) + 2 * int(g_skip_store_panel); skip != last_skip) {
+            d2d::log::info("store page: skip {} (cursor {}, {}; bag shown {})", skip == 1 ? "bag" : skip == 2 ? "store" : "none", mouse.x, mouse.y, inv_open);
+            last_skip = skip;
+        }
+    }
     draw_view(ui_buffer, &framebuffer, mouse, frame_ms);
+    g_skip_store_panel = g_skip_bag_panel = false;
     g_hover_capture = nullptr;
     if (g_world_only) {
         g_bottom_frame = &ui_buffer;
@@ -285,7 +299,12 @@ auto Town::draw(std::vector<std::uint8_t>& framebuffer, const Mouse& mouse, std:
             panel_was_open = false;
         }
         // The hover text the frame would have drawn: on the page, inside the screen.
-        if (!g_keep_panels && !handheld_hovers.empty() && scene && g_bottom_panels && !g_bottom_whole) {
+        // The skill tree just opened: its hover (the skill the cursor starts on) covered the whole page, tabs and all,
+        // till B (the emulator play test). It waits for the cursor to move.
+        if (tree_open && !tree_was_open) { tree_open_x = mouse.x; tree_open_y = mouse.y; }
+        tree_was_open = tree_open;
+        const bool tree_resting = tree_open && mouse.x == tree_open_x && mouse.y == tree_open_y;
+        if (!g_keep_panels && !handheld_hovers.empty() && scene && g_bottom_panels && !g_bottom_whole && !tree_resting) {
             if (fitted) {
                 int at_x = -100, at_y = -100;
                 if (!g_bottom_map.to_page(mouse.x, mouse.y, at_x, at_y)) at_x = at_y = -100;
@@ -606,6 +625,33 @@ auto Town::draw_view(std::vector<std::uint8_t>& framebuffer, std::vector<std::ui
             const int text_x = left + plate_w + gap;
             font.draw_tinted(*wide, std::uint32_t(width), kScreenHeight, pal, text_x + 1, text_y + 1, hint, 0, 0, 0);
             font.draw_tinted(*wide, std::uint32_t(width), kScreenHeight, pal, text_x, text_y, hint, 255, 232, 150);
+        }
+        // A level up: the game's own sign is a sound and the number in the HUD's corner, which a play tester missed; say
+        // it, and where the points go, for five seconds above the prompt's line.
+        if (g_world_only && wide) {
+            const int now_level = int(character.stats.get(d2d::d2s::kLevel));
+            const auto ticks = std::uint32_t(SDL_GetTicks());
+            if (level_seen_name == character.name && level_seen > 0 && now_level > level_seen) level_note_at = std::max<std::uint32_t>(1, ticks);
+            if (level_seen_name != character.name) level_note_at = 0;
+            level_seen = now_level; level_seen_name = character.name;
+            if (level_note_at && ticks - level_note_at < 5000) {
+                const auto& pal = scene->act_pal.entries().empty() ? scene->pal : scene->act_pal;
+                const auto& font = g_handheld_zoom > 0 && scene->font24.line_height() > 0 ? scene->font24 : scene->font;
+                const int width = fb_width(*wide), line = font.line_height();
+                const std::string head = std::format("Level {}!", now_level);
+                std::string points;
+                const int stat_points = int(character.stats.get(d2d::d2s::kStatPts)), skill_points = int(character.stats.get(d2d::d2s::kSkillPts));
+                if (stat_points > 0 && skill_points > 0) points = "Points to spend: Start > Character, Skill Tree";
+                else if (stat_points > 0) points = "Stat points: Start > Character";
+                else if (skill_points > 0) points = "Skill point: Start > Skill Tree";
+                const int top = g_clip_top + line * 2;
+                font.draw_tinted(*wide, std::uint32_t(width), kScreenHeight, pal, (width - font.measure(head)) / 2 + 1, top + 1, head, 0, 0, 0);
+                font.draw_tinted(*wide, std::uint32_t(width), kScreenHeight, pal, (width - font.measure(head)) / 2, top, head, 255, 232, 150);
+                if (!points.empty()) {
+                    font.draw_tinted(*wide, std::uint32_t(width), kScreenHeight, pal, (width - font.measure(points)) / 2 + 1, top + line + 3, points, 0, 0, 0);
+                    font.draw_tinted(*wide, std::uint32_t(width), kScreenHeight, pal, (width - font.measure(points)) / 2, top + line + 2, points, 255, 255, 255);
+                }
+            }
         }
         // A belt slot just used (the D-pad): what went, over the prompt's line, for a second and a half.
         if (g_world_only && wide && !belt_note.empty() && belt_note_at && std::uint32_t(SDL_GetTicks()) - belt_note_at < 1500) {

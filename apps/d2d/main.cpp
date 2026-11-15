@@ -871,6 +871,10 @@ int run_windowed(std::vector<std::uint8_t>& framebuffer,
         mouse.release_this_frame = false;
         mouse.rpress_this_frame = false;
         mouse.wheel = 0;
+        // A handheld tap whose lift came in the same frame as its touch: the lift is this frame's, so the button saw
+        // it held for one frame first (quick taps on the store's tabs did nothing at 5 fps: the emulator's scripted runs).
+        static bool touch_lift_pending = false;
+        if (touch_lift_pending) { mouse.down = false; mouse.release_this_frame = true; touch_lift_pending = false; }
         std::string text_this_frame;
         bool        backspace_this_frame = false;
         std::vector<SDL_Keycode> keys_this_frame;
@@ -974,7 +978,8 @@ int run_windowed(std::vector<std::uint8_t>& framebuffer,
                     }
                     else { mouse.x = touch_x * 5 / 2 + 1; mouse.y = touch_y * 5 / 2 + 1; }
                     if (down) { mouse.down = true; mouse.press_this_frame = true; }
-                    if (up) { mouse.down = false; mouse.release_this_frame = event.type == SDL_EVENT_FINGER_UP; }
+                    if (up && mouse.press_this_frame && event.type == SDL_EVENT_FINGER_UP) touch_lift_pending = true;   // next frame's
+                    else if (up) { mouse.down = false; mouse.release_this_frame = event.type == SDL_EVENT_FINGER_UP; }
                     pad_in_use = false; mouse_took_over = true;
                 }
                 continue;
@@ -1275,7 +1280,7 @@ int run_windowed(std::vector<std::uint8_t>& framebuffer,
                 // A handheld's panel page: the d-pad goes by where things lie on the second screen, and its buttons (a store's
                 // tabs, Buy, Sell, Leave, To my items) are stops too. By the frame's points, right stopped at the grid's last
                 // column and the store's buttons could be reached only by touch (the emulator play test).
-                if (g_world_only && screen == Screen::InGame && g_bottom_map.on && !town.tree_open && !by_key && (pad_actions.snap_x != 0 || pad_actions.snap_y != 0)) {
+                if (g_world_only && screen == Screen::InGame && g_bottom_map.on && !town.tree_open && town.npc_menu.npc < 0 && town.speech.npc < 0 && !by_key && (pad_actions.snap_x != 0 || pad_actions.snap_y != 0)) {
                     std::vector<pad::Point> centres, frames;
                     for (const auto& point : town.pad_snap_points())
                         if (int page_x = 0, page_y = 0; g_bottom_map.to_page(point.x, point.y, page_x, page_y)) { centres.push_back({ page_x, page_y }); frames.push_back(point); }
@@ -1285,7 +1290,10 @@ int run_windowed(std::vector<std::uint8_t>& framebuffer,
                         if (const int pick = pad::snap_pick(at_x, at_y, pad_actions.snap_x, pad_actions.snap_y, centres); pick >= 0) {
                             mouse.x = frames[std::size_t(pick)].x; mouse.y = frames[std::size_t(pick)].y;
                         }
-                    } else if (!frames.empty()) { mouse.x = frames.front().x; mouse.y = frames.front().y; }
+                    } else if (const int pick = pad::snap_pick(mouse.x, mouse.y, pad_actions.snap_x, pad_actions.snap_y, frames); pick >= 0) {
+                        // The cursor off the page (an NPC's menu opens with it mid-frame): a hop by the frame's points, as before.
+                        mouse.x = frames[std::size_t(pick)].x; mouse.y = frames[std::size_t(pick)].y;
+                    }
                     pad_actions.snap_x = pad_actions.snap_y = 0;
                 }
                 const auto points = by_key || (pad_actions.snap_x == 0 && pad_actions.snap_y == 0) ? std::vector<pad::Point>{} : screen == Screen::InGame ? town.pad_snap_points() : menu_buttons();

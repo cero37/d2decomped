@@ -449,6 +449,10 @@ struct Town {
     [[nodiscard]] bool pad_field_or_free() const;
     std::string belt_note;                        // a handheld: "Used Minor Healing Potion", shown on the top screen a moment
     std::uint32_t belt_note_at = 0;               // SDL_GetTicks when it went
+    int level_seen = 0;                           // a handheld: the hero's level last frame, for the level-up note
+    std::string level_seen_name;                  // ... whose (another hero loaded is no level up)
+    std::uint32_t level_note_at = 0;              // SDL_GetTicks of the level up, shown 5 s
+    bool tree_was_open = false; int tree_open_x = -1, tree_open_y = -1;   // a handheld: where the cursor was as the skill tree opened (no hover till it moves)
     void note_belt(int column);
     bool run_held = false;                        // Run's key made the player run
     bool portraits_hidden = false;

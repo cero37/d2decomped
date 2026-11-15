@@ -149,8 +149,17 @@ auto Town::pad_pick(const PadPlayer& player_pad, const UnitState& unit, bool use
                     return { PadPick::kMonster, foes[std::size_t(hit)].id, foes[std::size_t(hit)].x, foes[std::size_t(hit)].y };
         }
         if (!uses) return {};
+        // A handheld: only what stands inside the top screen's view (its feet well in, as the art rises from them).
+        // By distance alone the prompt named a chest, a bed, the waypoint and the Den's mouth off or at the screen's
+        // edge (the emulator play test): the view is wider than tall, and more of it lies above the hero than below.
+        const float zoom = float(g_clip_bottom - g_clip_top) / float(kHandheldHeight);
+        const auto in_view = [&](float x, float y) {
+            if (!g_world_only) return true;
+            const float across = (x - hero_x - (y - hero_y)) * float(kIsoW / 2), down = (x - hero_x + (y - hero_y)) * float(kIsoH / 2);
+            return std::abs(across) <= 176.f * zoom && down >= -96.f * zoom && down <= 92.f * zoom;
+        };
         std::vector<pad::Candidate> drops;
-        for (const auto& item : view.ground) drops.push_back({ item.id, item.x, item.y });
+        for (const auto& item : view.ground) if (in_view(item.x, item.y)) drops.push_back({ item.id, item.x, item.y });
         if (const int pick = pad::pick_target(hero_x, hero_y, face_x, face_y, drops, -1, pad::Aim{ 3.5f, 3.5f, -0.2f }); pick >= 0)
             return { PadPick::kItem, drops[std::size_t(pick)].id, drops[std::size_t(pick)].x, drops[std::size_t(pick)].y };
         std::vector<pad::Candidate> things;      // NPCs and objects you can use
@@ -160,10 +169,11 @@ auto Town::pad_pick(const PadPlayer& player_pad, const UnitState& unit, bool use
                 const UnitState* state = i < view.npc_states.size() ? &view.npc_states[i] : nullptr;
                 if ((state && state->hidden) || npc.name.empty()) continue;
                 if (state && !state->mode.empty() && npc.root == "objects" && !(npc.selectable >> game::mode_index(state->mode) & 1)) continue;
+                if (!in_view(state ? state->x : npc.x, state ? state->y : npc.y)) continue;
                 things.push_back({ int(i), state ? state->x : npc.x, state ? state->y : npc.y });
             }
         for (const auto& portal : view.portals)  // Interact's ids, as the mouse's hover names them (Cain's, 8, has no name)
-            if (portal.which < int(d2d::game::World::kGamePortals)) things.push_back({ -2000 - portal.which, portal.x, portal.y });
+            if (portal.which < int(d2d::game::World::kGamePortals) && in_view(portal.x, portal.y)) things.push_back({ -2000 - portal.which, portal.x, portal.y });
         for (const auto& corpse : view.corpses) things.push_back({ -3000 - corpse.which, corpse.x, corpse.y });
         // 3.5, not 4.5: at 4.5 the prompt named a well and Akara at or past the top screen's edge (the emulator play test).
         if (const int pick = pad::pick_target(hero_x, hero_y, face_x, face_y, things, -1, pad::Aim{ 3.5f, 3.5f, -0.2f }); pick >= 0)
@@ -172,7 +182,8 @@ auto Town::pad_pick(const PadPlayer& player_pad, const UnitState& unit, bool use
         // the one in reach is A's. The point sent is the middle of its select box (World::warp_clicked).
         std::vector<pad::Candidate> ways;
         if (level)
-            for (std::size_t i = 0; i < level->warps.size(); ++i) ways.push_back({ int(i), level->warps[i].unit_x, level->warps[i].unit_y });
+            for (std::size_t i = 0; i < level->warps.size(); ++i)
+                if (in_view(level->warps[i].unit_x, level->warps[i].unit_y)) ways.push_back({ int(i), level->warps[i].unit_x, level->warps[i].unit_y });
         if (const int pick = pad::pick_target(hero_x, hero_y, face_x, face_y, ways, -1, pad::Aim{ 6.f, 6.f, -0.2f }); pick >= 0) {
             const auto& warp = level->warps[std::size_t(ways[std::size_t(pick)].id)];
             const auto [click_x, click_y] = d2d::game::World::warp_click(warp);

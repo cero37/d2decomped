@@ -341,6 +341,7 @@ void render_ingame(std::vector<std::uint8_t>& framebuffer,
         }
         if (g_world_only) {   // a panel is open: the PC's HUD and panels on black, the second screen a window of them
             if (g_keep_panels) return;                    // the page as it was (Town::draw puts it back)
+            const prof::Mark timed("panels: clear");
             std::fill_n(reinterpret_cast<std::uint32_t*>(framebuffer.data()), framebuffer.size() / 4, kOpaqueBlack);
         } else if (wide)
             for (std::size_t y = 0; y < kScreenHeight; ++y)
@@ -349,6 +350,7 @@ void render_ingame(std::vector<std::uint8_t>& framebuffer,
         // Who reads the hover text: red requirements, class lines, attack speed.
         std::optional<d2d::rules::Wearer> wearer_value;
         if (inventory && hud_stats && class_idx >= 0 && class_idx < 7) {
+            const prof::Mark timed("panels: wearer");
             wearer_value = d2d::game::wearer(scene, kUiToSaveClass[class_idx], *inventory, *hud_stats);
             wearer_value->holy_shield = hud.holy_shield;
         }
@@ -364,7 +366,9 @@ void render_ingame(std::vector<std::uint8_t>& framebuffer,
         // The 800x600 border round an open side panel, under the panels
         // (FUN_00499450: FUN_00498630 left, FUN_00498700 right; bottom-left
         // anchored at these spots).
-        if (fb_width(framebuffer) == int(kScreenWidth) && scene.border_frame.frames_per_direction() >= 10) {
+        // Not a handheld's: its pages take the panels' grids and words, never the frame's border (30 ms a frame there).
+        if (!g_world_only && fb_width(framebuffer) == int(kScreenWidth) && scene.border_frame.frames_per_direction() >= 10) {
+            const prof::Mark timed("panels: border");
             static constexpr std::array<std::array<int, 2>, 10> kSpots{ { { 0, 0xfd }, { 0x100, 0x3f }, { 0, 0x1e4 }, { 0, 0x229 }, { 0x100, 0x229 },
                                                                           { 400, 0x3f }, { 0x220, 0xfd }, { 0x2c9, 0x1e4 }, { 0x220, 0x229 }, { 400, 0x229 } } };
             for (std::size_t frame = 0; frame < kSpots.size(); ++frame)
@@ -379,6 +383,8 @@ void render_ingame(std::vector<std::uint8_t>& framebuffer,
                 return string_id(scene, 0xd03) + std::to_string(d2d::rules::item_price(scene.rules, item, store->npc_id, true, store->header));
             };
         auto draw_inventory_panel = [&] {
+            const prof::Mark timed("panels: inventory");
+            if (g_skip_bag_panel) return;
             if (inventory && class_idx >= 0 && class_idx < 7)
             {
                 draw_inventory(framebuffer, scene, scene.inv_layout[std::size_t(kUiToSaveClass[class_idx])], *inventory,
@@ -387,12 +393,15 @@ void render_ingame(std::vector<std::uint8_t>& framebuffer,
             }
         };
         auto draw_store_panel = [&] {
+            const prof::Mark timed("panels: store");
+            if (g_skip_store_panel) return;
             if (store && store->npc >= 0)
             {
                 draw_store(framebuffer, scene, *store, mouse_x, mouse_y, hover_wearer, inventory);
                 if (hud_stats) draw_gold(framebuffer, scene, *hud_stats, true);
             }
         };
+        const prof::Mark timed_sides("panels: sides");
         if (char_stats) draw_char_panel(framebuffer, scene, *char_stats, panel ? *panel : PanelStats{}, name, class_idx, stat_pressed);
         // Each panel draws its own hover text: the one under the mouse goes last so
         // the other doesn't cover it (the store on the left, the inventory right).
@@ -412,7 +421,8 @@ void render_ingame(std::vector<std::uint8_t>& framebuffer,
         }
         if (npc_menu) draw_npc_menu(framebuffer, scene, *npc_menu, mouse_x, mouse_y, elapsed_ms);
         if (speech) draw_speech(framebuffer, scene, *speech, elapsed_ms);
-        if (hud_stats && !hud.hidden) draw_hud(framebuffer, scene, *hud_stats, hud, mouse_x, mouse_y);
+        if (hud_stats && !hud.hidden) { const prof::Mark timed("panels: hud"); draw_hud(framebuffer, scene, *hud_stats, hud, mouse_x, mouse_y); }
+        const prof::Mark timed_belt("panels: belt");
         if (belt && !hud.hidden) draw_belt(framebuffer, scene, *belt, mouse_x, mouse_y, hover_wearer,
                             belt_popup, hud.belt_keys, hud.pad_bar, &sell_price);
         // Dev overlay: a red dot on every blocked subtile around the camera.

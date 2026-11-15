@@ -93,6 +93,9 @@ inline bool g_bottom_whole = false;
 // drawn under a quarter second ago). The panels at 800x600 and their page cost most of a 3DS frame.
 inline std::uint64_t g_last_event_ms = 0;
 inline bool g_keep_panels = false;
+// A handheld with a store beside the bag: the side its page does not show this frame is not drawn (both cost ~60 ms a
+// frame on the console: the store page ran at 5 fps). Set by Town::draw only when the cursor is in one side's grid.
+inline bool g_skip_store_panel = false, g_skip_bag_panel = false;
 // Clicks the game makes for itself, one a frame (main.cpp): a thing moved between the bag and the stash
 // (Town::handheld_stash_move) is picked up, put down where it fits, and the cursor goes back where it was.
 // `wait_held`: not until the pick-up is back from the World (the thing on the cursor).

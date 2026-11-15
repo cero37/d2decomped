@@ -244,8 +244,13 @@ void draw_bottom_hud(std::vector<std::uint8_t>& framebuffer, const Scene& scene,
                 const auto* skill = id >= 0 ? scene.skills.get(id) : nullptr;
                 const std::string name = skill ? skill->name : std::string(skillpad::action_label(id, true));
                 scene.font.draw_tinted(framebuffer, kScreenWidth, kScreenHeight, pal, centre_x - scene.font.measure(name) / 2, centre_y - 16, name, 255, 255, 255);
-                const std::string how = lists.feedback.empty() ? std::string("press a button (B too) or touch a slot . Select: done") : lists.feedback;
+                // Two short lines: one ran edge to edge over the slots' icons (the emulator play test).
+                const std::string how = lists.feedback.empty() ? std::string("Press a button (B too)") : lists.feedback;
                 small.draw_tinted(framebuffer, kScreenWidth, kScreenHeight, pal, centre_x - small.measure(how) / 2, centre_y + 2, how, 199, 179, 119);
+                if (lists.feedback.empty()) {
+                    const std::string more = "or touch a slot . Select: done";
+                    small.draw_tinted(framebuffer, kScreenWidth, kScreenHeight, pal, centre_x - small.measure(more) / 2, centre_y + 14, more, 199, 179, 119);
+                }
             }
         } else if (state.automap && scene.automap_cels_small.frames_per_direction() > 0) {
             const auto& map = *state.automap;
