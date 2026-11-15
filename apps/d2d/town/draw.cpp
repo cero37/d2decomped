@@ -677,8 +677,17 @@ auto Town::draw_view(std::vector<std::uint8_t>& framebuffer, std::vector<std::ui
         if (g_world_only && wide && level && !d2d::rules::level_ids::is_town(level->id) && !view.dead) {
             const auto life = character.stats.get(d2d::d2s::kLife) >> 8, most = character.stats.get(d2d::d2s::kMaxLife) >> 8;
             if (most > 0 && life > 0 && life * 2 < most) {   // always on (it blinked off a third of the time and shots missed it); its red pulses   // half, not a third: at a third it came at 13 of 75, too late (round 12)
-                const bool potion = std::ranges::any_of(character.items, [](const d2d::d2s::Item& item) { return item.location == d2d::d2s::item_location::kBelt; });
-                const std::string words = potion ? "Low life!  D-pad: drink a potion" : "Low life!  No potions in the belt";
+                // Which way: the first belt column with a healing potion in it (Belt 1..4: up, down, left, right). A tester
+                // pressed an empty one at 14 life (round 17).
+                int column = -1, healing = -1;
+                for (const auto& item : character.items) {
+                    if (item.location != d2d::d2s::item_location::kBelt || item.column < 0 || item.column > 3) continue;
+                    if (column < 0) column = item.column;
+                    if (healing < 0 && (item.code.starts_with("hp") || item.code.starts_with("rv"))) healing = item.column;
+                }
+                if (healing >= 0) column = healing;
+                static constexpr std::array<const char*, 4> kWay = { "Up", "Down", "Left", "Right" };
+                const std::string words = column >= 0 ? std::string("Low life!  D-pad ") + kWay[std::size_t(column)] + ": drink" : "Low life!  No potions in the belt";
                 const auto& pal = scene->act_pal.entries().empty() ? scene->pal : scene->act_pal;
                 const auto& font = g_handheld_zoom > 0 && scene->font24.line_height() > 0 ? scene->font24 : scene->font;
                 const int width = fb_width(*wide), top = g_clip_top + font.line_height() / 2;

@@ -214,6 +214,9 @@ auto World::take_character(const Character& entering) -> void {
         // client's copy is whole points (its 0x18 packet, `value << 8`). The
         // same function sets stamina (0xa) to the maximum (0xb), 0x56b01d.
         actor->character.stats.values[d2d::d2s::kStamina] = actor->character.stats.values[d2d::d2s::kMaxStamina];
+        // ... but a save made while dead (a handheld's Save and Exit with the death page up: round 17) held life 0: the
+        // hero rose in camp at 0 beside its corpse. It comes in with its full life.
+        if (actor->character.stats.values[d2d::d2s::kLife] <= 0) actor->character.stats.values[d2d::d2s::kLife] = actor->character.stats.values[d2d::d2s::kMaxLife];
         // The save's maxima are its own (Fight::own_stats): the last game's
         // gear and Battle Orders shares go, or the next refresh adds none and
         // the next save takes them off again.

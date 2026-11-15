@@ -398,7 +398,8 @@ auto Town::walk(const Mouse& mouse, bool over_ui, Audio& audio, std::uint32_t fr
         // 0 / 1, UI 9 or 0xb up, the player in a room): it draws and plays
         // sounds, the server's frame (FUN_0052fc20) doesn't run. A hosted
         // game goes on, as a joined one does: its joiners are playing.
-        if (!net_game && !lan_host && (game_menu.open || controls.open)) world_ms = frame_ms;
+        // A handheld's Start list (the panels' menu on the second screen) pauses too: a tester died with it up (round 17).
+        if (!net_game && !lan_host && (game_menu.open || controls.open || (g_world_only && skill_strip >= 0))) world_ms = frame_ms;
         if (lan_client) {
             for (const auto& command : net.receive()) send(command);
             lan_client_frame(mouse, audio, frame_ms);
