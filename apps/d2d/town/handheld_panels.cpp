@@ -237,11 +237,14 @@ auto Town::handheld_sell(int mouse_x, int mouse_y) -> bool {
 auto Town::handheld_map_labels() -> void {
     static const Level* made_for = nullptr;
     g_map_people.clear();
-    if (g_world_only && scene && level && d2d::rules::level_ids::is_town(level->id))   // each frame: they walk about
+    if (g_world_only && scene && level)   // each frame: the camp's people walk about; and any level's waypoint
         for (std::size_t i = 0; i < level->npcs.size(); ++i) {
             const auto& npc = level->npcs[i];
             const UnitState* state = i < view.npc_states.size() ? &view.npc_states[i] : nullptr;
-            if (npc.root == "objects" || npc.name.empty() || (state && state->hidden)) continue;
+            if (npc.name.empty() || (state && state->hidden)) continue;
+            // A waypoint, named on the map wherever it is (a play tester could not find the camp's or the Cold Plains').
+            const bool waypoint = npc.root == "objects" && npc.name.find("aypoint") != std::string::npos;
+            if (!waypoint && (npc.root == "objects" || !d2d::rules::level_ids::is_town(level->id))) continue;
             g_map_people.push_back({ (state ? state->x : npc.x) + float(level->world_x), (state ? state->y : npc.y) + float(level->world_y), npc.name });
         }
     if (!g_world_only || !scene || !level || !world.game_data) { g_map_labels.clear(); made_for = nullptr; return; }
@@ -736,7 +739,7 @@ auto Town::handheld_fit_panel(const Mouse& mouse) -> bool {
                 const auto& ware = store.tabs[std::size_t(store.tab)][std::size_t(stock)];   // an index of the tab
                 const int cost = d2d::rules::item_price(scene->rules, ware, store.npc_id, false, store.header, store.reduced);
                 const bool afford = cost >= 0 && cost <= gold_now;
-                const std::string words = cost < 0 ? std::string("Buy") : afford ? std::format("Buy for {}", cost) : std::format("{} gold: too dear", cost);
+                const std::string words = cost < 0 ? std::string("Buy") : afford ? std::format("Buy for {}", cost) : std::format("Need {} gold", cost);
                 page.box(side, 194, kW - 2, 214, afford, !afford);
                 page.text(page.fit(words, kW - 2 - side - 6), words, (side + kW - 2) / 2, 204, afford ? kWhite : kDimInk, 0);
                 if (afford) { BottomMap::Spot spot{ side, 194, kW - 2, 214, mouse.x, mouse.y }; spot.buy = true; map.spots.push_back(spot); }

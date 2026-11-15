@@ -667,6 +667,20 @@ auto Town::draw_view(std::vector<std::uint8_t>& framebuffer, std::vector<std::ui
                 }
             }
         }
+        // Low life out of camp: a red line at the top, pulsing, and how to drink (a play tester died from 40 of 75 in a
+        // second to a pack and a unique, with a potion in the belt and nothing on screen to say so).
+        if (g_world_only && wide && level && !d2d::rules::level_ids::is_town(level->id) && !view.dead) {
+            const auto life = character.stats.get(d2d::d2s::kLife) >> 8, most = character.stats.get(d2d::d2s::kMaxLife) >> 8;
+            if (most > 0 && life > 0 && life * 3 < most && (SDL_GetTicks() / 400) % 3 != 2) {
+                const bool potion = std::ranges::any_of(character.items, [](const d2d::d2s::Item& item) { return item.location == d2d::d2s::item_location::kBelt; });
+                const std::string words = potion ? "Low life!  D-pad: drink a potion" : "Low life!  No potions in the belt";
+                const auto& pal = scene->act_pal.entries().empty() ? scene->pal : scene->act_pal;
+                const auto& font = g_handheld_zoom > 0 && scene->font24.line_height() > 0 ? scene->font24 : scene->font;
+                const int width = fb_width(*wide), top = g_clip_top + font.line_height() / 2;
+                font.draw_tinted(*wide, std::uint32_t(width), kScreenHeight, pal, (width - font.measure(words)) / 2 + 1, top + 1, words, 0, 0, 0);
+                font.draw_tinted(*wide, std::uint32_t(width), kScreenHeight, pal, (width - font.measure(words)) / 2, top, words, 255, 80, 80);
+            }
+        }
         // A belt slot just used (the D-pad): what went, over the prompt's line, for a second and a half.
         if (static std::uint32_t told = 0; belt_note_at != told) {   // the play tests: is it drawn, and when (the scripted runs never saw it)
             told = belt_note_at;
