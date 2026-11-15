@@ -258,11 +258,15 @@ auto Town::handheld_map_labels() -> void {
         if (placed.level == level->id || std::ranges::contains(led_to, placed.level) || placed.width <= 0) continue;
         const int p_right = placed.x + placed.width, p_bottom = placed.y + placed.height;
         float x = -1, y = -1;
-        if ((p_right == left || placed.x == right) && placed.y < bottom && p_bottom > top) {
-            x = float(p_right == left ? left : right); y = float(std::max(top, placed.y) + std::min(bottom, p_bottom)) / 2.f;
-        } else if ((p_bottom == top || placed.y == bottom) && placed.x < right && p_right > left) {
-            y = float(p_bottom == top ? top : bottom); x = float(std::max(left, placed.x) + std::min(right, p_right)) / 2.f;
+        constexpr int kSlack = 2;                         // edges that meet, give or take a cell
+        const auto near = [](int a, int b) { return std::abs(a - b) <= kSlack; };
+        if ((near(p_right, left) || near(placed.x, right)) && placed.y < bottom && p_bottom > top) {
+            x = float(near(p_right, left) ? left : right); y = float(std::max(top, placed.y) + std::min(bottom, p_bottom)) / 2.f;
+        } else if ((near(p_bottom, top) || near(placed.y, bottom)) && placed.x < right && p_right > left) {
+            y = float(near(p_bottom, top) ? top : bottom); x = float(std::max(left, placed.x) + std::min(right, p_right)) / 2.f;
         }
+        d2d::log::info("map labels: {} at {},{} {}x{}; {} at {},{} {}x{}: {}", level->id, left, top, right - left, bottom - top,
+                       placed.level, placed.x, placed.y, placed.width, placed.height, x < 0 ? "not beside" : "beside");
         if (x < 0) continue;
         const std::string words = name_of(placed.level);
         if (words.empty()) continue;
