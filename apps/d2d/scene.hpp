@@ -171,6 +171,9 @@ struct Scene : GameData {
     void trim_anims(std::uint32_t now_ms, std::uint32_t idle_ms = 15000) const;
     // What the caches hold now, for a handheld's memory log ("anims 12345 KiB (raw 678) ...").
     [[nodiscard]] std::string cache_report() const;
+    // A handheld: the monsters' / NPCs' decoded animations held to `budget` bytes, the longest undrawn let go first
+    // (none drawn this last half second); they are read again when next shown. 12-14 MB of them sat in the Cold Plains.
+    void cap_anims(std::uint32_t now_ms, std::size_t budget) const;
     // Class animations — 7 classes × 5 states, per the RE'd class table at
     // 0x00708a00. State order matches D2's suffix scheme: nu1, nu2, fw,
     // nu3, bw. Class order (rows in the table): assassin, druid, amazon,

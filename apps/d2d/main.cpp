@@ -1904,6 +1904,10 @@ int run_windowed(std::vector<std::uint8_t>& framebuffer,
                 town.update(framebuffer, mouse, keys_this_frame, screen, audio, now_ms, last_ms);
                 // A handheld's heap past 80%: the caches give back early, every 3 s, not only once a build has failed
                 // (from the fifth outdoor area each build ran out and some tiles were never read again: the scripted runs).
+                // Monsters' frames: 10 MiB, 6 MiB when the heap's past 80% (a fight's ~9 MiB at 6 was let go and read again
+                // every second: 1 fps).
+                if (std::getenv("D2D_HANDHELD") && scene)
+                    scene->cap_anims(std::uint32_t(SDL_GetTicks()), std::size_t(d2d::game::g_heap_percent.load(std::memory_order_relaxed) >= 80 ? 6 : 10) << 20);
                 if (static std::uint32_t reported_at = 0; std::getenv("D2D_HANDHELD") && scene && now_ms - reported_at > 30000) {   // where the heap goes (play tests)
                     reported_at = now_ms;
                     d2d::log::info("memory: heap {}%; {}", d2d::game::g_heap_percent.load(std::memory_order_relaxed), scene->cache_report());

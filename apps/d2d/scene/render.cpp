@@ -129,6 +129,35 @@ void Scene::trim_anims(std::uint32_t now_ms, std::uint32_t idle_ms) const {
     for (const auto& [key, anim] : npc_anims) trim(anim);
 }
 
+void Scene::cap_anims(std::uint32_t now_ms, std::size_t budget) const {
+    static std::uint32_t checked_ms = 0;
+    if (now_ms - checked_ms < 1000) return;
+    checked_ms = now_ms;
+    const auto bytes_of = [](const PlayerAnim& anim) {
+        std::size_t bytes = 0;
+        for (const auto& layer : anim.decoded) for (const auto& frame : layer.frames()) bytes += frame.pixels.size();
+        return bytes;
+    };
+    std::vector<std::pair<std::uint32_t, const PlayerAnim*>> held;
+    std::size_t total = 0;
+    for (const auto& [key, anim] : npc_anims)
+        if (const auto bytes = bytes_of(anim); bytes > 0) { total += bytes; held.emplace_back(anim.used_ms, &anim); }
+    if (total <= budget) return;
+    std::ranges::sort(held, [&](const auto& a, const auto& b) { return std::int32_t(a.first - b.first) < 0; });   // longest undrawn first
+    std::size_t freed = 0;
+    for (const auto& [used, anim] : held) {
+        if (total - freed <= budget) break;
+        if (now_ms - used < 500) break;                       // drawn just now: kept
+        for (std::size_t layer = 0; layer < anim->decoded.size(); ++layer)
+            if (!anim->path[layer].empty() && !anim->dropped[layer] && anim->dcc[layer].empty() && anim->decoded[layer].frames_per_direction() > 0) {
+                for (const auto& frame : anim->decoded[layer].frames()) freed += frame.pixels.size();
+                anim->decoded[layer] = {};
+                anim->dropped[layer] = true;
+            }
+    }
+    if (freed) d2d::log::info("memory: monster animations {} KiB over their {} KiB, {} KiB let go", total / 1024, budget / 1024, freed / 1024);
+}
+
 std::string Scene::cache_report() const {
     const auto dcc_bytes = [](const d2d::dcc::Sprite& sprite) { std::size_t bytes = 0; for (const auto& frame : sprite.frames()) bytes += frame.pixels.size(); return bytes; };
     const auto anim_bytes = [&](const PlayerAnim& anim, std::size_t& decoded, std::size_t& raw) {
