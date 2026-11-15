@@ -4,6 +4,21 @@
 
 ![D2Decomp widescreen gameplay](https://mindwerks.net/assets/images/2026/10/d2decomp-widescreen-rogue-encampment.png)
 
+## Sanctuary Pocket: the New 3DS port
+
+[![Sanctuary Pocket](platform/3ds/cia/art/preview/banner_3x.png)](platform/3ds/README.md)
+
+This fork carries **Sanctuary Pocket**, D2Decomp on the New Nintendo 3DS: the world on the top screen
+at 400×240, and the HUD, belt, map, inventory, skills, stores and menus on the bottom touch screen,
+playable with buttons or touch. Install it from the
+[latest 3ds build](https://github.com/ratherDashing/d2decomped/releases/tag/3ds-nightly): scan its
+QR code with FBI. You bring your own Diablo II + Lord of Destruction files. Setup, controls and
+building are in [platform/3ds/README.md](platform/3ds/README.md).
+
+Feedback is very welcome: [open an issue](https://github.com/ratherDashing/d2decomped/issues/new/choose)
+with what happened and your `/3ds/d2d/d2d.log`. Everything else in this README is the upstream
+project's, [psi29a/d2decomped](https://github.com/psi29a/d2decomped), which this fork follows.
+
 D2Decomp is a cross-platform, open-source reimplementation of the Diablo II:
 Lord of Destruction game engine. It aims to reproduce the original game's
 behavior, using version 1.14d as its reference. The long-term goal is a
@@ -196,3 +211,24 @@ finding the Act III quest-state bounds crash and preparing the initial fix.
 
 Thanks to [CascaMori](https://github.com/CascaMori) for extensive playtesting and
 reports leading to major fixes.
+
+### Sanctuary Pocket (the 3DS port)
+
+- The engine is D2Decomp, by [psi29a](https://github.com/psi29a) and its
+  [contributors](https://github.com/psi29a/d2decomped/graphs/contributors) (GPL-3.0-or-later); the
+  port is built on it and follows it.
+- Built with [devkitPro](https://devkitpro.org/)'s devkitARM, libctru and citro3d, and
+  [SDL3](https://www.libsdl.org/)'s 3DS backend (zlib License), with
+  [StormLib](https://github.com/ladislav-zezula/StormLib) (MIT) and
+  [CLI11](https://github.com/CLIUtils/CLI11) (BSD-3-Clause). CIAs are packed with
+  [makerom](https://github.com/3DSGuy/Project_CTR) and
+  [bannertool](https://github.com/diasurgical/bannertool).
+- The HOME Menu icon, banner and jingle are original, made by
+  [a script](platform/3ds/cia/art/make_assets.py); the banner's lettering is set in
+  Linux Libertine Display by Philipp H. Poll (SIL Open Font License 1.1).
+- [exsilium/3ds-d2](https://github.com/exsilium/3ds-d2) (BSD-2-Clause) showed what the New 3DS's
+  memory modes give a CIA. [Karolynaz/devil-3ds](https://github.com/Karolynaz/devil-3ds) set the bar
+  for a purpose-made two-screen interface; it inspired the idea only, and no code or art comes from it.
+- Tested on the [Azahar](https://azahar-emu.org/) emulator and on New 3DS hardware.
+- Diablo and Blizzard Entertainment are trademarks of Blizzard Entertainment, Inc.; Nintendo 3DS is a
+  trademark of Nintendo. This project is not affiliated with or endorsed by either.

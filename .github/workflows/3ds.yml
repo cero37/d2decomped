@@ -1,0 +1,132 @@
+# Sanctuary Pocket (platform/3ds): the New 3DS build. Every push to the 3ds branch builds
+# sanctuary-pocket.cia (HOME Menu) and sanctuary-pocket.3dsx (Homebrew Launcher) and puts them on the
+# rolling pre-release "3ds-nightly", whose page carries a QR code of the CIA's link for FBI
+# (Remote Install > Scan QR Code). A published release tagged 3ds-v... gets the same.
+# No game data is built or shipped: players copy their own Diablo II files to the SD card.
+name: 3ds
+
+on:
+  push:
+    branches: [3ds]
+  pull_request:
+    branches: [3ds]
+  workflow_dispatch:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: 3ds-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container: devkitpro/devkitarm:latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      - name: Dependencies (cached)
+        uses: actions/cache@v4
+        with:
+          path: .deps-3ds
+          key: 3ds-deps-${{ hashFiles('platform/3ds/deps.sh', 'platform/3ds/patches/**') }}
+      - name: Build dependencies
+        run: |
+          [ -f .deps-3ds/prefix/lib/libSDL3.a ] || DEPS=.deps-3ds JOBS=4 sh platform/3ds/deps.sh
+      - name: Build
+        run: |
+          export PATH=$PATH:/opt/devkitpro/devkitARM/bin:/opt/devkitpro/tools/bin
+          cmake -S platform/3ds -B build-3ds -G Ninja -DCMAKE_TOOLCHAIN_FILE=/opt/devkitpro/cmake/3DS.cmake \
+            -DD2D_3DS_DEPS="$GITHUB_WORKSPACE/.deps-3ds"
+          cmake --build build-3ds -j 3
+          arm-none-eabi-strip -o build-3ds/d2d-stripped.elf build-3ds/d2d.elf
+      - name: Banner and icon
+        run: |
+          curl -fsSL -o /tmp/bannertool.zip https://github.com/diasurgical/bannertool/releases/download/1.2.0/bannertool.zip
+          unzip -q /tmp/bannertool.zip -d /tmp/bannertool
+          install /tmp/bannertool/linux-x86_64/bannertool /usr/local/bin/
+          cd platform/3ds/cia
+          bannertool makebanner -i banner.png -a banner.wav -o "$GITHUB_WORKSPACE/build-3ds/banner.bnr"
+          bannertool makesmdh -s 'Sanctuary Pocket' -l 'An unofficial Diablo II engine port — bring your own game files' \
+            -p 'd2decomped contributors' -i icon.png -o "$GITHUB_WORKSPACE/build-3ds/icon.icn"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: build
+          path: |
+            build-3ds/d2d.3dsx
+            build-3ds/d2d-stripped.elf
+            build-3ds/banner.bnr
+            build-3ds/icon.icn
+            platform/3ds/cia/d2d.rsf
+
+  # makerom's release binaries need a newer glibc than devkitARM's image has: packed on the runner.
+  cia:
+    needs: build
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: build
+          path: in
+      - name: makerom
+        run: |
+          curl -fsSL -o makerom.zip https://github.com/3DSGuy/Project_CTR/releases/download/makerom-v0.19.0/makerom-v0.19.0-ubuntu_x86_64.zip
+          unzip -q makerom.zip -d makerom
+          chmod +x makerom/makerom
+      - name: CIA
+        run: |
+          mkdir out
+          makerom/makerom -f cia -o out/sanctuary-pocket.cia -elf in/build-3ds/d2d-stripped.elf -rsf in/platform/3ds/cia/d2d.rsf \
+            -target t -exefslogo -icon in/build-3ds/icon.icn -banner in/build-3ds/banner.bnr
+          cp in/build-3ds/d2d.3dsx out/sanctuary-pocket.3dsx
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sanctuary-pocket
+          path: out/
+      - name: Publish with a QR code
+        if: (github.event_name == 'push' && github.ref == 'refs/heads/3ds') || (github.event_name == 'release' && startsWith(github.event.release.tag_name, '3ds-v'))
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+          EVENT: ${{ github.event_name }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          sudo apt-get install -y -qq qrencode
+          if [ "$EVENT" = release ]; then
+            tag=$RELEASE_TAG
+          else
+            tag=3ds-nightly
+            # The rolling pre-release follows the branch: its tag moves to this commit.
+            if gh release view "$tag" -R "$REPO" >/dev/null 2>&1; then
+              gh api -X PATCH "repos/$REPO/git/refs/tags/$tag" -f sha="$SHA" -F force=true >/dev/null
+            else
+              gh release create "$tag" -R "$REPO" --target "$SHA" --prerelease --title "Sanctuary Pocket (latest 3ds build)" --notes ""
+            fi
+          fi
+          base="https://github.com/$REPO/releases/download/$tag"
+          qrencode -s 8 -m 3 -o out/sanctuary-pocket-qr.png "$base/sanctuary-pocket.cia"
+          gh release upload "$tag" out/sanctuary-pocket.cia out/sanctuary-pocket.3dsx out/sanctuary-pocket-qr.png --clobber -R "$REPO"
+          # The release's own text, then the code; a second run replaces the code, not the text.
+          if [ "$EVENT" = release ]; then gh release view "$tag" -R "$REPO" --json body -q .body | sed '/<!-- qr -->/,$d' > body.md; else : > body.md; fi
+          {
+            echo '<!-- qr -->'
+            [ "$EVENT" = release ] || echo "The newest build of the \`3ds\` branch: commit ${SHA:0:7}, built $(date -u '+%Y-%m-%d %H:%M UTC')."
+            echo
+            echo '### Install with FBI'
+            echo
+            echo 'FBI > Remote Install > Scan QR Code:'
+            echo
+            echo "![QR code of sanctuary-pocket.cia]($base/sanctuary-pocket-qr.png)"
+            echo
+            echo "Or download [sanctuary-pocket.cia]($base/sanctuary-pocket.cia) (HOME Menu, New 3DS) or [sanctuary-pocket.3dsx]($base/sanctuary-pocket.3dsx) (Homebrew Launcher)."
+            echo
+            echo 'You need your own Diablo II + Lord of Destruction files on the SD card: see [platform/3ds/README.md](https://github.com/'"$REPO"'/blob/3ds/platform/3ds/README.md).'
+            echo 'Found a problem or have an idea? [Open an issue](https://github.com/'"$REPO"'/issues/new/choose).'
+          } >> body.md
+          gh release edit "$tag" -R "$REPO" --notes-file body.md

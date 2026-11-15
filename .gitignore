@@ -39,3 +39,9 @@ docs/research/re/game-strings.tsv
 
 # Python
 __pycache__/
+
+# The 3DS build (platform/3ds)
+/build-3ds/
+/.deps-3ds/
+/dist/
+/devlogs/

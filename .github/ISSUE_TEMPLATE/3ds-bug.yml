@@ -1,0 +1,29 @@
+name: 3DS problem
+description: Something broken, slow, confusing or ugly in Sanctuary Pocket on the 3DS
+labels: ["3ds", "bug"]
+body:
+  - type: markdown
+    attributes:
+      value: Thanks for playing and reporting! A log and a photo or screenshot help most.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you saw, and what you expected instead.
+    validations:
+      required: true
+  - type: input
+    id: build
+    attributes:
+      label: Build
+      description: The commit in the first lines of /3ds/d2d/d2d.log (e.g. "Git hash 89d8754"), or the release you installed.
+  - type: dropdown
+    id: device
+    attributes:
+      label: Device
+      options: [New 3DS, New 3DS XL, New 2DS XL, Emulator (Azahar/Citra), Other]
+  - type: textarea
+    id: log
+    attributes:
+      label: Log
+      description: Attach /3ds/d2d/d2d.log from the SD card (after a crash, d2d-prev.log). Drag the file in here.

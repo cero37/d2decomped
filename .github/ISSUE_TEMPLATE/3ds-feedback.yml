@@ -1,0 +1,11 @@
+name: 3DS idea or feedback
+description: How Sanctuary Pocket plays, what to change, what you'd like
+labels: ["3ds", "feedback"]
+body:
+  - type: textarea
+    id: feedback
+    attributes:
+      label: Your feedback
+      description: What felt good, what felt awkward, what you'd change first.
+    validations:
+      required: true
