@@ -5,6 +5,8 @@
 #include "handheld_hud.hpp"
 #include "town.hpp"
 
+#include <SDL3/SDL_timer.h>
+
 #include "common.hpp"
 #include "controls.hpp"
 #include "gamepad_map.hpp"
@@ -604,6 +606,15 @@ auto Town::draw_view(std::vector<std::uint8_t>& framebuffer, std::vector<std::ui
             const int text_x = left + plate_w + gap;
             font.draw_tinted(*wide, std::uint32_t(width), kScreenHeight, pal, text_x + 1, text_y + 1, hint, 0, 0, 0);
             font.draw_tinted(*wide, std::uint32_t(width), kScreenHeight, pal, text_x, text_y, hint, 255, 232, 150);
+        }
+        // A belt slot just used (the D-pad): what went, over the prompt's line, for a second and a half.
+        if (g_world_only && wide && !belt_note.empty() && belt_note_at && std::uint32_t(SDL_GetTicks()) - belt_note_at < 1500) {
+            const auto& pal = scene->act_pal.entries().empty() ? scene->pal : scene->act_pal;
+            const auto& font = g_handheld_zoom > 0 && scene->font24.line_height() > 0 ? scene->font24 : scene->font;
+            const int width = fb_width(*wide), line = font.line_height();
+            const int text_x = (width - font.measure(belt_note)) / 2, text_y = g_clip_bottom - 8 - line * 5 / 2;
+            font.draw_tinted(*wide, std::uint32_t(width), kScreenHeight, pal, text_x + 1, text_y + 1, belt_note, 0, 0, 0);
+            font.draw_tinted(*wide, std::uint32_t(width), kScreenHeight, pal, text_x, text_y, belt_note, 255, 255, 255);
         }
         if (net_game && net_game->trade.state != 0) {
             std::vector<d2d::d2s::Item> theirs;

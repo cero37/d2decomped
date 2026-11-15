@@ -3,6 +3,8 @@
 // this directory.
 #include "town.hpp"
 
+#include <SDL3/SDL_timer.h>
+
 #include "audio.hpp"
 #include "belt_popup.hpp"
 #include "common.hpp"
@@ -227,14 +229,39 @@ auto Town::pad_act(PadPlayer& player_pad, const UnitState& unit, bool dead, bool
 auto Town::pad_walk(PadPlayer& player_pad, const UnitState& unit, bool dead, bool field, const Send& out) -> void {
         const bool walk = field && player_pad.move.active && !dead;
         if (walk) {
-            const auto step = pad::world_step(player_pad.move.x, player_pad.move.y, kIsoW, kIsoH, 6.f);
+            auto step = pad::world_step(player_pad.move.x, player_pad.move.y, kIsoW, kIsoH, 6.f);
+            // Stuck against something: turn the walk till it goes again (PadPlayer::slide).
+            bool fresh = false;
+            const std::uint32_t now = std::uint32_t(SDL_GetTicks());
+            const float length = std::hypot(step.x, step.y);
+            const float dir_x = length > 0 ? step.x / length : 0, dir_y = length > 0 ? step.y / length : 0;
+            if (!player_pad.walking || dir_x * player_pad.slide_dir_x + dir_y * player_pad.slide_dir_y < 0.9f) {
+                player_pad.slide = 0; player_pad.slide_dir_x = dir_x; player_pad.slide_dir_y = dir_y;
+                player_pad.progress_x = unit.x; player_pad.progress_y = unit.y; player_pad.progress_at = now;
+            } else if (now - player_pad.progress_at >= 350) {
+                const bool moved = std::hypot(unit.x - player_pad.progress_x, unit.y - player_pad.progress_y) >= 0.4f;
+                if (!moved) {
+                    static constexpr int kTurns[] = { 0, 1, -1, 2, -2 };
+                    int at = 0;
+                    while (at < 5 && kTurns[at] != player_pad.slide) ++at;
+                    player_pad.slide = kTurns[(at + 1) % 5];
+                    d2d::log::info("pad walk: stuck at {:.1f}, {:.1f}; turning {} degrees", unit.x, unit.y, player_pad.slide * 45);
+                    fresh = true;                             // the turned walk goes out fresh
+                    player_pad.slide_good = 0;
+                } else if (player_pad.slide != 0 && ++player_pad.slide_good >= 3) { player_pad.slide = 0; fresh = true; }   // past it: the stick's own way again
+                player_pad.progress_x = unit.x; player_pad.progress_y = unit.y; player_pad.progress_at = now;
+            }
+            if (player_pad.slide != 0) {
+                const float turn = float(player_pad.slide) * 0.785398f, c = std::cos(turn), s = std::sin(turn);
+                step = pad::WorldStep{ step.x * c - step.y * s, step.x * s + step.y * c };
+            }
             // Walk or run is the run toggle's (R, the left stick's click), as with the mouse. A handheld has no
             // stick to click: its circle pad pushed most of the way runs, less walks.
             if (g_world_only && player_pad.move.tilt > 0) {
                 const int run = player_pad.move.tilt >= 0.7f ? 1 : 0;
                 if (run != player_pad.run_sent) { out(cmd::Run{ run == 1 }); player_pad.run_sent = run; }
             }
-            out(cmd::Move{ unit.x + step.x, unit.y + step.y, !player_pad.walking });
+            out(cmd::Move{ unit.x + step.x, unit.y + step.y, !player_pad.walking || fresh });
         } else if (player_pad.walking) {
             out(cmd::Move{ unit.x, unit.y, true });   // stick centred: stop here, not at the old destination
         }
@@ -417,10 +444,10 @@ auto Town::field_play(PadPlayer& player_pad, pad::Mapper& mapper, const World::P
         for (const pad::Key key : actions.keys)
             switch (key) {
                 case pad::Key::ToggleRun:   out(cmd::Run{ !hero_there.running }); break;
-                case pad::Key::Belt1:       out(cmd::UseBelt{ 0 }); break;
-                case pad::Key::Belt2:       out(cmd::UseBelt{ 1 }); break;
-                case pad::Key::Belt3:       out(cmd::UseBelt{ 2 }); break;
-                case pad::Key::Belt4:       out(cmd::UseBelt{ 3 }); break;
+                case pad::Key::Belt1:       out(cmd::UseBelt{ 0 }); if (&player_pad == &pad) note_belt(0); break;
+                case pad::Key::Belt2:       out(cmd::UseBelt{ 1 }); if (&player_pad == &pad) note_belt(1); break;
+                case pad::Key::Belt3:       out(cmd::UseBelt{ 2 }); if (&player_pad == &pad) note_belt(2); break;
+                case pad::Key::Belt4:       out(cmd::UseBelt{ 3 }); if (&player_pad == &pad) note_belt(3); break;
                 case pad::Key::SwapWeapons: out(cmd::SwapWeapons{}); break;
                 case pad::Key::Inventory: case pad::Key::Character: case pad::Key::SkillTree: case pad::Key::QuestLog:
                 case pad::Key::Automap: case pad::Key::Escape:
@@ -867,5 +894,20 @@ auto Town::pad_tab(int step) -> void {
         for (int i = 1; i < 4; ++i)
             if (const int tab = ((store.tab + step * i) % 4 + 4) % 4; !store.tabs[std::size_t(tab)].empty()) { store.tab = tab; return; }
     }
+
+}  // namespace d2d::client
+
+namespace d2d::client {
+
+// A handheld: the belt slot just used is named on the top screen a moment (draw_view), from what's in its column now.
+auto Town::note_belt(int column) -> void {
+    if (!g_world_only || !scene) return;
+    const auto drunk = std::ranges::find_if(character.items, [&](const d2d::d2s::Item& item) { return item.location == d2d::d2s::item_location::kBelt && item.column == column; });
+    if (drunk == character.items.end()) return;
+    const auto info = scene->rules.item_info.find(drunk->code);
+    const auto text = info != scene->rules.item_info.end() && !info->second.namestr.empty() ? lookup_string(*scene, std::string_view(info->second.namestr)) : std::nullopt;
+    belt_note = "Used " + (text ? u16_to_latin1(*text) : drunk->code);
+    belt_note_at = std::max<std::uint32_t>(1, std::uint32_t(SDL_GetTicks()));
+}
 
 }  // namespace d2d::client

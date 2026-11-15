@@ -281,6 +281,13 @@ void draw_bottom_hud(std::vector<std::uint8_t>& framebuffer, const Scene& scene,
             for (const auto& other : map.marks) mark(other.x, other.y, { std::uint8_t(other.rgb[0]), std::uint8_t(other.rgb[1]), std::uint8_t(other.rgb[2]) });
             // The ways out: a gold diamond and the place's name; one off the map sits on its edge, toward it.
             const auto& small_font = scene.font_small;
+            // Names already placed, so a second one near the first moves to a free line instead of printing over it
+            // ("to Rogue Encampmenten of Evil": the emulator play test).
+            std::vector<std::array<int, 4>> placed;
+            const auto clashes = [&](int l, int t, int r, int b) {
+                for (const auto& p : placed) if (l < p[2] && r > p[0] && t < p[3] && b > p[1]) return true;
+                return false;
+            };
             for (const auto& label : g_map_labels) {
                 int mx = int(std::lround((label.x - label.y) * 80 / float(kDivisor))) - scroll_x + 8;
                 int my = int(std::lround((label.x + label.y) * 40 / float(kDivisor))) - scroll_y - 8;
@@ -292,7 +299,14 @@ void draw_bottom_hud(std::vector<std::uint8_t>& framebuffer, const Scene& scene,
                 const std::string words = off ? "to " + label.text : label.text;
                 const int width = small_font.measure(words);
                 const int tx = std::clamp(mx - width / 2, x0 + 1, x1 - width - 1);
-                const int ty = my + 6 + 10 <= y1 ? my + 5 : my - 15;
+                const int below = my + 6 + 10 <= y1 ? my + 5 : my - 15;
+                int ty = below;
+                for (int step = 0; step < 12; ++step) {
+                    const int offset = (step + 1) / 2 * 11 * (step % 2 ? 1 : -1);
+                    const int candidate = std::clamp(below + offset, y0 + 1, y1 - 11);
+                    if (!clashes(tx - 2, candidate, tx + width + 2, candidate + 11)) { ty = candidate; break; }
+                }
+                placed.push_back({ tx - 2, ty, tx + width + 2, ty + 11 });
                 small_font.draw_tinted(framebuffer, kScreenWidth, kScreenHeight, pal, tx, ty, words, 240, 210, 120);
             }
             mark(state.map_x, state.map_y, { 80, 120, 255 });

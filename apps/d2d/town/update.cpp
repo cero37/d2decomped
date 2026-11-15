@@ -312,6 +312,7 @@ auto Town::update(std::vector<std::uint8_t>& framebuffer, const Mouse& frame_mou
                 if (fires(keys::kBelt1 + belt)) {
                     net.send(cmd::UseBelt{ belt, (SDL_GetModState() & SDL_KMOD_SHIFT) != 0 });
                     g_bottom_skills.belt_fired[std::size_t(belt)] = frame_ms ? frame_ms : 1;       // a handheld's HUD lights the column
+                    note_belt(belt);
                 }
             for (int phrase = 0; phrase < 8; ++phrase)
                 if (fires(phrase < 7 ? keys::kSay1 + phrase : int(keys::kSayRetreat))) say(phrase);

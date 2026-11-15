@@ -223,8 +223,10 @@ auto Town::handheld_stash_move(int mouse_x, int mouse_y) -> bool {
 }
 
 auto Town::handheld_sell(int mouse_x, int mouse_y) -> bool {
-    if (store.npc < 0 || held || !scene) return false;
-    const d2d::d2s::Item* under = bag_at(mouse_x, mouse_y);
+    if (store.npc < 0 || !scene) return false;
+    // The thing in hand first (picked up with A: round 3 of the emulator play test held a bow with no way to sell it), else
+    // the bag's thing under the cursor.
+    const d2d::d2s::Item* under = held ? &*held : bag_at(mouse_x, mouse_y);
     if (!under) return false;
     d2d::log::info("handheld: selling {} (id {}) to {} for {} gold", under->code, under->id, store.npc_id,
                    d2d::rules::item_price(scene->rules, *under, store.npc_id, true, store.header));
@@ -483,7 +485,9 @@ auto Town::handheld_fit_panel(const Mouse& mouse) -> bool {
             const int line_y = kH - grid_h - 1 - 6;
             handheld_line_y = line_y;                      // hover text keeps off this line's buttons where it can
             // Its words are the coin too: a touch there opens the box to drop gold (or to put it in the stash).
-            const std::string gold_words = std::format("Gold {}", stats.get(d2d::d2s::kGold));
+            // The small font's 0 reads as a letter o ("Gold o": the emulator play test): none is said in words.
+            const auto gold = stats.get(d2d::d2s::kGold);
+            const std::string gold_words = gold ? std::format("Gold {}", gold) : std::string("No gold");
             page.text(small, gold_words, (kW - grid_w) / 2, line_y, kGold);
             map.spots.push_back({ (kW - grid_w) / 2 - 2, line_y - 7, (kW - grid_w) / 2 + small.measure(gold_words) + 6, line_y + 7, 493, 462 });
             if (store.npc >= 0 || stash_open || merc) {
@@ -493,7 +497,7 @@ auto Town::handheld_fit_panel(const Mouse& mouse) -> bool {
                 if (store.npc >= 0) {
                     turn(right - 84, line_y - 8, right, line_y + 8, "To the store", 96 + 14, 123 + 14);
                     // Sell the thing the cursor is on, for its price, in one touch (or the pad's Y): no mode to turn on first.
-                    const d2d::d2s::Item* for_sale = held ? nullptr : bag_at(mouse.x, mouse.y);
+                    const d2d::d2s::Item* for_sale = held ? &*held : bag_at(mouse.x, mouse.y);
                     const int sell_left = (kW - grid_w) / 2 + small.measure(gold_words) + 12, sell_right = right - 84 - 4;
                     if (for_sale && sell_right - sell_left > 40) {
                         const std::string words = std::format("Sell for {}", d2d::rules::item_price(scene->rules, *for_sale, store.npc_id, true, store.header));
@@ -502,7 +506,7 @@ auto Town::handheld_fit_panel(const Mouse& mouse) -> bool {
                         BottomMap::Spot spot{ sell_left, line_y - 8, sell_right, line_y + 8, mouse.x, mouse.y };
                         spot.sell = true;
                         map.spots.push_back(spot);
-                    } else if (!held) page.text(small, "Pick a thing to sell", (sell_left + sell_right) / 2, line_y, kDimInk, 0);
+                    } else page.text(small, "Pick a thing to sell", (sell_left + sell_right) / 2, line_y, kDimInk, 0);
                 }
                 else if (stash_open) turn(right - 96, line_y - 8, right, line_y + 8, "Stash page", stash.grid_x + stash.box_w / 2, stash.grid_y + stash.box_h / 2);
                 else turn(right - 96, line_y - 8, right, line_y + 8, "To the hireling", torso[0] + torso[2] / 2, torso[1] + torso[3] / 2);
@@ -707,7 +711,7 @@ auto Town::handheld_fit_panel(const Mouse& mouse) -> bool {
                 const bool down = (index < 2 && store.mode == index + 1) || (index == 2 && store.mode == 3);
                 button(side, 106 + index * 22, kW - 2, 106 + index * 22 + 20, names[std::size_t(index)], kCharPanelX - 1 + kButtonX[index] + 22, 453, down);
             }
-            page.text(small, std::format("Gold {}", stats.get(d2d::d2s::kGold)), side + 2, 204, kGold);
+            page.text(small, stats.get(d2d::d2s::kGold) ? std::format("Gold {}", stats.get(d2d::d2s::kGold)) : std::string("No gold"), side + 2, 204, kGold);
             if (inv_open) turn(side, 216, kW - 2, 237, "To my items", to_inventory_x, to_inventory_y);
         } else if (kind == kStash) {
             const auto& stash = scene->stash_layout[character.expansion ? 1 : 0];
@@ -718,8 +722,8 @@ auto Town::handheld_fit_panel(const Mouse& mouse) -> bool {
             const int side = 2 + int(float(grid_w) * scale) + 6, middle = (side + kW - 2) / 2;
             handheld_hover_w = side - 2;
             page.text(font, "Stash", middle, 14, kGold, 0);
-            page.text(small, std::format("Gold in the stash: {}", stats.get(d2d::d2s::kGoldBank)), middle, 40, kInk, 0);
-            page.text(small, std::format("Gold carried: {}", stats.get(d2d::d2s::kGold)), middle, 56, kInk, 0);
+            page.text(small, stats.get(d2d::d2s::kGoldBank) ? std::format("Gold in the stash: {}", stats.get(d2d::d2s::kGoldBank)) : std::string("No gold in the stash"), middle, 40, kInk, 0);
+            page.text(small, stats.get(d2d::d2s::kGold) ? std::format("Gold carried: {}", stats.get(d2d::d2s::kGold)) : std::string("No gold carried"), middle, 56, kInk, 0);
             button(side, 70, kW - 2, 100, "Take gold out", 163, 93, stash_coin_at(mouse.x, mouse.y));
             if (inv_open) button(side, 104, kW - 2, 134, "Put gold in", 493, 462, inventory_coin_at(mouse.x, mouse.y));
             if (inv_open) turn(side, 140, kW - 2, 170, "My items page", to_inventory_x, to_inventory_y);

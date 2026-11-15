@@ -291,6 +291,13 @@ struct Town {
         std::array<bool, skillpad::kSlots + 1> used_hold{};  // a press used an object: don't replace its queued walk with an attack
         int wants_panel = -1;                     // an assigned panel action, consumed by this seat
         bool wants_strip = false;                 // this pad's Start asked for the panel list
+        // A walk that has stopped getting anywhere (the stick into rocks or a fence): it turns 45, then 90 degrees
+        // either way till the hero moves again, so it slides along the obstacle instead of standing (the emulator play test).
+        float progress_x = 0, progress_y = 0;     // where the hero was when progress was last checked
+        std::uint32_t progress_at = 0;            // SDL_GetTicks then
+        int slide = 0;                            // the turn, in eighths, now added to the stick's way
+        int slide_good = 0;                       // checks the turned walk has got somewhere: at 3, the straight way is tried again
+        float slide_dir_x = 0, slide_dir_y = 0;   // the stick's way the turn was found for
     };
     PadPlayer pad;                                // the first player's
     using Send = std::function<void(const Command&)>;
@@ -440,6 +447,9 @@ struct Town {
     [[nodiscard]] static int say_sound(int cls, int phrase);                         // Say 1..7, Retreat (0..7)
     void clear_screen();
     [[nodiscard]] bool pad_field_or_free() const;
+    std::string belt_note;                        // a handheld: "Used Minor Healing Potion", shown on the top screen a moment
+    std::uint32_t belt_note_at = 0;               // SDL_GetTicks when it went
+    void note_belt(int column);
     bool run_held = false;                        // Run's key made the player run
     bool portraits_hidden = false;
     bool hireling_hint = false;                   // FUN_004939b0: armed at a game's start while d2d.cfg's popup_hireling isn't 1
