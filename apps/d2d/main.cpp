@@ -562,6 +562,12 @@ int run_windowed(std::vector<std::uint8_t>& framebuffer,
             scene->trim_anims(std::uint32_t(SDL_GetTicks()), 1000);         // animations not drawn this last second
             d2d::log::info("memory given back for a level's build");
         };
+        d2d::game::g_make_room = [&scene] {                                   // a build ahead at a high heap: lightly
+            const auto before = std::size_t(mallinfo().uordblks);
+            d2d::dt1::File::trim(d2d::dt1::File::default_budget() / 2);
+            scene->trim_anims(std::uint32_t(SDL_GetTicks()), 5000);
+            d2d::log::info("memory: room made for a build ahead ({} KiB back)", (before - std::min(before, std::size_t(mallinfo().uordblks))) / 1024);
+        };
         d2d::game::g_level_wait = [&scene, main_thread = std::this_thread::get_id()](int id) {
             if (std::this_thread::get_id() != main_thread) return;
             static std::vector<std::uint8_t> loading_frame;
@@ -2587,6 +2593,7 @@ int main(int argc, char** argv) {
     if (scene)
         Scene::g_anim_async = std::getenv("D2D_HANDHELD") != nullptr;
     if (Scene::g_anim_async) d2d::game::g_build_nearby = false;   // a level builds when it's gone to (gamedata.hpp)
+    if (std::getenv("D2D_HANDHELD")) d2d::game::g_waypoint_opens_on_light = true;
     if (scene)
         Scene::g_anim_loader = [mpqs = &scene->mpqs](const std::string& path) -> std::optional<std::vector<std::byte>> {
             try { return mpqs->try_read(path); } catch (const std::exception&) { return std::nullopt; }

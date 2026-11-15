@@ -35,7 +35,7 @@ include(HeaderCheck)
 set(D2D_VERSION "3ds-dev")
 find_package(Git QUIET)
 if(GIT_FOUND)
-    execute_process(COMMAND ${GIT_EXECUTABLE} rev-parse --short HEAD WORKING_DIRECTORY ${D2D_ROOT}
+    execute_process(COMMAND ${GIT_EXECUTABLE} describe --always --dirty --abbrev=7 WORKING_DIRECTORY ${D2D_ROOT}
         OUTPUT_VARIABLE git_hash OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
 endif()
 if(NOT git_hash)

@@ -324,6 +324,11 @@ void draw_bottom_hud(std::vector<std::uint8_t>& framebuffer, const Scene& scene,
                         const bool rim = std::abs(d) == 3 || std::abs(e) == 3;
                         canvas.put(mx + d, my + e, rim ? 20 : 120, rim ? 40 : 230, rim ? 60 : 255);
                     }
+                else if (person.foe) {                                 // one of the Den's last: a red dot, pulsing, no name
+                    const int r = (now_ms / 300) % 2 ? 2 : 3;
+                    for (int d = -r; d <= r; ++d) for (int e = -r; e <= r; ++e) if (d * d + e * e <= r * r + 1) canvas.put(mx + d, my + e, 255, 40, 40);
+                    continue;
+                }
                 else for (int d = -1; d <= 1; ++d) for (int e = -1; e <= 1; ++e) canvas.put(mx + d, my + e, 170, 220, 255);
                 const int width = small_font.measure(person.text);
                 const int tx = std::clamp(mx - width / 2, x0 + 1, x1 - width - 1);

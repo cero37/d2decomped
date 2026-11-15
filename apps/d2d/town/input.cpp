@@ -162,6 +162,9 @@ auto Town::pad_pick(const PadPlayer& player_pad, const UnitState& unit, bool use
         for (const auto& item : view.ground) if (in_view(item.x, item.y)) drops.push_back({ item.id, item.x, item.y });
         if (const int pick = pad::pick_target(hero_x, hero_y, face_x, face_y, drops, -1, pad::Aim{ 3.5f, 3.5f, -0.2f }); pick >= 0)
             return { PadPick::kItem, drops[std::size_t(pick)].id, drops[std::size_t(pick)].x, drops[std::size_t(pick)].y };
+        // Right by the hero on any side: a Chipped Ruby's label just above the hero got no prompt, the hero facing away (round 19).
+        if (const int pick = pad::pick_target(hero_x, hero_y, 0.f, 0.f, drops, -1, pad::Aim{ 1.6f, 1.6f, -2.f }); pick >= 0)
+            return { PadPick::kItem, drops[std::size_t(pick)].id, drops[std::size_t(pick)].x, drops[std::size_t(pick)].y };
         // The player's corpse first: it lies where they rise, by Warriv, and "Talk to Warriv" hid its prompt (round 18).
         std::vector<pad::Candidate> bodies;
         for (const auto& corpse : view.corpses) if (in_view(corpse.x, corpse.y)) bodies.push_back({ -3000 - corpse.which, corpse.x, corpse.y });

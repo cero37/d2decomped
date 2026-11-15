@@ -1325,7 +1325,12 @@ inline bool g_build_nearby = true;
 // walk-up build (World::cross_level) holds back above kPrebuildHeapPercent: built levels are kept, and with the camp,
 // the Blood Moor, the Cold Plains and a cave the heap reached 96% (the emulator's scripted runs, round 7).
 inline std::atomic<int> g_heap_percent{ 0 };
-inline constexpr int kPrebuildHeapPercent = 75;
+inline constexpr int kPrebuildHeapPercent = 75;     // past it, room is made first (far levels go, g_make_room)
+inline constexpr int kPrebuildMaxHeapPercent = 92;  // past it, no build ahead (it builds when gone to, behind Loading)
+// The caches a handheld trims lightly (decoded tiles to half their budget, animations idle 5 s): before a build ahead.
+inline std::function<void()> g_make_room;
+// A handheld: touching an unlit waypoint lights it and opens its list at once (the original waits for a second touch).
+inline bool g_waypoint_opens_on_light = false;
 // Set by the game's World (a handheld): every level far behind let go now, for a build that ran out of memory.
 inline std::function<void()> g_let_levels_go;
 inline constexpr int kLetGoHeapPercent = 85;      // World::let_far_levels_go: above it, the level longest behind goes

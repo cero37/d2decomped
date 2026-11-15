@@ -250,6 +250,14 @@ auto Town::handheld_map_labels() -> void {
             if (waypoint) g_map_people.insert(g_map_people.begin(), std::move(label));   // first: its name keeps its place (it jumped as people walked)
             else g_map_people.push_back(std::move(label));
         }
+    // The Den of Evil's last few (five or fewer, as its count says): a red dot each. On the console a player hunted the
+    // last two for four minutes and gave up (the hardware log, 2026-11-15).
+    if (g_world_only && level && level->id == d2d::rules::DenQuest::kDen) {
+        const auto alive = std::ranges::count_if(view.monsters, [](const auto& monster) { return monster.alive(); });
+        if (alive > 0 && alive <= 5)
+            for (const auto& monster : view.monsters)
+                if (monster.alive()) g_map_people.push_back({ monster.unit.x + float(level->world_x), monster.unit.y + float(level->world_y), {}, false, true });
+    }
     if (!g_world_only || !scene || !level || !world.game_data) { g_map_labels.clear(); made_for = nullptr; return; }
     if (made_for == level && made_for_id == level->id) return;
     made_for = level;

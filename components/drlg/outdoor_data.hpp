@@ -20,9 +20,11 @@
 #include <cstddef>
 #include <cstdint>
 #include <deque>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -39,6 +41,10 @@ inline int to_int(std::string_view text, int fallback = 0) {
 struct OutdoorAssets {
     d2d::txt::Table levels, lvl_types, lvl_warp, lvl_maze;
     std::deque<Dt1File> dt1s;                           // loaded by load_room_dt1s
+    // Each DT1's heads once, by path: every level build read its type's DT1s again and kept them, ~1 MB a build that
+    // a session never got back (the camp's heap 54 -> 66 -> 68 MiB over three games: the emulator play test, round 19).
+    std::unordered_map<std::string, const Dt1File*> dt1_by_path;
+    std::mutex dt1_mutex;                               // builds run on workers
     std::deque<std::unique_ptr<LazyMap>> maps;          // each parsed when first read (outdoor.hpp LazyMap)
     OutdoorData data;
     OutdoorAssets() = default;
@@ -123,9 +129,11 @@ template <class Read> RoomDt1s load_room_dt1s(OutdoorAssets& assets, Read&& read
         std::string path = R"(data\global\tiles\)", name;
         for (const char letter : rel) path.push_back(letter == '/' ? '\\' : letter);
         for (const char letter : rel.substr(rel.find_last_of("/\\") + 1)) name.push_back(char(std::tolower(static_cast<unsigned char>(letter))));
+        const std::scoped_lock lock(assets.dt1_mutex);
+        if (const auto found = assets.dt1_by_path.find(path); found != assets.dt1_by_path.end()) return found->second;
         const auto bytes = read(path);
         if (!bytes) return nullptr;
-        return &assets.dt1s.emplace_back(dt1_heads(std::move(name), *bytes));
+        return assets.dt1_by_path[path] = &assets.dt1s.emplace_back(dt1_heads(std::move(name), *bytes));
     };
     for (std::size_t row = 0; row < assets.lvl_types.size(); ++row)
         if (to_int(assets.lvl_types.get(row, "Id"), -1) == type)

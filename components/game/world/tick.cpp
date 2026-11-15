@@ -504,8 +504,10 @@ auto World::tick_level(std::span<const Order> orders, std::uint32_t now_ms, std:
                         // up (mode 1 → 2) and the panel waits for the next touch.
                         set_waypoint(0);
                         set_waypoint(waypoint_index(*game_data, level->id));
-                        if (npc.mode == "NU" && !operated.contains({ level, actor->interact_npc })) operated[{ level, actor->interact_npc }] = now_ms;
-                        else actor->events.push_back(ev::OpenUI{ ev::OpenUI::waypoint, actor->interact_npc });
+                        const bool lights = npc.mode == "NU" && !operated.contains({ level, actor->interact_npc });
+                        if (lights) operated[{ level, actor->interact_npc }] = now_ms;
+                        // A handheld opens the list as it lights too: the lit one looked idle and the second A went unguessed (round 19).
+                        if (!lights || g_waypoint_opens_on_light) actor->events.push_back(ev::OpenUI{ ev::OpenUI::waypoint, actor->interact_npc });
                     } else {
                         if (d2d::rules::is_healer(npc.hc_idx)) { d2d::rules::heal(actor->character.stats); fight.cure(now_ms, false); }
                         // In Hell, a Den of Evil done before the reset existed

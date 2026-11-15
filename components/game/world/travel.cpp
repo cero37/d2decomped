@@ -109,13 +109,26 @@ auto World::cross_level() -> void {
         // Nothing built ahead (a handheld): the outdoor level the player is walking up to starts building once they are
         // within 10 cells of it, so most of its build is done by the time they cross (it froze the Blood Moor's first
         // entry for 4.7 s behind the Loading screen: the emulator play test). One level, the one near, not the act.
-        if (!g_build_nearby && g_heap_percent.load(std::memory_order_relaxed) < kPrebuildHeapPercent) {
+        // The heap high (most of a session: 83-88%), the levels far behind go first and it builds still, up to 92%: the
+        // gate at 75% stopped every build ahead, and each new area froze the game 4.7-7.4 s behind Loading (round 19).
+        if (!g_build_nearby) {
             const float here_x = float(level->world_x) + actor->player.x, here_y = float(level->world_y) + actor->player.y;
             for (const auto& placement : game_data->layout_of(level->id)) {
                 if (placement.level == level->id || game_data->built(placement.level)) continue;
                 const float out_x = std::max({ float(placement.x) - here_x, 0.f, here_x - float(placement.x + placement.width) });
                 const float out_y = std::max({ float(placement.y) - here_y, 0.f, here_y - float(placement.y + placement.height) });
-                if (out_x < 18.f && out_y < 18.f) game_data->want_level(placement.level);   // 18, not 10: a running hero still waited 3 s for the Blood Moor and the Cold Plains (round 12)
+                if (out_x >= 24.f || out_y >= 24.f) continue;   // 24: a build takes 4-5 s (the emulator) and a running hero covers ~20 cells in that
+                if (g_heap_percent.load(std::memory_order_relaxed) >= kPrebuildHeapPercent) {
+                    static int room_for = -1;
+                    if (room_for != placement.level) {
+                        room_for = placement.level;
+                        const auto seen = level_seen_ms.find(level->id);
+                        let_far_levels_go(seen != level_seen_ms.end() ? seen->second : 0, true);
+                        if (g_make_room) g_make_room();
+                    }
+                    if (g_heap_percent.load(std::memory_order_relaxed) >= kPrebuildMaxHeapPercent) continue;
+                }
+                game_data->want_level(placement.level);
             }
         }
         bool known = level->inside(actor->target_x, actor->target_y);
