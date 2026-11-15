@@ -724,6 +724,7 @@ auto Town::handheld_fit_panel(const Mouse& mouse) -> bool {
             map.pieces.push_back(part(96, 123, 290, 290, 2, 4, kScale, true));
             page.piece(ui_buffer, map.pieces.back());
             const int side = 2 + 232 + 4;
+            handheld_hover_w = side - 2;    // the hover text over the grid only: across the tabs it took their taps (round 12)
             for (int tab = 0; tab < 4; ++tab) {
                 const bool empty = store.tabs[std::size_t(tab)].empty();
                 button(side, 4 + tab * 25, kW - 2, 4 + tab * 25 + 23, string_id(*scene, kTabString[std::size_t(tab)]), kCharPanelX + 80 * tab + 40, 75, tab == store.tab, empty);
