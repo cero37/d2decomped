@@ -129,6 +129,22 @@ void Scene::trim_anims(std::uint32_t now_ms, std::uint32_t idle_ms) const {
     for (const auto& [key, anim] : npc_anims) trim(anim);
 }
 
+std::string Scene::cache_report() const {
+    const auto dcc_bytes = [](const d2d::dcc::Sprite& sprite) { std::size_t bytes = 0; for (const auto& frame : sprite.frames()) bytes += frame.pixels.size(); return bytes; };
+    const auto anim_bytes = [&](const PlayerAnim& anim, std::size_t& decoded, std::size_t& raw) {
+        for (std::size_t layer = 0; layer < anim.decoded.size(); ++layer) { decoded += dcc_bytes(anim.decoded[layer]); raw += anim.dcc[layer].size(); }
+    };
+    std::size_t hero = 0, hero_raw = 0, npc = 0, npc_raw = 0, missiles = 0, overlays = 0;
+    for (const auto& [key, anim] : composites) anim_bytes(anim, hero, hero_raw);
+    for (const auto& [key, anim] : npc_anims) anim_bytes(anim, npc, npc_raw);
+    for (const auto& [key, sprite] : missile_cels) missiles += dcc_bytes(sprite);
+    for (const auto& [key, sprite] : overlay_sprites) overlays += dcc_bytes(sprite);
+    return std::format("hero anims {} KiB (+{} raw, {} kept), monsters/NPCs {} KiB (+{} raw, {} kept), missiles {} KiB ({}), overlays {} KiB ({}), "
+                       "item sprites {}, palshifts {}, decoded tiles {} KiB",
+                       hero / 1024, hero_raw / 1024, composites.size(), npc / 1024, npc_raw / 1024, npc_anims.size(), missiles / 1024, missile_cels.size(),
+                       overlays / 1024, overlay_sprites.size(), item_sprites.size() + flippy_sprites.size(), palshifts.size(), d2d::dt1::File::decoded_bytes() / 1024);
+}
+
 void Scene::note_drawn(std::string_view kind, std::string_view name) {
     static std::unordered_set<std::string> drawn;
     static std::ofstream out = [] {
