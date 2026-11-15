@@ -399,6 +399,20 @@ void handle_charcreate_click(CharCreateUI& create_ui,
                              const Mouse& mouse,
                              std::uint32_t elapsed_ms) {
     create_ui.hovered = class_under(create_ui, scene, mouse);
+    // A handheld's page always has its cursor on a row, lit: the lit class is the one chosen, so Start never sits
+    // grey under a class that looks picked (the emulator play test: Amazon lit, Start grey until it was touched).
+    if (g_world_only && create_ui.hovered >= 0 && create_ui.hovered != create_ui.selected) {
+        if (create_ui.selected >= 0) {
+            auto& prev = create_ui.classes[std::size_t(create_ui.selected)];
+            prev.state = ClassState::Deselecting;
+            prev.state_start_ms = elapsed_ms;
+        }
+        auto& cur = create_ui.classes[std::size_t(create_ui.hovered)];
+        cur.state = ClassState::Selecting;
+        cur.state_start_ms = elapsed_ms;
+        create_ui.selected = create_ui.hovered;
+        create_ui.expansion = true;
+    }
     if (!mouse.release_this_frame) return;
     // The checkboxes toggle on their own 15 x 16 boxes only (FUN_00501090,
     // the type 6 control's mouse-down): the labels beside them, 0xBD

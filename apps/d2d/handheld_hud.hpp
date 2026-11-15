@@ -114,8 +114,8 @@ struct BottomMap {
     struct Piece { int src_x = 0, src_y = 0, src_w = 0, src_h = 0, dst_x = 0, dst_y = 0; float scale = 1.f; bool look_first = false; };
     // move: the touch only puts the cursor at the point (to bring the other side's page), no click.
     // use: the touch is a right click where the cursor is (the thing under it is used), not a click at the point.
-    struct Spot { int left = 0, top = 0, right = 0, bottom = 0, x = 0, y = 0; bool move = false, use = false, stash = false; };
-    enum Touch { kClick, kLookFirst, kMove, kUse, kStash };
+    struct Spot { int left = 0, top = 0, right = 0, bottom = 0, x = 0, y = 0; bool move = false, use = false, stash = false, sell = false; };
+    enum Touch { kClick, kLookFirst, kMove, kUse, kStash, kSell };
     bool on = false;
     std::vector<Piece> pieces;
     std::vector<Spot> spots;
@@ -128,6 +128,7 @@ struct BottomMap {
                 if (how && spot.move) *how = kMove;
                 if (how && spot.use) *how = kUse;
                 if (how && spot.stash) *how = kStash;
+                if (how && spot.sell) *how = kSell;
                 return true;
             }
         for (const auto& piece : pieces) {

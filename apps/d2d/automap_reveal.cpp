@@ -17,6 +17,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <mutex>
 #include <span>
 #include <vector>
 
@@ -54,8 +55,15 @@ std::array<std::vector<ListTile>, 2> room_lists(const GameData& game_data, const
         const d2d::drlg::OutdoorAssets* assets = nullptr;   // any generated level's: the presets' rows and DS1s
         for (const auto& [id, built] : game_data.levels)
             if (built && built->assets) { assets = built->assets; break; }
-        if (!assets) return lists;                           // none built yet: again next time
-        made = reveal.presets.emplace(&level, game::preset_rooms(game_data, level, *assets)).first;
+        if (assets) made = reveal.presets.emplace(&level, game::preset_rooms(game_data, level, *assets)).first;
+        else {
+            // None built yet (the handheld builds a level only when it's gone to: the camp is all there is): the
+            // builder's own tables, when no build holds them; else again next time.
+            if (!game_data.builder || !game_data.builder->act1) return lists;
+            std::unique_lock lock(game_data.builder->mutex, std::try_to_lock);
+            if (!lock.owns_lock()) return lists;
+            made = reveal.presets.emplace(&level, game::preset_rooms(game_data, level, *game_data.builder->act1)).first;
+        }
     }
     if (room < 0 || std::size_t(room) >= made->second.size()) return lists;
     for (const auto& tile : made->second[std::size_t(room)].tiles) {

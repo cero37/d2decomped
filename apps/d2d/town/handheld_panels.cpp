@@ -191,6 +191,16 @@ auto Town::handheld_stash_move(int mouse_x, int mouse_y) -> bool {
     return true;
 }
 
+auto Town::handheld_sell(int mouse_x, int mouse_y) -> bool {
+    if (store.npc < 0 || held || !scene) return false;
+    const d2d::d2s::Item* under = bag_at(mouse_x, mouse_y);
+    if (!under) return false;
+    d2d::log::info("handheld: selling {} (id {}) to {} for {} gold", under->code, under->id, store.npc_id,
+                   d2d::rules::item_price(scene->rules, *under, store.npc_id, true, store.header));
+    send(cmd::Sell{ under->id });
+    return true;
+}
+
 auto Town::handheld_return_held() -> void {
     namespace d2s = d2d::d2s;
     if (!scene || !held || !g_auto_clicks.empty()) return;
@@ -408,11 +418,17 @@ auto Town::handheld_fit_panel(const Mouse& mouse) -> bool {
                 const int right = (kW + grid_w) / 2;
                 if (store.npc >= 0) {
                     turn(right - 84, line_y - 8, right, line_y + 8, "To the store", 96 + 14, 123 + 14);
-                    // Sell, as the store's own button: on, a thing touched twice (once to read its price) is sold.
-                    const bool selling = store.mode == 2;
-                    page.box(right - 84 - 4 - 78, line_y - 8, right - 84 - 4, line_y + 8, selling);
-                    page.text(small, selling ? "Selling: on" : "Sell: off", right - 84 - 4 - 39, line_y, selling ? kWhite : kInk, 0);
-                    map.spots.push_back({ right - 84 - 4 - 78, line_y - 8, right - 84 - 4, line_y + 8, kCharPanelX - 1 + 169 + 22, 453 });
+                    // Sell the thing the cursor is on, for its price, in one touch (or the pad's Y): no mode to turn on first.
+                    const d2d::d2s::Item* for_sale = held ? nullptr : bag_at(mouse.x, mouse.y);
+                    const int sell_left = (kW - grid_w) / 2 + small.measure(gold_words) + 12, sell_right = right - 84 - 4;
+                    if (for_sale && sell_right - sell_left > 40) {
+                        const std::string words = std::format("Sell for {}", d2d::rules::item_price(scene->rules, *for_sale, store.npc_id, true, store.header));
+                        page.box(sell_left, line_y - 8, sell_right, line_y + 8, true);
+                        page.text(page.fit(words, sell_right - sell_left - 6), words, (sell_left + sell_right) / 2, line_y, kWhite, 0);
+                        BottomMap::Spot spot{ sell_left, line_y - 8, sell_right, line_y + 8, mouse.x, mouse.y };
+                        spot.sell = true;
+                        map.spots.push_back(spot);
+                    } else if (!held) page.text(small, "Pick a thing to sell", (sell_left + sell_right) / 2, line_y, kDimInk, 0);
                 }
                 else if (stash_open) turn(right - 96, line_y - 8, right, line_y + 8, "Stash page", stash.grid_x + stash.box_w / 2, stash.grid_y + stash.box_h / 2);
                 else turn(right - 96, line_y - 8, right, line_y + 8, "To the hireling", torso[0] + torso[2] / 2, torso[1] + torso[3] / 2);
@@ -522,14 +538,16 @@ auto Town::handheld_fit_panel(const Mouse& mouse) -> bool {
             for (const auto& line : speech.lines) widest = std::max(widest, told.measure(line));
             const int left = std::max(4, (kW - widest) / 2), offset = speech.offset_px(now_ms);
             for (std::size_t index = 0; index < speech.lines.size(); ++index) {
-                // The frame's box has a line enter at its foot (112 rows down) and leave at its top; here it enters 92 rows
-                // further down (five lines sooner) and leaves at the same moment, so the page starts half full.
-                const int base = kTop + 112 - offset + int(index) * 18;
+                // The page starts full from its top (it began half way down, which read as missing text: the emulator
+                // play test), and rises at the speech's own pace once the voice has caught up with it.
+                const int rise = std::max(0, offset - (112 - cell));
+                const int base = kTop + cell + int(index) * 18 - rise;
                 if (base - cell + 1 >= kBottom || base < kTop) continue;
                 told.draw_tinted(pixels, kW, kH, pal, left, base - cell + 1, speech.lines[index], 255, 255, 255, kTop, kBottom);
             }
             page.box(4, 212, kW - 4, 237, false);
-            page.text(page.fit("Touch, or press A or B, to close", kW - 16), "Touch, or press A or B, to close", kW / 2, 224, kInk, 0);
+            const std::string foot = "Up / Down: read on    A, B or touch: close";
+            page.text(page.fit(foot, kW - 16), foot, kW / 2, 224, kInk, 0);
             map.spots.push_back({ 0, 0, kW, kH, mouse.x, mouse.y });       // any press shuts the speech: the cursor stays where it is
         } else if (kind == kNpcMenu) {
             // An NPC's menu (and its talk list, a confirmation, a refusal): its heading, then a large row for each choice.

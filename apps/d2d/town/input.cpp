@@ -200,7 +200,10 @@ auto Town::pad_act(PadPlayer& player_pad, const UnitState& unit, bool dead, bool
         }
         const bool left = !move.alt;
         const int skill = left ? left_skill : right_skill, item = left ? left_item : right_item;
-        const PadPick pick = pad_pick(player_pad, unit, left && move.attack, pad_aim(skill, move.aim || move.active));
+        // A fresh press acts on what the prompt names (contextual_pick: the same pick, made as the frame was drawn), not
+        // on a pick made again now: the facing can have turned since, and A then talked to someone the prompt didn't name.
+        const bool prompt_pick = left && move.attack && &player_pad == &pad && contextual_pick.kind != PadPick::kNone;
+        const PadPick pick = prompt_pick ? contextual_pick : pad_pick(player_pad, unit, left && move.attack, pad_aim(skill, move.aim || move.active));
         if (pick.kind == PadPick::kMonster) {
             player_pad.target = pick.id;
             out(cmd::UseSkill{ skill, pick.x, pick.y, pick.id, left, item });

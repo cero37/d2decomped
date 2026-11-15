@@ -467,6 +467,8 @@ struct Town {
     [[nodiscard]] StashMove stash_move_at(int mouse_x, int mouse_y) const;
     // Moves it (g_auto_clicks); false when there's nothing to move or no room.
     bool handheld_stash_move(int mouse_x, int mouse_y);
+    // A store open: the bag's thing at (x, y) of the frame sold (the page's Sell button, the pad's Y); false: nothing there.
+    bool handheld_sell(int mouse_x, int mouse_y);
     // A handheld: a thing left on the cursor with the bag shut (no way there to drop or walk) goes back
     // into the bag, which opens for it and shuts again (main.cpp, each frame).
     void handheld_return_held();

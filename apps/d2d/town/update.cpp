@@ -574,8 +574,12 @@ auto Town::update(std::vector<std::uint8_t>& framebuffer, const Mouse& frame_mou
         }
         // A keeps the ordinary inventory pickup/move action, including usable tomes.
         // Use starts Identify; the active Identify branch above accepts A to confirm.
-        if (mouse.press_this_frame && !item_click && store.mode == 0 && npc_menu.npc < 0 && speech.npc < 0) {
-            if (held && store.npc >= 0 && !pad_a_edge && mouse.x >= 96 && mouse.x < 96 + 10 * 29
+        // A handheld: a thing held over the store's grid sells whatever the store's mode and whichever button put it
+        // there (A included). Else a thing picked up with Selling on has no way down: the page's buttons and A
+        // all pass it by (round 1 of the emulator play test: the shop locked up with a scroll on the cursor).
+        const bool held_sells = g_world_only && held && store.npc >= 0;
+        if (mouse.press_this_frame && !item_click && (store.mode == 0 || held_sells) && npc_menu.npc < 0 && speech.npc < 0) {
+            if (held && store.npc >= 0 && (!pad_a_edge || g_world_only) && mouse.x >= 96 && mouse.x < 96 + 10 * 29
                 && mouse.y >= 123 && mouse.y < 123 + 10 * 29) {
                 send(cmd::Sell{ held->id });               // Town::send: a joined game's host makes the sale
                 item_click = true;
@@ -995,7 +999,7 @@ auto Town::update(std::vector<std::uint8_t>& framebuffer, const Mouse& frame_mou
                 send(cmd::Buy{ store_index, store.tab, fill });
             }
             // Sell: an inventory item; repair: that or a worn one.
-            if (mouse.press_this_frame && (store.mode == 3 || (store.mode == 2 && !pad_a_edge)))
+            if (mouse.press_this_frame && !held && (store.mode == 3 || (store.mode == 2 && (!pad_a_edge || g_world_only))))   // a handheld's A sells with Selling on
                 for (std::size_t i = 0; i < character.items.size(); ++i) {
                     const auto& item = character.items[i];
                     const bool worn = item.location == d2d::d2s::item_location::kEquipped && item.slot >= d2d::d2s::body_location::kFirst && item.slot <= d2d::d2s::body_location::kLast;

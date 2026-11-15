@@ -941,6 +941,10 @@ int run_windowed(std::vector<std::uint8_t>& framebuffer,
                                 if (down) { (void)town.handheld_stash_move(mouse.x, mouse.y); pad_in_use = false; mouse_took_over = true; }
                                 continue;
                             }
+                            if (how == BottomMap::kSell) {             // Sell for N: the bag's thing under the cursor, sold
+                                if (down) { (void)town.handheld_sell(mouse.x, mouse.y); pad_in_use = false; mouse_took_over = true; }
+                                continue;
+                            }
                             if (how == BottomMap::kUse) {              // the page's Use button: a right click where the cursor is
                                 if (down) { mouse.rpress_this_frame = true; pad_in_use = false; mouse_took_over = true; }
                                 continue;
@@ -1277,11 +1281,27 @@ int run_windowed(std::vector<std::uint8_t>& framebuffer,
                 town.pad_rt_down = pad_actions.right_trigger_down;
                 town.pad_rt_edge = pad_actions.right_trigger_press;
             }
+            // A handheld with an NPC speaking: Up / Down read back / on a line (the speech's clock moved 18 px of rise),
+            // as the page's foot says.
+            {
+                static bool up_was = false, down_was = false;
+                const bool up = first.held[std::size_t(pad::Button::DpadUp)], down = first.held[std::size_t(pad::Button::DpadDown)];
+                if (g_world_only && town.speech.npc >= 0 && town.speech.rate > 0) {
+                    const std::uint32_t line_ms = 18u * 4096u / std::uint32_t(town.speech.rate);
+                    const std::uint32_t now_ticks = std::uint32_t(SDL_GetTicks());
+                    if (down && !down_was) town.speech.start_ms -= line_ms;
+                    if (up && !up_was) town.speech.start_ms = std::int32_t(now_ticks - (town.speech.start_ms + line_ms)) > 0 ? town.speech.start_ms + line_ms : now_ticks;
+                }
+                up_was = up; down_was = down;
+            }
             // A handheld with the stash open: Y (the west button) moves the thing under the cursor across, bag <-> stash.
             {
                 static bool west_was = false;
                 const bool west = first.held[std::size_t(pad::Button::West)];
                 if (g_world_only && west && !west_was && !pad_field && town.stash_open && town.handheld_stash_move(mouse.x, mouse.y))
+                    pad_actions.trade_press = pad_actions.drop_press = false;
+                // ... and with a store open, Y sells it.
+                else if (g_world_only && west && !west_was && !pad_field && town.store.npc >= 0 && town.handheld_sell(mouse.x, mouse.y))
                     pad_actions.trade_press = pad_actions.drop_press = false;
                 west_was = west;
             }
@@ -1975,8 +1995,12 @@ int run_windowed(std::vector<std::uint8_t>& framebuffer,
                     if (at_x < 0 || at_y < 0 || at_x >= 320 || at_y >= 240) second = nullptr;
                 }
                 const auto& pal = scene->act_pal.entries().empty() ? scene->pal : scene->act_pal;
+                // Buttons on a page of words (an NPC's menu or speech, the waypoints, the game menu): its lit row is the
+                // place; the hand only covered the words (the emulator play test). On item pages it marks the thing.
+                const bool words_page = town.npc_menu.npc >= 0 || town.speech.npc >= 0 || town.waypoint.open || town.game_menu.open;
                 if (!second) {}
                 else if (town.held && !town.use_item.placed()) draw_held(*second, *scene, *town.held, at_x, at_y);
+                else if (pad_in_use && words_page) {}
                 else if (!pad_cursor_hidden && scene->cursor.frames_per_direction() >= 8) {
                     const auto& frame = scene->cursor.frame(0, mouse.down ? 7 : 0);
                     blit_sprite(*second, frame, pal, at_x + frame.offset_x, at_y + frame.offset_y - int(frame.height) + 1);
