@@ -366,6 +366,7 @@ static fs::path    g_user_dir;
 static pad::Config g_pad_config;          // d2d.cfg pad_* (gamepad_map.hpp load_config)
 static std::array<int, 6> g_automap_options{ 0, 0, 1, 1, 1, 0 };   // d2d.cfg automap_mode/fade/center/party/names/left (game.exe's registry)
 static bool        g_pad_controls = true;
+static bool        g_aim_hero_pick = true;  // a handheld's hero list just opened: its cursor goes to the pick
 static bool        g_click_keys = true;   // Configure Controls' Attack / Use and Right-hand Skill keys (deviations.md); off: --toggle click_keys=off
 static keys::Clicks g_click_bindings = keys::kNoClicks;   // d2d.cfg click_attack / click_skill
 static bool        g_coop_lobby = true;   // the title's "SINGLE PLAYER / COOP" and character select's co-op lobby; off: --toggle coop_lobby=off // Configure Controls' gamepad page (deviations.md); off: --toggle pad_controls=off
@@ -1271,6 +1272,22 @@ int run_windowed(std::vector<std::uint8_t>& framebuffer,
                         }
                     pad_actions.snap_x = pad_actions.snap_y = 0;
                 }
+                // A handheld's panel page: the d-pad goes by where things lie on the second screen, and its buttons (a store's
+                // tabs, Buy, Sell, Leave, To my items) are stops too. By the frame's points, right stopped at the grid's last
+                // column and the store's buttons could be reached only by touch (the emulator play test).
+                if (g_world_only && screen == Screen::InGame && g_bottom_map.on && !town.tree_open && !by_key && (pad_actions.snap_x != 0 || pad_actions.snap_y != 0)) {
+                    std::vector<pad::Point> centres, frames;
+                    for (const auto& point : town.pad_snap_points())
+                        if (int page_x = 0, page_y = 0; g_bottom_map.to_page(point.x, point.y, page_x, page_y)) { centres.push_back({ page_x, page_y }); frames.push_back(point); }
+                    for (const auto& spot : g_bottom_map.spots)
+                        if (!spot.use && !spot.stash && !spot.sell) { centres.push_back({ (spot.left + spot.right) / 2, (spot.top + spot.bottom) / 2 }); frames.push_back({ spot.x, spot.y }); }
+                    if (int at_x = 0, at_y = 0; g_bottom_map.to_page(mouse.x, mouse.y, at_x, at_y)) {
+                        if (const int pick = pad::snap_pick(at_x, at_y, pad_actions.snap_x, pad_actions.snap_y, centres); pick >= 0) {
+                            mouse.x = frames[std::size_t(pick)].x; mouse.y = frames[std::size_t(pick)].y;
+                        }
+                    } else if (!frames.empty()) { mouse.x = frames.front().x; mouse.y = frames.front().y; }
+                    pad_actions.snap_x = pad_actions.snap_y = 0;
+                }
                 const auto points = by_key || (pad_actions.snap_x == 0 && pad_actions.snap_y == 0) ? std::vector<pad::Point>{} : screen == Screen::InGame ? town.pad_snap_points() : menu_buttons();
                 if (const int pick = (town.tree_open && screen == Screen::InGame ? pad::tree_pick : pad::snap_pick)(mouse.x, mouse.y, pad_actions.snap_x, pad_actions.snap_y, points); pick >= 0) {
                     mouse.x = points[std::size_t(pick)].x; mouse.y = points[std::size_t(pick)].y;
@@ -1929,6 +1946,7 @@ int run_windowed(std::vector<std::uint8_t>& framebuffer,
                     load_saves(*scene, save_dir);                      // the character just played first
                     csu.selected = scene->saves.empty() ? -1 : 0;
                     csu.scroll = 0;
+                    g_aim_hero_pick = true;
                 }
                 // Classic, Diablo dead with bit 13 (DAT_007a0604): leaving plays
                 // ACT04END, then the endgame screen (FUN_0044f360 -> FUN_00482ef0);
@@ -2114,9 +2132,18 @@ int run_windowed(std::vector<std::uint8_t>& framebuffer,
                         // The characters on the list's page: a touch picks one, a touch on the pick plays it (as OK).
                         const int count = int(scene->saves.size());
                         page.heading = count > 0 ? "Choose a hero" : "No heroes yet";
+                        // The list just opened: the cursor on the pick (the hero last played), not where it last was (it sat
+                        // on another hero, the top screen framed the pick: the emulator play test).
+                        if (g_aim_hero_pick && csu.selected >= csu.scroll && csu.selected < csu.scroll + 8) {
+                            const int slot = csu.selected - csu.scroll;
+                            mouse.x = kSlotX[slot % 2] + kSlotW / 2; mouse.y = kSlotY[slot / 2] + kSlotH / 2;
+                        }
+                        g_aim_hero_pick = false;
                         for (int slot = 0; slot < 8 && csu.scroll + slot < count; ++slot) {
                             const int index = csu.scroll + slot;
                             const auto& header = scene->saves[std::size_t(index)];
+                            // The pick follows the cursor, so both screens name the same hero and A plays the one lit.
+                            if (mouse.x == kSlotX[slot % 2] + kSlotW / 2 && mouse.y == kSlotY[slot / 2] + kSlotH / 2) csu.selected = index;
                             // Lit: the row the cursor is on (the d-pad's); the pick keeps gold words. A row is the click on its own
                             // slot, so the lit row is what A plays (the pick's row stood for Play and stayed lit wherever the
                             // d-pad went: the emulator play test). A touch on the pick plays it (the press below).

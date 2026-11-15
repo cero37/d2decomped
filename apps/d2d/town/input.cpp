@@ -142,6 +142,11 @@ auto Town::pad_pick(const PadPlayer& player_pad, const UnitState& unit, bool use
                 if (monster.alive() && !monster.ally_not_interact(*scene, level ? level->id : 0)) foes.push_back({ monster.id, monster.unit.x, monster.unit.y });   // not a converted one, as the cursor
             if (const int hit = pad::pick_target(hero_x, hero_y, face_x, face_y, foes, player_pad.target, aim); hit >= 0)
                 return { PadPick::kMonster, foes[std::size_t(hit)].id, foes[std::size_t(hit)].x, foes[std::size_t(hit)].y };
+            // Out of town, a foe close on any side beats the facing: A swung at the air while a Brute hit from behind
+            // (55 to 17 HP, six presses) and while a Fallen stood on the hero (the emulator play test). The prompt names it too.
+            if (!(level && d2d::rules::level_ids::is_town(level->id)))
+                if (const int hit = pad::pick_target(hero_x, hero_y, 0.f, 0.f, foes, -1, pad::Aim{ 2.5f, 2.5f, -2.f }); hit >= 0)
+                    return { PadPick::kMonster, foes[std::size_t(hit)].id, foes[std::size_t(hit)].x, foes[std::size_t(hit)].y };
         }
         if (!uses) return {};
         std::vector<pad::Candidate> drops;
@@ -160,7 +165,8 @@ auto Town::pad_pick(const PadPlayer& player_pad, const UnitState& unit, bool use
         for (const auto& portal : view.portals)  // Interact's ids, as the mouse's hover names them (Cain's, 8, has no name)
             if (portal.which < int(d2d::game::World::kGamePortals)) things.push_back({ -2000 - portal.which, portal.x, portal.y });
         for (const auto& corpse : view.corpses) things.push_back({ -3000 - corpse.which, corpse.x, corpse.y });
-        if (const int pick = pad::pick_target(hero_x, hero_y, face_x, face_y, things, -1, pad::Aim{ 4.5f, 4.5f, -0.2f }); pick >= 0)
+        // 3.5, not 4.5: at 4.5 the prompt named a well and Akara at or past the top screen's edge (the emulator play test).
+        if (const int pick = pad::pick_target(hero_x, hero_y, face_x, face_y, things, -1, pad::Aim{ 3.5f, 3.5f, -0.2f }); pick >= 0)
             return { PadPick::kThing, things[std::size_t(pick)].id, things[std::size_t(pick)].x, things[std::size_t(pick)].y };
         // A cave mouth, stairs or a door to another level: the pad has no cursor to click it with, so
         // the one in reach is A's. The point sent is the middle of its select box (World::warp_clicked).
@@ -176,6 +182,7 @@ auto Town::pad_pick(const PadPlayer& player_pad, const UnitState& unit, bool use
     }
 
 auto Town::pad_use(const PadPick& pick, const Send& out) const -> bool {
+        if (pick.kind != PadPick::kNone && pick.kind != PadPick::kMonster) d2d::log::info("pad: {}", pick_label(pick));   // what A acted on, for the play tests
         if (pick.kind == PadPick::kItem) out(cmd::Pickup{ pick.id });
         else if (pick.kind == PadPick::kThing) out(cmd::Interact{ pick.id });
         else if (pick.kind == PadPick::kWarp) out(cmd::Move{ pick.x, pick.y, true });
