@@ -89,7 +89,7 @@ jobs:
           name: sanctuary-pocket
           path: out/
       - name: Publish with a QR code
-        if: (github.event_name == 'push' && github.ref == 'refs/heads/3ds') || (github.event_name == 'release' && startsWith(github.event.release.tag_name, '3ds-v'))
+        if: ((github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/3ds') || (github.event_name == 'release' && startsWith(github.event.release.tag_name, '3ds-v'))
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
