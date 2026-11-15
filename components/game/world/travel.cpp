@@ -59,6 +59,9 @@ auto World::let_far_levels_go(std::uint32_t now_ms, bool all) -> void {
         if (other == level || other == &game_data->town || other == izual_level || other == gidbinn_level) return true;
         if (other == fight.mon_level || other == loot.ground_level || other == fana.first || other == fight.spawning.room_level) return true;
         for (const auto& near : level->nearby) if (near.level == other) return true;
+        // Where the player's level's warps lead (a cave by its mouth): built ahead as the player nears, let go, built
+        // again, 24 times in 47 s by the Cold Plains' cave (1-4 s freezes: the emulator play test, round 18).
+        for (const auto& warp : level->warps) if (warp.destination == other->id) return true;
         for (const auto& player : players) {
             if (player->on_level == other || (player->body && player->body->level == other)) return true;
             for (const auto& corpse : player->corpses) if (corpse.level == other) return true;
