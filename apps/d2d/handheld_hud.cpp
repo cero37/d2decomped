@@ -319,7 +319,12 @@ void draw_bottom_hud(std::vector<std::uint8_t>& framebuffer, const Scene& scene,
                 const int mx = int(std::lround((person.x - person.y) * 80 / float(kDivisor))) - scroll_x + 8;
                 const int my = int(std::lround((person.x + person.y) * 40 / float(kDivisor))) - scroll_y - 8;
                 if (mx < x0 + 2 || mx > x1 - 2 || my < y0 + 2 || my > y1 - 2) continue;
-                for (int d = -1; d <= 1; ++d) for (int e = -1; e <= 1; ++e) canvas.put(mx + d, my + e, 170, 220, 255);
+                if (person.waypoint)                                   // a waypoint: a bright square with a dark rim
+                    for (int d = -3; d <= 3; ++d) for (int e = -3; e <= 3; ++e) {
+                        const bool rim = std::abs(d) == 3 || std::abs(e) == 3;
+                        canvas.put(mx + d, my + e, rim ? 20 : 120, rim ? 40 : 230, rim ? 60 : 255);
+                    }
+                else for (int d = -1; d <= 1; ++d) for (int e = -1; e <= 1; ++e) canvas.put(mx + d, my + e, 170, 220, 255);
                 const int width = small_font.measure(person.text);
                 const int tx = std::clamp(mx - width / 2, x0 + 1, x1 - width - 1);
                 int ty = -1;

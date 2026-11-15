@@ -49,7 +49,7 @@ auto World::cross_level() -> void {
                 if (placement.level == level->id || game_data->built(placement.level)) continue;
                 const float out_x = std::max({ float(placement.x) - here_x, 0.f, here_x - float(placement.x + placement.width) });
                 const float out_y = std::max({ float(placement.y) - here_y, 0.f, here_y - float(placement.y + placement.height) });
-                if (out_x < 10.f && out_y < 10.f) game_data->want_level(placement.level);
+                if (out_x < 18.f && out_y < 18.f) game_data->want_level(placement.level);   // 18, not 10: a running hero still waited 3 s for the Blood Moor and the Cold Plains (round 12)
             }
         }
         bool known = level->inside(actor->target_x, actor->target_y);

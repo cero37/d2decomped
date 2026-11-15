@@ -58,7 +58,7 @@ struct BottomSkills {
 inline BottomSkills g_bottom_skills;
 // The level's ways out, on the second screen's map (Town::handheld_map_labels): where (act cells, as the map's
 // player) and where to. A new player found no way out of the camp (the emulator play test).
-struct MapLabel { float x = 0, y = 0; std::string text; };
+struct MapLabel { float x = 0, y = 0; std::string text; bool waypoint = false; };
 inline std::vector<MapLabel> g_map_labels;
 // The camp's people, on the same map (a play tester spent 35 moves looking for Akara): where each stands now, and the name.
 inline std::vector<MapLabel> g_map_people;

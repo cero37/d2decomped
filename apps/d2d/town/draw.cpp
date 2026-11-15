@@ -671,7 +671,7 @@ auto Town::draw_view(std::vector<std::uint8_t>& framebuffer, std::vector<std::ui
         // second to a pack and a unique, with a potion in the belt and nothing on screen to say so).
         if (g_world_only && wide && level && !d2d::rules::level_ids::is_town(level->id) && !view.dead) {
             const auto life = character.stats.get(d2d::d2s::kLife) >> 8, most = character.stats.get(d2d::d2s::kMaxLife) >> 8;
-            if (most > 0 && life > 0 && life * 3 < most && (SDL_GetTicks() / 400) % 3 != 2) {
+            if (most > 0 && life > 0 && life * 2 < most && (SDL_GetTicks() / 400) % 3 != 2) {   // half, not a third: at a third it came at 13 of 75, too late (round 12)
                 const bool potion = std::ranges::any_of(character.items, [](const d2d::d2s::Item& item) { return item.location == d2d::d2s::item_location::kBelt; });
                 const std::string words = potion ? "Low life!  D-pad: drink a potion" : "Low life!  No potions in the belt";
                 const auto& pal = scene->act_pal.entries().empty() ? scene->pal : scene->act_pal;

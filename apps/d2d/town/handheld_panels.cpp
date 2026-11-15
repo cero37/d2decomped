@@ -245,7 +245,9 @@ auto Town::handheld_map_labels() -> void {
             // A waypoint, named on the map wherever it is (a play tester could not find the camp's or the Cold Plains').
             const bool waypoint = npc.root == "objects" && npc.name.find("aypoint") != std::string::npos;
             if (!waypoint && (npc.root == "objects" || !d2d::rules::level_ids::is_town(level->id))) continue;
-            g_map_people.push_back({ (state ? state->x : npc.x) + float(level->world_x), (state ? state->y : npc.y) + float(level->world_y), npc.name });
+            MapLabel label{ (state ? state->x : npc.x) + float(level->world_x), (state ? state->y : npc.y) + float(level->world_y), npc.name, waypoint };
+            if (waypoint) g_map_people.insert(g_map_people.begin(), std::move(label));   // first: its name keeps its place (it jumped as people walked)
+            else g_map_people.push_back(std::move(label));
         }
     if (!g_world_only || !scene || !level || !world.game_data) { g_map_labels.clear(); made_for = nullptr; return; }
     if (made_for == level) return;
