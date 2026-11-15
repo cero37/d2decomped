@@ -2061,7 +2061,7 @@ int run_windowed(std::vector<std::uint8_t>& framebuffer,
                 const bool words_page = town.npc_menu.npc >= 0 || town.speech.npc >= 0 || town.waypoint.open || town.game_menu.open;
                 if (!second) {}
                 else if (town.held && !town.use_item.placed()) draw_held(*second, *scene, *town.held, at_x, at_y);
-                else if (pad_in_use && words_page) {}
+                else if (words_page) {}   // the lit row is the place, by pad or touch (the hand sat on Quit while Return was lit: rounds 9, 10, 14)
                 else if (!pad_cursor_hidden && g_bottom_map.on) {
                     // A fitted page (the bag, a store, the stash): a gold ring with a dot, not the game's gauntlet, which
                     // players read as a glove held in the hand (the emulator play tests, rounds 4 and 5).
