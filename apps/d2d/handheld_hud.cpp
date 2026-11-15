@@ -363,6 +363,12 @@ int bottom_wheel_hit(int x, int y, int shown) {
     return -1;
 }
 
+int bottom_belt_hit(int x, int y) {
+    constexpr int cell = 29, left = 320 / 2 - cell * 2, top = 240 - 2 - cell;
+    if (y < top || y >= top + cell || x < left || x >= left + 4 * cell) return -1;
+    return (x - left) / cell;
+}
+
 int bottom_slot_hit(int x, int y) {
     constexpr int kPitch = 30, kIcon = 24;                       // as draw_bottom_hud lays the row
     const int left = kBottomWidth / 2 - (7 * kPitch - (kPitch - kIcon - 2)) / 2, top = kBottomHeight - 2 - 29 - 3 - kIcon - 2;

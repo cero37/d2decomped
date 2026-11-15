@@ -5,6 +5,8 @@
 // of Town (town.hpp) is in this directory, by subsystem.
 #include "town.hpp"
 
+#include <SDL3/SDL_timer.h>
+
 #include "common.hpp"
 #include "controls.hpp"
 #include "ingame.hpp"
@@ -71,6 +73,19 @@ auto Town::take_view(std::span<const std::uint8_t> bytes, const View* local) -> 
         level = view.level;
         if (net_game) net_overlay();
         cues.due.insert(cues.due.end(), view.sounds.begin(), view.sounds.end());
+        // A handheld: the hero's "I can't carry any more" / "I need mana" said on the top screen too (a play tester's
+        // loot failed with nothing shown; with no sound, nothing at all). The class lines, by their sound index.
+        if (g_world_only && scene && !view.sounds.empty()) {
+            static constexpr std::array<std::string_view, 7> kClass{ "amazon", "sorceress", "necromancer", "paladin", "barbarian", "druid", "assassin" };
+            const auto cls = kClass[std::size_t(std::clamp(int(character.header.cls), 0, 6))];
+            const auto index_of = [&](const std::string& name) { const auto found = scene->sound_index.find(name); return found == scene->sound_index.end() ? -1 : found->second; };
+            const int no_room = index_of(cls == "assassin" ? std::string("assassin_cant_carry") : std::string(cls) + "_cantcarry_1");
+            const int no_mana = index_of(std::string(cls) + "_needmana_1");
+            for (const auto& sound : view.sounds) {
+                const char* words = no_room >= 0 && sound.sound == no_room ? "No room in the bag" : no_mana >= 0 && sound.sound == no_mana ? "Not enough mana" : nullptr;
+                if (words) { belt_note = words; belt_note_at = std::max<std::uint32_t>(1, std::uint32_t(SDL_GetTicks())); }
+            }
+        }
         if (!view.has_character) return true;
         const auto hotkeys = character.header.hotkeys;  // client-owned bindings, not replicated gameplay state
         character.header = view.header;

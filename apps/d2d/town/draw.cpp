@@ -132,6 +132,11 @@ auto Town::draw(std::vector<std::uint8_t>& framebuffer, const Mouse& mouse, std:
                     if (slot == 0) put.main_skill = true; else put.skill_slot = slot - 1;
                     drive_wheel(put);
                 }
+            } else if (const int belt = bottom_belt_hit(x, y); belt >= 0 && pad_field()) {
+                // A touch on a belt slot drinks it, as its d-pad direction (it did nothing: the emulator play test).
+                note_belt(belt);
+                send(cmd::UseBelt{ belt });
+                g_bottom_skills.belt_fired[std::size_t(belt)] = frame_ms ? frame_ms : 1;
             } else if (y < 22 && pad_field()) skill_strip = 0;
             else if (y < 166) {
                 g_handheld_zoom = (g_handheld_zoom + 1) % 3;
@@ -671,14 +676,15 @@ auto Town::draw_view(std::vector<std::uint8_t>& framebuffer, std::vector<std::ui
         // second to a pack and a unique, with a potion in the belt and nothing on screen to say so).
         if (g_world_only && wide && level && !d2d::rules::level_ids::is_town(level->id) && !view.dead) {
             const auto life = character.stats.get(d2d::d2s::kLife) >> 8, most = character.stats.get(d2d::d2s::kMaxLife) >> 8;
-            if (most > 0 && life > 0 && life * 2 < most && (SDL_GetTicks() / 400) % 3 != 2) {   // half, not a third: at a third it came at 13 of 75, too late (round 12)
+            if (most > 0 && life > 0 && life * 2 < most) {   // always on (it blinked off a third of the time and shots missed it); its red pulses   // half, not a third: at a third it came at 13 of 75, too late (round 12)
                 const bool potion = std::ranges::any_of(character.items, [](const d2d::d2s::Item& item) { return item.location == d2d::d2s::item_location::kBelt; });
                 const std::string words = potion ? "Low life!  D-pad: drink a potion" : "Low life!  No potions in the belt";
                 const auto& pal = scene->act_pal.entries().empty() ? scene->pal : scene->act_pal;
                 const auto& font = g_handheld_zoom > 0 && scene->font24.line_height() > 0 ? scene->font24 : scene->font;
                 const int width = fb_width(*wide), top = g_clip_top + font.line_height() / 2;
                 font.draw_tinted(*wide, std::uint32_t(width), kScreenHeight, pal, (width - font.measure(words)) / 2 + 1, top + 1, words, 0, 0, 0);
-                font.draw_tinted(*wide, std::uint32_t(width), kScreenHeight, pal, (width - font.measure(words)) / 2, top, words, 255, 80, 80);
+                const bool bright = (SDL_GetTicks() / 400) % 2 == 0;
+                font.draw_tinted(*wide, std::uint32_t(width), kScreenHeight, pal, (width - font.measure(words)) / 2, top, words, 255, bright ? 90 : 40, bright ? 90 : 40);
             }
         }
         // A belt slot just used (the D-pad): what went, over the prompt's line, for a second and a half.

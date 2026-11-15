@@ -67,6 +67,8 @@ int bottom_strip_hit(int x, int y);
 int bottom_wheel_hit(int x, int y, int shown);
 // Which of the HUD's skill slots a touch is on: 0 the trigger's, 1..6 the buttons' in their order; -1 for none.
 int bottom_slot_hit(int x, int y);
+// Which belt column (0..3) a touch on the HUD's belt row is on, or -1 (the row as draw_bottom_hud lays it, 320x240).
+int bottom_belt_hit(int x, int y);
 
 // An open panel is 432 rows and a screen 240: it goes across both, 216 rows each, its upper half
 // at the foot of the top screen (this image, 320 x kPanelHalf RGBA; empty when no panel is up)
