@@ -100,6 +100,9 @@ auto World::deal(const Command& command, std::uint32_t now_ms) -> bool {
             if (found->location == d2d::d2s::item_location::kBelt || (worn && actor->held)) return true;
             const bool belt = worn && found->slot == d2d::d2s::body_location::kBelt;
             d2d::rules::wield_leaves(item_rules, actor->character.items, *found);   // FUN_00560cd0 -> FUN_0063d2b0
+            // What it fetches, for the play tests (a Town Portal scroll was shown at 60 and paid 50).
+            d2d::log::info("sell: {} (quantity {}, quality {}) for {}", found->code, found->quantity, found->quality,
+                           d2d::rules::item_price(item_rules, *found, actor->store.npc_id, true, actor->store.header));
             if (const auto over = d2d::rules::store_sell(item_rules, actor->store, std::size_t(found - actor->character.items.begin()), actor->character.items, actor->character.stats); over > 0) {
                 loot.enter(level);
                 loot.put({ .code = "gld", .gold = int(over) }, actor->player.x, actor->player.y, 1, fight.spawning.game, now_ms);

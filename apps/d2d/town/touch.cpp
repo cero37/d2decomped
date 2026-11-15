@@ -305,7 +305,7 @@ void Town::drive_touch() {
         if (pad_use(picked, out)) touch_attack_used = true;
         else if (picked.kind == PadPick::kMonster) send(cmd::UseSkill{ 0, picked.x, picked.y, picked.id, true, -1 });
     }
-    if (touch_input.belt >= 0) send(cmd::UseBelt{ touch_input.belt });
+    if (touch_input.belt >= 0) { note_belt(touch_input.belt); send(cmd::UseBelt{ touch_input.belt }); }   // named first, as the keys
     for (const auto& target : touch_input.casts) cast_resolved(touch_player, target);
 
 }

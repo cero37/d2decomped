@@ -477,10 +477,10 @@ auto Town::field_play(PadPlayer& player_pad, pad::Mapper& mapper, const World::P
         for (const pad::Key key : actions.keys)
             switch (key) {
                 case pad::Key::ToggleRun:   out(cmd::Run{ !hero_there.running }); break;
-                case pad::Key::Belt1:       out(cmd::UseBelt{ 0 }); if (&player_pad == &pad) note_belt(0); break;
-                case pad::Key::Belt2:       out(cmd::UseBelt{ 1 }); if (&player_pad == &pad) note_belt(1); break;
-                case pad::Key::Belt3:       out(cmd::UseBelt{ 2 }); if (&player_pad == &pad) note_belt(2); break;
-                case pad::Key::Belt4:       out(cmd::UseBelt{ 3 }); if (&player_pad == &pad) note_belt(3); break;
+                case pad::Key::Belt1:       if (&player_pad == &pad) note_belt(0); out(cmd::UseBelt{ 0 }); break;
+                case pad::Key::Belt2:       if (&player_pad == &pad) note_belt(1); out(cmd::UseBelt{ 1 }); break;
+                case pad::Key::Belt3:       if (&player_pad == &pad) note_belt(2); out(cmd::UseBelt{ 2 }); break;
+                case pad::Key::Belt4:       if (&player_pad == &pad) note_belt(3); out(cmd::UseBelt{ 3 }); break;
                 case pad::Key::SwapWeapons: out(cmd::SwapWeapons{}); break;
                 case pad::Key::Inventory: case pad::Key::Character: case pad::Key::SkillTree: case pad::Key::QuestLog:
                 case pad::Key::Automap: case pad::Key::Escape:

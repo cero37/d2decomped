@@ -502,6 +502,10 @@ auto Town::handheld_fit_panel(const Mouse& mouse) -> bool {
                     const int sell_left = (kW - grid_w) / 2 + small.measure(gold_words) + 12, sell_right = right - 84 - 4;
                     if (for_sale && sell_right - sell_left > 40) {
                         const std::string words = std::format("Sell for {}", d2d::rules::item_price(scene->rules, *for_sale, store.npc_id, true, store.header));
+                        if (static std::string said; said != words + for_sale->code) {   // the price shown, for the world's "sell:" line (play tests)
+                            said = words + for_sale->code;
+                            d2d::log::info("store page: {} {} (quantity {}, quality {})", for_sale->code, words, for_sale->quantity, for_sale->quality);
+                        }
                         page.box(sell_left, line_y - 8, sell_right, line_y + 8, true);
                         page.text(page.fit(words, sell_right - sell_left - 6), words, (sell_left + sell_right) / 2, line_y, kWhite, 0);
                         BottomMap::Spot spot{ sell_left, line_y - 8, sell_right, line_y + 8, mouse.x, mouse.y };

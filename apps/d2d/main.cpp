@@ -1329,7 +1329,9 @@ int run_windowed(std::vector<std::uint8_t>& framebuffer,
                 const bool up = first.held[std::size_t(pad::Button::DpadUp)], down = first.held[std::size_t(pad::Button::DpadDown)];
                 if (g_world_only && town.speech.npc >= 0 && town.speech.rate > 0) {
                     const std::uint32_t line_ms = 18u * 4096u / std::uint32_t(town.speech.rate);
-                    const std::uint32_t now_ticks = std::uint32_t(SDL_GetTicks());
+                    // The speech's own clock (Town::now_ms, SDL ticks less the start): raw ticks put an Up's start in the
+                    // future, the offset wrapped round, and the words ran to the end and closed (the emulator's scripted runs).
+                    const std::uint32_t now_ticks = town.now_ms;
                     if (down && !down_was) town.speech.start_ms -= line_ms;
                     if (up && !up_was) town.speech.start_ms = std::int32_t(now_ticks - (town.speech.start_ms + line_ms)) > 0 ? town.speech.start_ms + line_ms : now_ticks;
                 }

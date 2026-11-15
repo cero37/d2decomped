@@ -310,9 +310,9 @@ auto Town::update(std::vector<std::uint8_t>& framebuffer, const Mouse& frame_mou
             if (key == SDLK_ESCAPE && view.dead && (!view.ghost || view.all_dead) && !game_menu.open) { send(cmd::Resurrect{}); continue; }
             for (int belt = 0; belt < 4; ++belt)
                 if (fires(keys::kBelt1 + belt)) {
+                    note_belt(belt);      // first: the world can take the potion out of the column as the use is sent (no note when it was the last)
                     net.send(cmd::UseBelt{ belt, (SDL_GetModState() & SDL_KMOD_SHIFT) != 0 });
                     g_bottom_skills.belt_fired[std::size_t(belt)] = frame_ms ? frame_ms : 1;       // a handheld's HUD lights the column
-                    note_belt(belt);
                 }
             for (int phrase = 0; phrase < 8; ++phrase)
                 if (fires(phrase < 7 ? keys::kSay1 + phrase : int(keys::kSayRetreat))) say(phrase);
@@ -356,7 +356,7 @@ auto Town::update(std::vector<std::uint8_t>& framebuffer, const Mouse& frame_mou
                 else if (waypoint.open) waypoint = {};
                 // A handheld on the bag's page with a store or the stash beside it: B goes back to that page first (it shut
                 // the whole window: the emulator play test). The page is the side the cursor is on: it moves across.
-                else if (g_world_only && !held && inv_open && (store.npc >= 0 || stash_open) && frame_mouse.x >= int(kScreenWidth) / 2 && g_auto_clicks.empty()) {
+                else if (g_world_only && !held && inv_open && (store.npc >= 0 || stash_open) && !handheld_left && g_auto_clicks.empty()) {   // the page shown (handheld_fit_panel), not the cursor's half: a bag-page button can stand for a point on the store's half (2 of 5 Bs did nothing)
                     const auto& stash = scene->stash_layout[character.expansion ? 1 : 0];
                     if (store.npc >= 0) g_auto_clicks = { { 96 + 14, 123 + 14, false } };
                     else g_auto_clicks = { { stash.grid_x + stash.box_w / 2, stash.grid_y + stash.box_h / 2, false } };
