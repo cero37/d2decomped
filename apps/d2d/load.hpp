@@ -15,6 +15,7 @@
 #include <functional>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace d2d::client {
@@ -55,8 +56,9 @@ void load_saves(Scene& scene, const fs::path& dir);
 void load_act_palettes(Scene& scene, const d2d::mpq::Stack& mpqs, int act);
 
 // The MPQs and strings (open_game_data) and the menus' sprites, fonts and
-// palettes: enough for the title. nullopt: no game data.
-std::optional<Scene> load_scene(const fs::path& data_dir, const fs::path& patch_installer);
+// palettes: enough for the title. language: d2d.cfg's `language =` (empty:
+// the data's own). nullopt: no game data.
+std::optional<Scene> load_scene(const fs::path& data_dir, const fs::path& patch_installer, std::string_view language = {});
 // The menus' backgrounds, logo and fire: read (again), or let go while a game is on (a handheld's heap).
 void load_menu_art(Scene& scene);
 void drop_menu_art(Scene& scene);

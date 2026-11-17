@@ -662,6 +662,9 @@ struct GameData {
     // docs/research/re/frontend-menu-table.md — records at 0x708ec0+ carry
     // TBL ids 0x13f2..0x13f7 in the +0x18 field). Class-name keys are bare
     // ("Barbarian", "Assassin", "Druid", …) — see class-table.md.
+    // The tables come from data\local\LNG\<language>\ (ENG, ESN for Spanish, …):
+    // language.hpp picks it. The menu art (load.cpp) and the tables share it.
+    std::string           language = "ENG";
     d2d::tbl::Table       strings;         // string.tbl
     d2d::tbl::Table       patch_strings;   // patchstring.tbl (has Druid/Assassin)
     d2d::tbl::Table       exp_strings;     // expansionstring.tbl

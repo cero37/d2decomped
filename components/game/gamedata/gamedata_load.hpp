@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <optional>
+#include <string_view>
 
 namespace d2d::game {
 
@@ -17,12 +18,15 @@ namespace d2d::game {
 // every table and string, and Act 1 for map_seed. nullopt: no d2data.mpq
 // there, or a file failed to load (logged).
 // tile_pixels: decode the levels' tile graphics (GameData::tile_pixels).
+// language: the string tables' code (d2d.cfg `language =`; empty: the data's own,
+// see choose_language in language.hpp). GameData::language says what loaded.
 std::optional<GameData> load_game_data(const fs::path& data_dir, const fs::path& patch_installer, std::uint32_t map_seed,
-                                       bool tile_pixels = false);
+                                       bool tile_pixels = false, std::string_view language = {});
 // load_game_data in steps, so the menus can come up first: the MPQs and the
 // strings; then every table; then Act 1 for map_seed with its units,
 // monsters and skills (after the tables: a save's seed needs them read).
-std::optional<GameData> open_game_data(const fs::path& data_dir, const fs::path& patch_installer, bool tile_pixels = false);
+std::optional<GameData> open_game_data(const fs::path& data_dir, const fs::path& patch_installer, bool tile_pixels = false,
+                                       std::string_view language = {});
 void load_game_tables(GameData& data, const d2d::mpq::Stack& mpqs);
 void load_game_world(GameData& data, d2d::mpq::Stack& mpqs, std::uint32_t map_seed);
 

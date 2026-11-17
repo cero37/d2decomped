@@ -28,6 +28,7 @@ Or use [the launcher](../launcher/README.md), which finds them for you.
 | Upscale filter (default `pixelart`; also in the launcher) | `--toggle scalemode=nearest` (or `linear`) |
 | Straight into a new character | `--start-screen charcreate --start-class 1 --start-name Test` (class 0..6: Amazon, Sorceress, Necromancer, Paladin, Barbarian, Druid, Assassin) |
 | Don't touch your saves | `--no-save` |
+| Spanish text and menu art (the install's own, e.g. a Spanish disc's `LNG\ESN`; English when it has none) | `language = ESN` in `d2d.cfg`. Without it, d2d uses the language the data has: Spanish-only installs load Spanish by themselves |
 | Turn a d2d extra off | `--toggle autoloot=off,trans_roof=off,autoparty=off` |
 | Draw the hand into the frame, as game.exe (not the OS cursor) | `--toggle hwcursor=off` |
 | Attack or cast from a mouse's extra buttons | Configure Controls' first two rows, Attack / Use and Right-hand Skill (`--toggle click_keys=off` hides them) |

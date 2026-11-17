@@ -136,7 +136,16 @@ Scene::PlayerAnim load_npc_composite(const d2d::mpq::Stack& mpqs, const Npc& npc
 
 namespace {
 
+// The menu art's folder (data\local\UI\<language>\, ending in a backslash): the
+// language the string tables came from, else ENG where the install has no art
+// for it. Probed by one file the folder always holds.
+std::string ui_folder(const Scene& scene, const d2d::mpq::Stack& mpqs) {
+    const std::string own = R"(data\local\UI\)" + scene.language + "\\";
+    return mpqs.contains(own + "youdiedhardcore.dc6") ? own : std::string(R"(data\local\UI\ENG\)");
+}
+
 void load_ui_sprites(Scene& scene, const d2d::mpq::Stack& mpqs) {
+    const std::string ui = ui_folder(scene, mpqs);
     auto txt = [&](const char* name) {
         auto bytes = mpqs.try_read(std::string(R"(data\global\excel\)") + name + ".txt");
         return bytes ? d2d::txt::Table(*bytes) : d2d::txt::Table{};
@@ -228,11 +237,11 @@ void load_ui_sprites(Scene& scene, const d2d::mpq::Stack& mpqs) {
     if (auto bytes = mpqs.try_read(R"(data\local\FONT\LATIN\font30.tbl)"))
         if (auto sheet_bytes = mpqs.try_read(R"(data\local\FONT\LATIN\font30.dc6)"))
             scene.font30 = d2d::font::Font(*bytes, d2d::dc6::Sprite(*sheet_bytes));
-    sprite(R"(data\local\UI\ENG\youdiedhardcore.dc6)", scene.you_died);
-    sprite(R"(data\local\UI\ENG\youdiedinst.dc6)", scene.you_died_inst);
+    sprite(ui + "youdiedhardcore.dc6", scene.you_died);
+    sprite(ui + "youdiedinst.dc6", scene.you_died_inst);
     for (const auto name : game_menu_images())
         if (!scene.menu_text.contains(std::string(name)))
-            if (auto bytes = mpqs.try_read(std::string(R"(data\local\UI\ENG\)") + std::string(name) + ".dc6"))
+            if (auto bytes = mpqs.try_read(ui + std::string(name) + ".dc6"))
                 scene.menu_text.emplace(std::string(name), d2d::dc6::Sprite(*bytes));
     sprite(R"(data\global\ui\CURSOR\pentspin.dc6)", scene.pentspin);
     sprite(R"(data\global\ui\menu\boxpieces.dc6)", scene.boxpieces);
@@ -278,7 +287,7 @@ void load_ui_sprites(Scene& scene, const d2d::mpq::Stack& mpqs) {
         auto entry = [&](int level, const std::string& file) {
             if (file.empty() || file == "0") return std::string();
             const std::string act = level >= 0x6d ? "EXPANSION" : "ACT" + std::to_string(act_of[level] + 1);
-            std::string path = R"(data\local\UI\ENG\)" + act + "\\" + file + ".dc6";
+            std::string path = ui + act + "\\" + file + ".dc6";
             if (scene.entry_art.contains(path)) return path;
             auto bytes = mpqs.try_read(path);
             if (!bytes) return std::string();
@@ -513,8 +522,8 @@ void drop_menu_art(Scene& scene) {
         *sprite = d2d::dc6::Sprite{};
 }
 
-std::optional<Scene> load_scene(const fs::path& data_dir, const fs::path& patch_installer) {
-    auto data = game::open_game_data(data_dir, patch_installer, /*tile_pixels=*/true);
+std::optional<Scene> load_scene(const fs::path& data_dir, const fs::path& patch_installer, std::string_view language) {
+    auto data = game::open_game_data(data_dir, patch_installer, /*tile_pixels=*/true, language);
     if (!data) return std::nullopt;
     const auto start_ms = d2d::log::ms();
     try {
@@ -569,8 +578,8 @@ std::optional<Scene> load_scene(const fs::path& data_dir, const fs::path& patch_
                              mpqs.read(R"(data\local\FONT\LATIN\font16.tbl)"),
                              d2d::dc6::Sprite(mpqs.read(R"(data\local\FONT\LATIN\font16.dc6)")));
         scene.credits = [&] {
-                auto bytes = mpqs.try_read(R"(data\local\UI\ENG\ExpansionCredits.txt)");
-                if (!bytes) bytes = mpqs.try_read(R"(data\local\ui\eng\Credits.txt)");
+                auto bytes = mpqs.try_read(ui_folder(scene, mpqs) + "ExpansionCredits.txt");
+                if (!bytes) bytes = mpqs.try_read(ui_folder(scene, mpqs) + "Credits.txt");
                 return bytes ? parse_credits_utf16(*bytes) : std::vector<std::string>{};
             }();
         // Rogue-camp world data — separate call so a DS1/DT1 miss doesn't

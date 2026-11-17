@@ -2651,7 +2651,9 @@ int main(int argc, char** argv) {
 
     std::vector<std::uint8_t> framebuffer(std::size_t(kScreenWidth) * kScreenHeight * 4, 0);
     for (std::size_t i = 3; i < framebuffer.size(); i += 4) framebuffer[i] = 0xFF;
-    auto scene = load_scene(data_dir, patch_layer);   // the menus' part; nullopt if the MPQs won't load
+    // d2d.cfg `language =` (e.g. ESN for Spanish): the string tables and menu art
+    // of that language, when the install has them (language.hpp).
+    auto scene = load_scene(data_dir, patch_layer, cfg["language"]);   // the menus' part; nullopt if the MPQs won't load
     // Nothing to run without them: say so (the log has which MPQ and why)
     // rather than go on to a game with no data.
     if (!scene) {

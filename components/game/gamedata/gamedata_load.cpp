@@ -4,6 +4,7 @@
 #include <malloc.h>
 
 #include "gamedata.hpp"
+#include "language.hpp"
 #include "log.hpp"
 
 #include <compcode.hpp>
@@ -1716,7 +1717,8 @@ void check_patch_layer(const d2d::mpq::Stack& mpqs) {
 
 }  // namespace
 
-std::optional<GameData> open_game_data(const fs::path& data_dir, const fs::path& patch_installer, bool tile_pixels) {
+std::optional<GameData> open_game_data(const fs::path& data_dir, const fs::path& patch_installer, bool tile_pixels,
+                                       std::string_view language) {
     // MPQ names match case-insensitively (D2DATA.MPQ in Wine prefixes and
     // Linux copies); the install is read in place, never renamed.
     auto find = [&](std::string_view name) { return d2d::install::find_file(data_dir, name); };
@@ -1790,6 +1792,16 @@ std::optional<GameData> open_game_data(const fs::path& data_dir, const fs::path&
 
         GameData game_data;
         game_data.tile_pixels = tile_pixels;
+        // The language whose string tables load (and whose menu art, load.cpp).
+        // d2d.cfg's `language =` when the install has it; else ENG, then ESN.
+        game_data.language = choose_language(language, [&](const std::string& code) {
+            return mpqs.contains(std::format(R"(data\local\LNG\{}\string.tbl)", code));
+        });
+        std::string wanted(language);
+        for (auto& letter : wanted) letter = char(std::toupper(static_cast<unsigned char>(letter)));
+        if (!wanted.empty() && wanted != game_data.language)
+            d2d::log::warn("language {} isn't in the install (no data\\local\\LNG\\{}); using {}", wanted, wanted, game_data.language);
+        d2d::log::info("  Language: {}", game_data.language);
         // Frontend button labels (IDs 0x13f2..0x13f7) live in the base
         // string.tbl per probe. patchstring.tbl (826 entries) overrides
         // specific IDs when Blizzard shipped patches; expansionstring.tbl
@@ -1798,15 +1810,15 @@ std::optional<GameData> open_game_data(const fs::path& data_dir, const fs::path&
         // entry, load all three and query in order (patch → expansion →
         // base).
         game_data.strings = [&] {
-                auto bytes = mpqs.try_read(R"(data\local\LNG\ENG\string.tbl)");
+                auto bytes = mpqs.try_read(std::format(R"(data\local\LNG\{}\string.tbl)", game_data.language));
                 return bytes ? d2d::tbl::Table(*bytes) : d2d::tbl::Table{};
             }();
         game_data.patch_strings = [&] {
-                auto bytes = mpqs.try_read(R"(data\local\LNG\ENG\patchstring.tbl)");
+                auto bytes = mpqs.try_read(std::format(R"(data\local\LNG\{}\patchstring.tbl)", game_data.language));
                 return bytes ? d2d::tbl::Table(*bytes) : d2d::tbl::Table{};
             }();
         game_data.exp_strings = [&] {
-                auto bytes = mpqs.try_read(R"(data\local\LNG\ENG\expansionstring.tbl)");
+                auto bytes = mpqs.try_read(std::format(R"(data\local\LNG\{}\expansionstring.tbl)", game_data.language));
                 return bytes ? d2d::tbl::Table(*bytes) : d2d::tbl::Table{};
             }();
         d2d::log::info("Opened the MPQs and strings ({} ms; heap {} KiB)", d2d::log::ms() - start_ms, std::size_t(mallinfo().uordblks) / 1024);
@@ -1861,8 +1873,8 @@ void load_game_world(GameData& game_data, d2d::mpq::Stack& mpqs, std::uint32_t m
 }
 
 std::optional<GameData> load_game_data(const fs::path& data_dir, const fs::path& patch_installer, std::uint32_t map_seed,
-                                       bool tile_pixels) {
-    auto game_data = open_game_data(data_dir, patch_installer, tile_pixels);
+                                       bool tile_pixels, std::string_view language) {
+    auto game_data = open_game_data(data_dir, patch_installer, tile_pixels, language);
     if (!game_data) return std::nullopt;
     try {
         load_game_tables(*game_data, game_data->mpqs);
